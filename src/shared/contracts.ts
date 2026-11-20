@@ -133,6 +133,8 @@ export const sessionStartResultSchema = z
   })
   .strict();
 
+export const sessionStopRequestSchema = z.object({}).strict();
+
 export const sampleBatchSchema = z.array(pulseSampleSchema);
 
 export const validationMessageSchema = z

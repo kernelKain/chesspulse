@@ -6,7 +6,7 @@
   "main": "dist-electron/main/index.js",
   "scripts": {
     "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.electron.json && node --test dist-electron/shared/contracts.test.js dist-electron/shared/security.test.js dist-electron/main/navigation.test.js dist-electron/main/permission.test.js dist-electron/main/store.test.js scripts/vite-ready.test.mjs",
+    "test": "tsc -p tsconfig.electron.json && node --test dist-electron/shared/contracts.test.js dist-electron/shared/security.test.js dist-electron/main/navigation.test.js dist-electron/main/permission.test.js dist-electron/main/store.test.js dist-electron/main/session.test.js scripts/vite-ready.test.mjs",
     "build": "tsc -p tsconfig.electron.json && vite build",
     "dev": "node scripts/dev.mjs",
     "start": "electron ."

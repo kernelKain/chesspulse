@@ -1,0 +1,161 @@
+// What: opens and closes one session, then stores its baseline and coverage.
+// Why: bands later compare against the player's own first minute, and a thin trace must count as thin.
+// Removed: the header would have no baseline, and a gap would be treated as a normal pulse.
+import path from 'node:path';
+import { sessionStartRequestSchema, type PulseSample, type SessionAnchor, type SessionMeta } from '../shared/contracts.js';
+import { appendSamples, createSession, listSessions, readMeta, readSamples, saveMeta } from './store.js';
+
+/** Samples at or above this score can support a baseline or coverage. The raw file keeps the rest. */
+export const CONFIDENCE_FLOOR = 50;
+/** The resting pulse is the median of usable samples in this window. */
+export const BASELINE_WINDOW_US = 60_000_000;
+/** A usable sample covers the wait until the next one, and never more than this. */
+export const MAX_SAMPLE_HOLD_US = 1_000_000;
+export const MAX_SESSION_US = 90 * 60 * 1_000_000;
+
+interface ActiveSession {
+  id: string;
+  anchor: SessionAnchor;
+  timeControl: string;
+}
+
+const active = new Map<string, ActiveSession>();
+
+export function isUsableSample(sample: PulseSample, floor = CONFIDENCE_FLOOR): boolean {
+  return sample.stable && sample.confidence >= floor;
+}
+
+export function baselineFromSamples(
+  samples: readonly PulseSample[],
+  startUs: number,
+  floor = CONFIDENCE_FLOOR,
+): Pick<SessionMeta, 'baselineBpm' | 'baselineWindow'> | undefined {
+  const toUs = startUs + BASELINE_WINDOW_US;
+  const values = samples
+    .filter((sample) => sample.tUs >= startUs && sample.tUs < toUs && isUsableSample(sample, floor))
+    .map((sample) => sample.bpm);
+  if (values.length === 0) return undefined;
+  return {
+    baselineBpm: median(values),
+    baselineWindow: { fromUs: startUs, toUs },
+  };
+}
+
+export function coverageFromSamples(
+  samples: readonly PulseSample[],
+  startUs: number,
+  stopUs: number,
+  floor = CONFIDENCE_FLOOR,
+): NonNullable<SessionMeta['coverage']> {
+  if (stopUs < startUs) throw new Error('The session clock moved backwards.');
+  const totalUs = stopUs - startUs;
+  const ordered = samples
+    .filter((sample) => sample.tUs >= startUs && sample.tUs <= stopUs)
+    .sort((a, b) => a.tUs - b.tUs);
+  let usableUs = 0;
+  for (let index = 0; index < ordered.length; index += 1) {
+    const sample = ordered[index];
+    if (!isUsableSample(sample, floor)) continue;
+    const nextUs = index + 1 < ordered.length ? ordered[index + 1].tUs : stopUs;
+    const gap = nextUs - sample.tUs;
+    if (gap <= 0) continue;
+    usableUs += Math.min(gap, MAX_SAMPLE_HOLD_US);
+  }
+  if (usableUs > totalUs) usableUs = totalUs;
+  const pct = totalUs === 0 ? 0 : (usableUs / totalUs) * 100;
+  return { usableUs, totalUs, pct, confidenceFloor: floor };
+}
+
+export async function startSession(
+  root: string,
+  anchor: SessionAnchor,
+  timeControl: string,
+): Promise<SessionMeta> {
+  const parsed = sessionStartRequestSchema.safeParse({ timeControl });
+  if (!parsed.success) throw new Error('Choose a time control before starting.');
+  const key = path.resolve(root);
+  if (active.has(key)) throw new Error('A session is already running.');
+  const meta = await createSession(root, {
+    startedAtEpochMs: anchor.epochMs,
+    startAnchor: anchor,
+  });
+  active.set(key, { id: meta.id, anchor, timeControl: parsed.data.timeControl });
+  return meta;
+}
+
+export async function ingestSamples(root: string, samples: readonly PulseSample[]): Promise<void> {
+  const current = requireActive(root);
+  const limit = current.anchor.monoUs + MAX_SESSION_US;
+  if (samples.some((sample) => sample.tUs > limit)) {
+    throw new Error('A session cannot run longer than 90 minutes.');
+  }
+  await appendSamples(root, current.id, samples);
+}
+
+export async function stopSession(
+  root: string,
+  stopAnchor: SessionAnchor,
+  reason: 'user' | 'sdkError',
+): Promise<SessionMeta> {
+  const current = requireActive(root);
+  const meta = await readMeta(root, current.id);
+  const saved = await finalize(root, meta, stopAnchor, reason);
+  active.delete(path.resolve(root));
+  return saved;
+}
+
+export async function recoverInterruptedSessions(root: string): Promise<SessionMeta[]> {
+  const ids = await listSessions(root);
+  const recovered: SessionMeta[] = [];
+  for (const id of ids) {
+    const meta = await readMeta(root, id);
+    if (meta.stopReason) continue;
+    const samples = await readSamples(root, id);
+    const lastUs = samples.reduce((max, sample) => Math.max(max, sample.tUs), meta.startAnchor.monoUs);
+    const stopAnchor = {
+      monoUs: lastUs,
+      epochMs: meta.startAnchor.epochMs + Math.round((lastUs - meta.startAnchor.monoUs) / 1000),
+    };
+    recovered.push(await finalize(root, meta, stopAnchor, 'crash'));
+  }
+  const key = path.resolve(root);
+  const current = active.get(key);
+  if (current && recovered.some((meta) => meta.id === current.id)) active.delete(key);
+  return recovered;
+}
+
+async function finalize(
+  root: string,
+  meta: SessionMeta,
+  stopAnchor: SessionAnchor,
+  reason: NonNullable<SessionMeta['stopReason']>,
+): Promise<SessionMeta> {
+  const samples = await readSamples(root, meta.id);
+  const baseline = baselineFromSamples(samples, meta.startAnchor.monoUs);
+  const coverage = coverageFromSamples(samples, meta.startAnchor.monoUs, stopAnchor.monoUs);
+  await saveMeta(root, {
+    ...meta,
+    ...baseline,
+    stopAnchor,
+    stopReason: reason,
+    coverage,
+  });
+  return readMeta(root, meta.id);
+}
+
+export function activeTimeControl(root: string): string | undefined {
+  return active.get(path.resolve(root))?.timeControl;
+}
+
+function requireActive(root: string): ActiveSession {
+  const current = active.get(path.resolve(root));
+  if (!current) throw new Error('No session is running.');
+  return current;
+}
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[mid];
+  return (sorted[mid - 1] + sorted[mid]) / 2;
+}

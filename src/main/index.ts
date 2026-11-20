@@ -2,11 +2,36 @@
 // Why: the camera, engine, and files will live here later, outside the page.
 // Removed: the renderer would have no desktop process to attach to.
 import path from 'node:path';
-import { app, BrowserWindow, session } from 'electron';
+import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { sessionStartRequestSchema, sessionStartResultSchema, sessionStopRequestSchema } from '../shared/contracts.js';
 import { contentSecurityPolicy } from '../shared/security.js';
 import { allowsNavigation } from './navigation.js';
 import { currentConsent, registerConsentHandler } from './consent.js';
 import { grantsMediaPermission } from './permission.js';
+import { recoverInterruptedSessions, startSession, stopSession } from './session.js';
+import { defaultDataRoot } from './store.js';
+
+const SESSION_START_CHANNEL = 'cp:session:start';
+const SESSION_STOP_CHANNEL = 'cp:session:stop';
+
+function currentAnchor(): { monoUs: number; epochMs: number } {
+  return { epochMs: Date.now(), monoUs: Math.round(performance.now() * 1000) };
+}
+
+function registerSessionHandlers(): void {
+  ipcMain.handle(SESSION_START_CHANNEL, async (_event, payload: unknown) => {
+    if (!currentConsent()) throw new Error('The camera stays off until you consent.');
+    const parsed = sessionStartRequestSchema.safeParse(payload);
+    if (!parsed.success) throw new Error('Choose a time control before starting.');
+    const meta = await startSession(defaultDataRoot(), currentAnchor(), parsed.data.timeControl);
+    return sessionStartResultSchema.parse({ sessionId: meta.id });
+  });
+  ipcMain.handle(SESSION_STOP_CHANNEL, async (_event, payload: unknown) => {
+    const parsed = sessionStopRequestSchema.safeParse(payload ?? {});
+    if (!parsed.success) throw new Error('Stop does not take any details.');
+    return stopSession(defaultDataRoot(), currentAnchor(), 'user');
+  });
+}
 
 function installSessionGuards(): void {
   const devUrl = process.env.CHESSPULSE_RENDERER_URL;
@@ -90,9 +115,15 @@ function createWindow(): void {
   void win.loadFile(target);
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   installSessionGuards();
   registerConsentHandler();
+  registerSessionHandlers();
+  try {
+    await recoverInterruptedSessions(defaultDataRoot());
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : 'An open session could not be closed.');
+  }
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

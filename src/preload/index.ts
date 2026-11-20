@@ -1,9 +1,11 @@
-// What: the isolated preload. It exposes one consent call and nothing else.
-// Why: the page must not receive Node, files, or keys, and main checks the payload again.
-// Removed: a later screen could not tell the desktop process that consent changed.
+// What: the isolated preload. It exposes consent and session calls, and nothing else.
+// Why: the page must not receive Node, files, or keys, and main checks every payload again.
+// Removed: a later screen could not start or stop a session.
 import { contextBridge, ipcRenderer } from 'electron';
 
 const CONSENT_CHANNEL = 'cp:consent:set';
+const SESSION_START_CHANNEL = 'cp:session:start';
+const SESSION_STOP_CHANNEL = 'cp:session:stop';
 
 interface ConsentState {
   granted: boolean;
@@ -27,5 +29,31 @@ contextBridge.exposeInMainWorld('chesspulse', {
       return Promise.reject(new Error('Consent was not a yes or no.'));
     }
     return ipcRenderer.invoke(CONSENT_CHANNEL, { granted }).then(readConsentState);
+  },
+  startSession(timeControl: unknown): Promise<{ sessionId: string }> {
+    if (typeof timeControl !== 'string') {
+      return Promise.reject(new Error('Choose a time control before starting.'));
+    }
+    return ipcRenderer.invoke(SESSION_START_CHANNEL, { timeControl }).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('sessionId' in value) || typeof value.sessionId !== 'string') {
+        throw new Error('The window returned an unexpected session.');
+      }
+      return { sessionId: value.sessionId };
+    });
+  },
+  stopSession(): Promise<{ id: string }> {
+    return ipcRenderer.invoke(SESSION_STOP_CHANNEL, {}).then((value: unknown) => {
+      if (
+        typeof value !== 'object' ||
+        value === null ||
+        !('id' in value) ||
+        typeof value.id !== 'string' ||
+        !('schemaVersion' in value) ||
+        value.schemaVersion !== 1
+      ) {
+        throw new Error('The window returned an unexpected session.');
+      }
+      return value as { id: string };
+    });
   },
 });
