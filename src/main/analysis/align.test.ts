@@ -26,8 +26,8 @@ function game(partial: Partial<PgnGame> & Pick<PgnGame, 'index'>): PgnGame {
       { san: 'e4', clockSec: 50 },
       { san: 'e5', clockSec: 40 },
     ],
-    ending: 'checkmate',
-    includeInStats: true,
+    ending: partial.ending ?? 'checkmate',
+    includeInStats: partial.includeInStats ?? true,
     endTimeEpochMs: partial.endTimeEpochMs,
     startTimeEpochMs: partial.startTimeEpochMs,
   };
@@ -144,5 +144,65 @@ describe('alignGames', () => {
     assert.equal(noStop.ok, false);
     if (noStop.ok) return;
     assert.match(noStop.banner, /stop time/);
+  });
+
+  it('places a finished game when an abandoned game has no clocks', () => {
+    const abandoned = game({
+      index: 0,
+      includeInStats: false,
+      ending: 'abandoned',
+      moves: [{ san: 'e4' }],
+      endTimeEpochMs: EPOCH + 30_000,
+    });
+    const played = game({ index: 1, endTimeEpochMs: EPOCH + 120_000 });
+    const aligned = alignGames([abandoned, played], clock);
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    assert.deepEqual(aligned.games.map((entry) => entry.game.index), [1]);
+  });
+
+  it('rejects a negative clock delta and a packed span past the session', () => {
+    const backwards = alignGames(
+      [game({ index: 0, moves: [{ san: 'e4', clockSec: 70 }], endTimeEpochMs: EPOCH + 10_000 })],
+      clock,
+    );
+    assert.equal(backwards.ok, false);
+    if (backwards.ok) return;
+    assert.match(backwards.banner, /inconsistent clock/);
+
+    const session: SessionClock = {
+      startAnchor: clock.startAnchor,
+      stopAnchor: { monoUs: 15_000_000, epochMs: EPOCH + 15_000 },
+    };
+    const overflow = alignGames(
+      [
+        game({ index: 0, moves: [{ san: 'e4', clockSec: 50 }] }),
+        game({ index: 1, moves: [{ san: 'd4', clockSec: 50 }] }),
+      ],
+      session,
+    );
+    assert.equal(overflow.ok, false);
+    if (overflow.ok) return;
+    assert.match(overflow.banner, /longer than the session/);
+  });
+
+  it('rounds leftover session time up to the next second and keeps an exact fit at zero', () => {
+    const loose: SessionClock = {
+      startAnchor: clock.startAnchor,
+      stopAnchor: { monoUs: 10_400_000, epochMs: EPOCH + 10_400 },
+    };
+    const padded = alignGames([game({ index: 0, moves: [{ san: 'e4', clockSec: 50 }] })], loose);
+    assert.equal(padded.ok, true);
+    if (!padded.ok) return;
+    assert.equal(padded.games[0]?.alignment.toleranceSec, 1);
+
+    const exact: SessionClock = {
+      startAnchor: clock.startAnchor,
+      stopAnchor: { monoUs: 10_000_000, epochMs: EPOCH + 10_000 },
+    };
+    const fitted = alignGames([game({ index: 0, moves: [{ san: 'e4', clockSec: 50 }] })], exact);
+    assert.equal(fitted.ok, true);
+    if (!fitted.ok) return;
+    assert.equal(fitted.games[0]?.alignment.toleranceSec, 0);
   });
 });

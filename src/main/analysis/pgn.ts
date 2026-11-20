@@ -6,7 +6,8 @@ import { pgnGameSchema, type PgnGame } from '../../shared/contracts.js';
 
 const MAX_GAMES = 20;
 const PASTE_BYTE_LIMIT = 2_000_000;
-const SAN = /^(O-O-O|O-O|[NBRQK]?[a-h]?[1-8]?x?[a-h][1-8](?:=[NBRQ])?)[+#]?/;
+const SAN =
+  /^(O-O-O|O-O|[NBRQK][a-h]?[1-8]?x?[a-h][1-8]|[a-h]x[a-h][1-8](?:=[NBRQ])?|[a-h][1-8](?:=[NBRQ])?)[+#]?/;
 
 export interface PgnBatchSummary {
   total: number;
@@ -40,25 +41,32 @@ export function parsePgn(pgn: string, index: number): PgnParseResult {
     return invalid(index, 'Paste one game per entry.');
   }
 
-  const headers = readHeaders(pgn);
-  const movetext = readMovetext(pgn);
-  const listed = readMoves(movetext);
+  const parts = splitPgn(pgn);
+  if (parts.headers.get('FEN') !== undefined || parts.headers.get('SetUp') === '1') {
+    return invalid(index, 'Setup positions are not accepted.');
+  }
+  const listed = readMoves(parts.movetext);
   if (!listed.ok) return invalid(index, listed.message);
+  const headerResult = parts.headers.get('Result');
+  if (!headerResult) return invalid(index, 'The Result tag is missing.');
+  if (listed.result !== headerResult) {
+    return invalid(index, 'The movetext result does not match the Result tag.');
+  }
 
-  const endTime = epochPair(headers.get('EndDate'), headers.get('EndTime'));
+  const endTime = epochPair(parts.headers.get('EndDate'), parts.headers.get('EndTime'));
   if (endTime === 'bad') return invalid(index, 'EndDate and EndTime are not a complete UTC time.');
-  const startTime = epochPair(headers.get('UTCDate'), headers.get('UTCTime'));
+  const startTime = epochPair(parts.headers.get('UTCDate'), parts.headers.get('UTCTime'));
   if (startTime === 'bad') return invalid(index, 'UTCDate and UTCTime are not a complete UTC time.');
 
-  const ending = classifyEnding(headers.get('Termination'), listed.moves);
+  const ending = classifyEnding(parts.headers.get('Termination'), listed.moves);
   const game = {
     index,
-    white: headers.get('White') ?? '',
-    black: headers.get('Black') ?? '',
-    result: headers.get('Result') ?? '*',
+    white: parts.headers.get('White') ?? '',
+    black: parts.headers.get('Black') ?? '',
+    result: headerResult,
     endTimeEpochMs: endTime,
     startTimeEpochMs: startTime,
-    timeControl: headers.get('TimeControl'),
+    timeControl: parts.headers.get('TimeControl'),
     moves: listed.moves,
     ending,
     includeInStats: ending !== 'aborted' && ending !== 'abandoned',
@@ -139,9 +147,21 @@ function invalid(index: number, message: string): Extract<PgnFailure, { reason: 
   return { ok: false, reason: 'invalid', index, message };
 }
 
-function readHeaders(pgn: string): Map<string, string> {
+function splitPgn(pgn: string): { headers: Map<string, string>; movetext: string } {
+  const lines = pgn.replace(/^\uFEFF/, '').split(/\r?\n/);
+  const headerLines: string[] = [];
+  let index = 0;
+  while (index < lines.length && /^\s*\[[A-Za-z0-9]+\s+"/.test(lines[index] ?? '')) {
+    headerLines.push(lines[index] ?? '');
+    index += 1;
+  }
+  while (index < lines.length && (lines[index] ?? '').trim() === '') index += 1;
+  return { headers: readHeaders(headerLines.join('\n')), movetext: lines.slice(index).join('\n') };
+}
+
+function readHeaders(headerText: string): Map<string, string> {
   const headers = new Map<string, string>();
-  for (const line of pgn.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+  for (const line of headerText.split(/\r?\n/)) {
     const match = /^\s*\[([A-Za-z0-9]+)\s+"((?:\\.|[^"\\])*)"\]\s*$/.exec(line);
     if (!match) continue;
     const value = match[2].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
@@ -150,17 +170,12 @@ function readHeaders(pgn: string): Map<string, string> {
   return headers;
 }
 
-function readMovetext(pgn: string): string {
-  const lines = pgn.replace(/^\uFEFF/, '').split(/\r?\n/);
-  const body = lines.filter((line) => !/^\s*\[[A-Za-z0-9]+\s+"/.test(line));
-  return body.join('\n');
-}
-
 function readMoves(
   movetext: string,
-): { ok: true; moves: { san: string; clockSec?: number }[] } | { ok: false; message: string } {
+): { ok: true; moves: { san: string; clockSec?: number }[]; result: string } | { ok: false; message: string } {
   const moves: { san: string; clockSec?: number }[] = [];
   let cursor = 0;
+  let result: string | undefined;
 
   while (cursor < movetext.length) {
     while (cursor < movetext.length && /\s/.test(movetext[cursor] ?? '')) cursor += 1;
@@ -187,9 +202,10 @@ function readMoves(
     }
 
     const rest = movetext.slice(cursor);
-    const result = /^(?:1-0|0-1|1\/2-1\/2|\*)(?=\s|$)/.exec(rest);
-    if (result) {
-      cursor += result[0].length;
+    const resultMatch = /^(?:1-0|0-1|1\/2-1\/2|\*)(?=\s|$)/.exec(rest);
+    if (resultMatch) {
+      result = resultMatch[0];
+      cursor += resultMatch[0].length;
       while (cursor < movetext.length && /\s/.test(movetext[cursor] ?? '')) cursor += 1;
       if (cursor < movetext.length) return { ok: false, message: 'Text continues after the game result.' };
       break;
@@ -203,13 +219,18 @@ function readMoves(
 
     const san = SAN.exec(rest);
     if (!san) return { ok: false, message: 'A move is not in standard notation.' };
+    const next = rest[san[0].length];
+    if (next !== undefined && !/[\s{!?]/.test(next) && next !== '$') {
+      return { ok: false, message: 'A move is not in standard notation.' };
+    }
     moves.push({ san: san[0] });
     cursor += san[0].length;
     const suffix = /^[!?]+|^\$\d+/.exec(movetext.slice(cursor));
     if (suffix) cursor += suffix[0].length;
   }
 
-  return { ok: true, moves };
+  if (!result) return { ok: false, message: 'The movetext has no result.' };
+  return { ok: true, moves, result };
 }
 
 function clockFromComment(comment: string): number | undefined | 'bad' {
@@ -241,7 +262,17 @@ function epochPair(date: string | undefined, time: string | undefined): number |
   const second = Number(clock[3]);
   if (month < 1 || month > 12 || dayOfMonth < 1 || dayOfMonth > 31) return 'bad';
   if (hour > 23 || minute > 59 || second > 59) return 'bad';
-  return Date.UTC(Number(day[1]), month - 1, dayOfMonth, hour, minute, second);
+  const year = Number(day[1]);
+  const utc = Date.UTC(year, month - 1, dayOfMonth, hour, minute, second);
+  const back = new Date(utc);
+  if (
+    back.getUTCFullYear() !== year ||
+    back.getUTCMonth() !== month - 1 ||
+    back.getUTCDate() !== dayOfMonth
+  ) {
+    return 'bad';
+  }
+  return utc;
 }
 
 function classifyEnding(

@@ -36,16 +36,13 @@ export async function buildReport(
   engine?: Evaluator,
 ): Promise<Report | Refusal> {
   const meta = await readMeta(root, sessionId);
+  await deleteReport(root, sessionId);
   const samples = await readSamples(root, sessionId);
   const refusal = gate(meta, samples, pgns);
-  if (refusal) {
-    await deleteReport(root, sessionId);
-    return refusal;
-  }
+  if (refusal) return refusal;
 
   const parsed = parsePgnBatch(pgns);
   if (!parsed.ok) {
-    await deleteReport(root, sessionId);
     if (parsed.reason === 'order') {
       return { ok: false, reason: 'order', remedy: parsed.remedy };
     }
@@ -57,20 +54,13 @@ export async function buildReport(
 
   const stop = meta.stopAnchor;
   if (!stop) {
-    await deleteReport(root, sessionId);
     return { ok: false, reason: 'no_trace', remedy: 'Stop the session before building a report.' };
   }
   const aligned = alignGames(parsed.games, { startAnchor: meta.startAnchor, stopAnchor: stop }, samples);
-  if (!aligned.ok) {
-    await deleteReport(root, sessionId);
-    throw new Error(aligned.banner);
-  }
+  if (!aligned.ok) throw new Error(aligned.banner);
 
   const baseline = meta.baselineBpm ?? baselineFromSamples(samples, meta.startAnchor.monoUs)?.baselineBpm;
-  if (baseline === undefined) {
-    await deleteReport(root, sessionId);
-    throw new Error('No baseline was recorded, so bands were not computed.');
-  }
+  if (baseline === undefined) throw new Error('No baseline was recorded, so bands were not computed.');
 
   const owned = engine === undefined;
   const scorer = engine ?? createEngine();
@@ -157,7 +147,7 @@ function gate(meta: SessionMeta, samples: readonly PulseSample[], pgns: readonly
     return {
       ok: false,
       reason: 'low_coverage',
-      measured: Math.round(coverage.pct),
+      measured: Math.floor(coverage.pct),
       threshold: COVERAGE_GATE_PCT,
       remedy: LOW_COVERAGE_REMEDY,
     };
@@ -182,18 +172,21 @@ async function scoreAlignedMoves(
   };
   const metrics: MoveMetric[] = [];
   for (const aligned of games) {
+    if (!aligned.game.includeInStats) continue;
     const sans = aligned.game.moves.map((move) => move.san);
     const positions = positionsFromMoves(sans);
-    for (let moveIndex = 0; moveIndex < positions.length; moveIndex += 1) {
+    for (let moveIndex = 0; moveIndex < sans.length; moveIndex += 1) {
       const position = positions[moveIndex];
       if (!position || position.illegal || !position.fenAfter) {
-        metrics.push({
-          cpl: null,
-          accuracy: null,
-          blunder: false,
-          band: null,
-          includeInStats: aligned.game.includeInStats,
-        });
+        for (let rest = moveIndex; rest < sans.length; rest += 1) {
+          metrics.push({
+            cpl: null,
+            accuracy: null,
+            blunder: false,
+            band: null,
+            includeInStats: true,
+          });
+        }
         break;
       }
       const when = moveTimes.find((time) => time.gameIndex === aligned.game.index && time.moveIndex === moveIndex);

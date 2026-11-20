@@ -115,6 +115,22 @@ describe('verdictLine', () => {
     );
   });
 
+  it('uses the singular minute and does not call an unscored mate a blunder', () => {
+    const scored = analyseMoves(Array.from({ length: 5 }, () => counted({ band: 'settled', accuracy: 80 })));
+    assert.match(
+      verdictLine(scored, { elevatedMinutes: 1.4, deltaBpm: 12 }),
+      /in the 1 minute your pulse stayed 12 bpm above baseline/,
+    );
+    const mate = analyseMoves([
+      { cpl: null, accuracy: null, blunder: false, band: 'settled', includeInStats: true },
+    ]);
+    assert.equal(mate.unscored, 1);
+    assert.equal(mate.blunders, 0);
+    const line = verdictLine(mate, { elevatedMinutes: 0, deltaBpm: 0 });
+    assert.match(line, /no centipawn score/);
+    assert.equal(line.includes('blunder'), false);
+  });
+
   it('does not import a model', () => {
     const source = readFileSync('src/main/analysis/metrics.ts', 'utf8');
     assert.equal(/from ['"][^'"]*ai/i.test(source), false);

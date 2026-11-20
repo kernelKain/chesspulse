@@ -36,6 +36,8 @@ export interface AnalysisSummary {
   elevated: BandSummary;
   blunders: number;
   elevatedBlunders: number;
+  /** Included moves with no centipawn score. They are not blunders. */
+  unscored: number;
 }
 
 export function centipawnLoss(before: Score, after: Score): number | null {
@@ -83,6 +85,7 @@ export function analyseMoves(moves: readonly MoveMetric[]): AnalysisSummary {
     elevated: bandSummary('elevated', counted),
     blunders: counted.filter((move) => move.blunder).length,
     elevatedBlunders: counted.filter((move) => move.blunder && move.band === 'elevated').length,
+    unscored: counted.filter((move) => move.accuracy === null).length,
   };
 }
 
@@ -90,12 +93,22 @@ export function verdictLine(
   summary: AnalysisSummary,
   moment: { elevatedMinutes: number; deltaBpm: number; gapClause?: string },
 ): string {
+  const minutes = Math.max(0, Math.round(moment.elevatedMinutes));
+  if (summary.unscored > 0 && summary.blunders === 0 && summary.settled.moves === 0 && summary.elevated.moves === 0) {
+    const word = summary.unscored === 1 ? 'move' : 'moves';
+    return `Not enough scored moves for a verdict. ${summary.unscored} ${word} had no centipawn score and were left out.`;
+  }
   const blunderWord = summary.blunders === 1 ? 'blunder' : 'blunders';
+  const minuteWord = minutes === 1 ? 'minute' : 'minutes';
   const where =
-    moment.elevatedMinutes > 0
-      ? `in the ${moment.elevatedMinutes} minutes your pulse stayed ${moment.deltaBpm} bpm above baseline`
+    minutes > 0
+      ? `in the ${minutes} ${minuteWord} your pulse stayed ${moment.deltaBpm} bpm above baseline`
       : 'while your pulse was elevated';
-  const sentence = `${summary.blunders} ${blunderWord}, ${summary.elevatedBlunders} of them ${where}. ${accuracyPhrase(summary)}.`;
+  const leftOut =
+    summary.unscored > 0
+      ? ` ${summary.unscored} ${summary.unscored === 1 ? 'move' : 'moves'} had no centipawn score and were left out.`
+      : '';
+  const sentence = `${summary.blunders} ${blunderWord}, ${summary.elevatedBlunders} of them ${where}. ${accuracyPhrase(summary)}.${leftOut}`;
   const gap = moment.gapClause?.trim();
   return gap ? `${sentence} ${gap}` : sentence;
 }

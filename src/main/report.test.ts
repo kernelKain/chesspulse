@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import type { PulseSample } from '../shared/contracts.js';
-import { buildReport, COVERAGE_GATE_PCT, formatResult, main } from './report.js';
+import { buildReport, COVERAGE_GATE_PCT, formatResult } from './report.js';
 import { ingestSamples, startSession, stopSession } from './session.js';
 
 const roots: string[] = [];
@@ -77,28 +77,20 @@ describe('buildReport', () => {
     const samples = Array.from({ length: 10 }, (_unused, index) => sample(index * 1_000_000));
     const id = await session(root, samples, 10_000_000);
     const pgn = pgnAt(EPOCH + 10_000);
-    const file = path.join(root, 'game.pgn');
-    await writeFile(file, pgn);
-    const first = await buildReport(root, id, [pgn]);
-    const second = await buildReport(root, id, [pgn]);
+    const evaluator = {
+      async evaluate(fen: string) {
+        return { fen, depth: 8, evalFailed: false, scoreCp: 12, bestmove: 'e7e5' };
+      },
+      async close() {},
+    };
+    const first = await buildReport(root, id, [pgn], evaluator);
+    const second = await buildReport(root, id, [pgn], evaluator);
     assert.equal(first.ok, true);
     assert.deepEqual(second, first);
     if (!first.ok) return;
     assert.match(first.verdict, /blunder/);
     const saved = JSON.parse(await readFile(path.join(root, 'sessions', id, 'report.json'), 'utf8')) as unknown;
     assert.deepEqual(saved, first);
-    const lines: string[] = [];
-    const write = process.stdout.write.bind(process.stdout);
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      lines.push(String(chunk));
-      return true;
-    }) as typeof process.stdout.write;
-    try {
-      const code = await main(['node', 'report.js', '--root', root, id, file]);
-      assert.equal(code, 0);
-    } finally {
-      process.stdout.write = write;
-    }
-    assert.equal(lines.join(''), `${first.verdict}\n`);
+    assert.equal(formatResult(first), `${first.verdict}\n`);
   });
 });

@@ -108,7 +108,9 @@ describe('parsePgnBatch order', () => {
     const earlier = (await fixture('resignation.pgn')).replace('12:06:00', '12:05:00');
     const batch = parsePgnBatch([later, earlier]);
     assert.equal(batch.ok, false);
-    if (batch.ok || batch.reason !== 'order') return;
+    if (batch.ok) return;
+    assert.equal(batch.reason, 'order');
+    if (batch.reason !== 'order') return;
     assert.deepEqual(batch.indices, [0, 1]);
     assert.match(batch.remedy, /oldest first/);
   });
@@ -129,7 +131,9 @@ describe('parsePgnBatch order', () => {
       await fixture('bullet-no-end.pgn'),
     ]);
     assert.equal(batch.ok, false);
-    if (batch.ok || batch.reason !== 'order') return;
+    if (batch.ok) return;
+    assert.equal(batch.reason, 'order');
+    if (batch.reason !== 'order') return;
     assert.deepEqual(batch.indices, [1]);
   });
 });
@@ -190,5 +194,58 @@ describe('parsePgn failures', () => {
     assert.equal(batch.ok, false);
     if (batch.ok) return;
     assert.equal(batch.reason, 'no_games');
+  });
+
+  it('keeps a header when a comment contains a tag, and rejects a bad date or a joined move', () => {
+    const comment = parsePgn(
+      `[White "Ada"]
+[Black "Nim"]
+[Result "1-0"]
+[TimeControl "60"]
+
+1. e4 {[White "Eve"][%clk 0:00:50]} 1-0
+`,
+      0,
+    );
+    assert.equal(comment.ok, true);
+    if (!comment.ok) return;
+    assert.equal(comment.game.white, 'Ada');
+
+    const hijack = parsePgn(
+      `[White "Ada"]
+[Black "Nim"]
+[Result "1-0"]
+
+1. e4
+[White "Eve"]
+1-0
+`,
+      0,
+    );
+    assert.equal(hijack.ok, false);
+
+    const mismatch = parsePgn('[White "Ada"]\n[Black "Nim"]\n[Result "1-0"]\n\n1. e4 0-1\n', 0);
+    const missing = parsePgn('[White "Ada"]\n[Black "Nim"]\n[Result "*"]\n\n1. e4\n', 0);
+    const aborted = parsePgn('[White "Ada"]\n[Black "Nim"]\n[Result "*"]\n[Termination "Game aborted"]\n\n*\n', 0);
+    const leap = parsePgn(
+      '[White "Ada"]\n[Black "Nim"]\n[Result "1-0"]\n[EndDate "2024.02.28"]\n[EndTime "12:00:00"]\n\n1. e4 1-0\n',
+      0,
+    );
+    const impossible = parsePgn(
+      '[White "Ada"]\n[Black "Nim"]\n[Result "1-0"]\n[EndDate "2024.02.31"]\n[EndTime "12:00:00"]\n\n1. e4 1-0\n',
+      0,
+    );
+    const joined = parsePgn('[White "Ada"]\n[Black "Nim"]\n[Result "1-0"]\n\n1. e4e5 1-0\n', 0);
+    const setup = parsePgn(
+      '[White "Ada"]\n[Black "Nim"]\n[Result "*"]\n[SetUp "1"]\n[FEN "8/8/8/8/8/8/8/K6k w - - 0 1"]\n\n*\n',
+      0,
+    );
+    assert.equal(mismatch.ok, false);
+    assert.equal(missing.ok, false);
+    assert.equal(aborted.ok, true);
+    assert.equal(leap.ok, true);
+    assert.equal(impossible.ok, false);
+    assert.equal(joined.ok, false);
+    assert.equal(setup.ok, false);
   });
 });

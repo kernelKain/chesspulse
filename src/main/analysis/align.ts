@@ -91,14 +91,23 @@ export function alignGames(
       banner: 'Some games have a timestamp and others do not, so they were not placed on one clock.',
     };
   }
-  const durations = games.map(durationUs);
-  const missing = durations.findIndex((duration) => duration === null);
-  if (missing >= 0) {
-    const label = (games[missing]?.index ?? missing) + 1;
-    return {
-      ok: false,
-      banner: `Game ${label} has no move clocks, so its length is unknown and it was not placed.`,
-    };
+  const ready: { game: PgnGame; duration: number }[] = [];
+  for (const game of games) {
+    const duration = durationUs(game);
+    if (typeof duration === 'number') {
+      ready.push({ game, duration });
+      continue;
+    }
+    if (!game.includeInStats) continue;
+    const label = game.index + 1;
+    const banner =
+      duration === 'negative'
+        ? `Game ${label} has an inconsistent clock, so it was not placed.`
+        : `Game ${label} has no move clocks, so its length is unknown and it was not placed.`;
+    return { ok: false, banner };
+  }
+  if (ready.length === 0) {
+    return { ok: false, banner: 'No game had clocks that could be placed.' };
   }
   if (mode === 'inferred' && !clock.stopAnchor) {
     return {
@@ -107,9 +116,13 @@ export function alignGames(
         'No EndTime or UTC start in these PGNs, and the session has no stop time, so the games were not placed on the trace.',
     };
   }
-  const known = durations as number[];
 
-  const placed = place(games, known, clock, mode);
+  const placed = place(
+    ready.map((entry) => entry.game),
+    ready.map((entry) => entry.duration),
+    clock,
+    mode,
+  );
   if (!placed.ok) return placed;
 
   const aligned: AlignedGame[] = [];
@@ -138,12 +151,13 @@ function placementMode(games: readonly PgnGame[]): 'endtime' | 'starttime' | 'in
   return 'mixed';
 }
 
-function durationUs(game: PgnGame): number | null {
+function durationUs(game: PgnGame): number | 'missing' | 'negative' {
   if (game.moves.length === 0) return 0;
   const thinks = thinkTimeSec(game);
   let seconds = 0;
   for (const think of thinks) {
-    if (think === null) return null;
+    if (think === null) return 'missing';
+    if (think < 0) return 'negative';
     seconds += think;
   }
   return Math.round(seconds * 1_000_000);
@@ -179,7 +193,11 @@ function place(
     cursor = endUs;
     return aligned(game, startUs, endUs, 'inferred', 0);
   });
-  const slackSec = Math.max(0, Math.round((stopUs - cursor) / 1_000_000));
+  if (cursor > stopUs) {
+    return { ok: false, banner: 'The games are longer than the session, so they were not placed.' };
+  }
+  const slackUs = stopUs - cursor;
+  const slackSec = slackUs === 0 ? 0 : Math.ceil(slackUs / 1_000_000);
   const withTolerance = inferred.map((game) => ({
     ...game,
     alignment: { mode: 'inferred' as const, toleranceSec: slackSec },

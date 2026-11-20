@@ -181,7 +181,9 @@ export async function saveReport(root: string, sessionId: string, text: string):
 }
 
 export async function deleteReport(root: string, sessionId: string): Promise<void> {
-  await rm(path.join(sessionDir(root, sessionId), 'report.json'), { force: true });
+  await exclusive(root, async () => {
+    await rm(path.join(sessionDir(root, sessionId), 'report.json'), { force: true });
+  });
 }
 
 export async function readSamples(root: string, sessionId: string): Promise<PulseSample[]> {
