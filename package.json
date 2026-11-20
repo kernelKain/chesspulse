@@ -1,0 +1,44 @@
+{
+  "name": "chesspulse",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Post-game chess review aligned with a local pulse trace.",
+  "main": "dist-electron/main/index.js",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.electron.json && node --test dist-electron/shared/contracts.test.js",
+    "build": "tsc -p tsconfig.electron.json && vite build",
+    "dev": "node scripts/dev.mjs",
+    "start": "electron ."
+  },
+  "build": {
+    "appId": "local.chesspulse.app",
+    "productName": "ChessPulse",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**"
+    ],
+    "linux": {
+      "target": "AppImage",
+      "category": "Utility"
+    }
+  },
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}
