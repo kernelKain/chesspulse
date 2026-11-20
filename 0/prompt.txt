@@ -1,0 +1,1 @@
+the app is showing too dark increase light on face, the camera video is all black, previously it was working fine. Also reduce test time to 5 min.
