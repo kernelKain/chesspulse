@@ -29,6 +29,25 @@ export interface EndingMark {
   label: string;
 }
 
+export interface TimelineMoveRow {
+  gameLabel: string;
+  time: string;
+  san: string;
+  pulseBpm: string;
+  band: string;
+  cpl: string;
+  think: string;
+  note: string;
+}
+
+export interface TimelineSampleRow {
+  time: string;
+  bpm: string;
+  confidence: number;
+  status: string;
+  gapBeforeSec: number | null;
+}
+
 export interface TimelineViewModel {
   state: TimelineState;
   startUs: number;
@@ -210,7 +229,61 @@ export function sampleReadout(view: TimelineViewModel, sampleIndex: number): str
   const nearestMove = nearestMoveTo(view.moves, sample.tUs);
   const moveText = nearestMove ? formatMoveReadout(nearestMove) : '';
 
-  return `${time} · ${bpm} bpm · ${bandText}${gameText}${moveText}`;
+  return `Sample ${sampleIndex + 1}/${view.samples.length} · ${time} · ${bpm} bpm · ${bandText}${gameText}${moveText}`;
+}
+
+export function moveTableRows(view: TimelineViewModel): TimelineMoveRow[] {
+  if (view.state === 'low_coverage' || view.state === 'empty') return [];
+  return view.moves.map((move) => {
+    const pulse = move.tUs === null ? null : usableSampleAt(view.samples, move.tUs);
+    return {
+      gameLabel: `G${move.gameIndex + 1}`,
+      time: move.tUs === null ? '—' : formatElapsed(move.tUs, view.startUs),
+      san: move.san,
+      pulseBpm: pulse ? `${formatNumber(pulse.bpm)} bpm` : '—',
+      band: move.band === 'elevated' ? 'Elevated' : move.band === 'settled' ? 'Settled' : 'No reading',
+      cpl: move.cpl === null ? 'Unscored' : `${Math.round(move.cpl)} cp`,
+      think: move.thinkSec === null ? '—' : `${formatNumber(move.thinkSec)} s`,
+      note: move.blunder ? 'Blunder' : move.cpl === null ? 'Mate or unscored' : '',
+    };
+  });
+}
+
+export function sampleTableRows(view: TimelineViewModel): TimelineSampleRow[] {
+  if (view.samples.length === 0) return [];
+  return view.samples.map((sample, index) => {
+    const prev = index > 0 ? view.samples[index - 1] : undefined;
+    const deltaUs = prev ? sample.tUs - prev.tUs : 0;
+    const gapBeforeSec = deltaUs > SAMPLE_HOLD_US ? Math.round((deltaUs / 1_000_000) * 10) / 10 : null;
+    const usable = sample.stable && sample.confidence >= CONFIDENCE_FLOOR;
+    let status: string;
+    if (!usable) {
+      status = 'Low confidence';
+    } else if (view.state === 'low_coverage' || view.elevatedThresholdBpm === undefined) {
+      status = 'Raw (bands withheld)';
+    } else if (sample.bpm >= view.elevatedThresholdBpm) {
+      status = 'Elevated';
+    } else {
+      status = 'Settled';
+    }
+    return {
+      time: formatElapsed(sample.tUs, view.startUs),
+      bpm: `${formatNumber(sample.bpm)} bpm`,
+      confidence: sample.confidence,
+      status,
+      gapBeforeSec,
+    };
+  });
+}
+
+function usableSampleAt(samples: readonly PulseSample[], tUs: number): PulseSample | null {
+  let latest: PulseSample | undefined;
+  for (const sample of samples) {
+    if (sample.tUs <= tUs && (!latest || sample.tUs >= latest.tUs)) latest = sample;
+  }
+  if (!latest || !latest.stable || latest.confidence < CONFIDENCE_FLOOR) return null;
+  if (tUs > latest.tUs + SAMPLE_HOLD_US) return null;
+  return latest;
 }
 
 export function timeTicks(startUs: number, stopUs: number): number[] {

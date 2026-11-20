@@ -8,7 +8,9 @@ import {
   cplBarRatio,
   endingMark,
   formatElapsed,
+  moveTableRows,
   sampleReadout,
+  sampleTableRows,
   thinkTimeRatio,
   timeTicks,
   type TimelineViewModel,
@@ -32,6 +34,7 @@ const AXIS_Y = 314;
 export function Timeline({ result }: { result: ReportResult | null }) {
   const view = buildTimelineView(result);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [mode, setMode] = useState<'chart' | 'table'>('chart');
   const hatchId = useId();
   const keysHintId = useId();
 
@@ -41,6 +44,12 @@ export function Timeline({ result }: { result: ReportResult | null }) {
       : selectedIndex === null
         ? null
         : Math.min(view.samples.length - 1, Math.max(0, selectedIndex));
+
+  function stepSample(delta: -1 | 1): void {
+    if (view.samples.length === 0) return;
+    const base = activeIndex ?? (delta > 0 ? -1 : view.samples.length);
+    setSelectedIndex(Math.min(view.samples.length - 1, Math.max(0, base + delta)));
+  }
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
     if (view.samples.length === 0) return;
@@ -81,11 +90,35 @@ export function Timeline({ result }: { result: ReportResult | null }) {
   };
 
   const selectedSample = activeIndex !== null ? view.samples[activeIndex] : undefined;
+  const moveRows = mode === 'table' ? moveTableRows(view) : [];
+  const sampleRows = mode === 'table' ? sampleTableRows(view) : [];
 
   return (
     <section className={`timeline timeline-${view.state}`} aria-label="Session timeline">
       <div className="timeline-header">
-        <span className="timeline-title">Timeline</span>
+        <div className="timeline-header-left">
+          <span className="timeline-title">Timeline</span>
+          {view.samples.length > 0 ? (
+            <div className="view-toggle" role="group" aria-label="Timeline view">
+              <button
+                type="button"
+                className="small-btn"
+                aria-pressed={mode === 'chart'}
+                onClick={() => setMode('chart')}
+              >
+                Chart
+              </button>
+              <button
+                type="button"
+                className="small-btn"
+                aria-pressed={mode === 'table'}
+                onClick={() => setMode('table')}
+              >
+                Table
+              </button>
+            </div>
+          ) : null}
+        </div>
         {view.confidenceLabel ? (
           <span className="timeline-confidence">{view.confidenceLabel}</span>
         ) : view.state === 'low_coverage' ? (
@@ -99,86 +132,114 @@ export function Timeline({ result }: { result: ReportResult | null }) {
         </div>
       ) : null}
 
-      <div
-        className="timeline-frame"
-        tabIndex={0}
-        role="group"
-        aria-roledescription="session timeline"
-        aria-label="Pulse, move error, think time, and game endings"
-        aria-describedby={keysHintId}
-        onKeyDown={onKeyDown}
-        onFocus={() => {
-          if (selectedIndex === null && view.samples.length > 0) setSelectedIndex(0);
-        }}
-      >
-        <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="presentation">
-          <defs>
-            <pattern
-              id={hatchId}
-              width="8"
-              height="8"
-              patternUnits="userSpaceOnUse"
-              patternTransform="rotate(45)"
-            >
-              <line x1="0" y1="0" x2="0" y2="8" className="elevated-hatch-line" />
-            </pattern>
-          </defs>
+      {mode === 'table' && view.samples.length > 0 ? (
+        <TimelineTables view={view} moveRows={moveRows} sampleRows={sampleRows} />
+      ) : (
+        <>
+          <div
+            className="timeline-frame"
+            tabIndex={0}
+            role="group"
+            aria-roledescription="session timeline"
+            aria-label="Pulse, move error, think time, and game endings"
+            aria-describedby={keysHintId}
+            onKeyDown={onKeyDown}
+            onFocus={() => {
+              if (selectedIndex === null && view.samples.length > 0) setSelectedIndex(0);
+            }}
+          >
+            <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="presentation">
+              <defs>
+                <pattern
+                  id={hatchId}
+                  width="8"
+                  height="8"
+                  patternUnits="userSpaceOnUse"
+                  patternTransform="rotate(45)"
+                >
+                  <line x1="0" y1="0" x2="0" y2="8" className="elevated-hatch-line" />
+                </pattern>
+              </defs>
 
-          {view.state === 'empty' ? (
-            <EmptySvg />
-          ) : (
-            <>
-              <GameBands view={view} xOf={xOf} />
-
-              {view.state !== 'low_coverage' && view.elevatedThresholdBpm !== undefined ? (
-                <ElevatedZone
-                  hatchId={hatchId}
-                  thresholdBpm={view.elevatedThresholdBpm}
-                  yOfBpm={yOfBpm}
-                />
-              ) : null}
-
-              {view.baselineBpm !== undefined ? (
-                <BaselineHairline baselineBpm={view.baselineBpm} yOfBpm={yOfBpm} />
-              ) : null}
-
-              <RailGuides showChessRails={view.state !== 'low_coverage'} view={view} yOfBpm={yOfBpm} />
-
-              {view.state !== 'low_coverage' ? (
+              {view.state === 'empty' ? (
+                <EmptySvg />
+              ) : (
                 <>
-                  <EndingRail view={view} xOf={xOf} />
-                  <ThinkRail view={view} xOf={xOf} />
-                  <CplRail view={view} xOf={xOf} />
+                  <GameBands view={view} xOf={xOf} />
+
+                  {view.state !== 'low_coverage' && view.elevatedThresholdBpm !== undefined ? (
+                    <ElevatedZone
+                      hatchId={hatchId}
+                      thresholdBpm={view.elevatedThresholdBpm}
+                      yOfBpm={yOfBpm}
+                    />
+                  ) : null}
+
+                  {view.baselineBpm !== undefined ? (
+                    <BaselineHairline baselineBpm={view.baselineBpm} yOfBpm={yOfBpm} />
+                  ) : null}
+
+                  <RailGuides showChessRails={view.state !== 'low_coverage'} view={view} yOfBpm={yOfBpm} />
+
+                  {view.state !== 'low_coverage' ? (
+                    <>
+                      <EndingRail view={view} xOf={xOf} />
+                      <ThinkRail view={view} xOf={xOf} />
+                      <CplRail view={view} xOf={xOf} />
+                    </>
+                  ) : null}
+
+                  <PulseLayer view={view} xOf={xOf} yOfBpm={yOfBpm} />
+
+                  <TimeAxis view={view} xOf={xOf} />
+
+                  {selectedSample ? (
+                    <g className="timeline-cursor">
+                      <line
+                        x1={xOf(selectedSample.tUs)}
+                        y1={THINK_TOP}
+                        x2={xOf(selectedSample.tUs)}
+                        y2={CPL_BOTTOM}
+                      />
+                      <circle
+                        cx={xOf(selectedSample.tUs)}
+                        cy={yOfBpm(selectedSample.bpm)}
+                        r={4.5}
+                      />
+                    </g>
+                  ) : null}
                 </>
-              ) : null}
+              )}
+            </svg>
+          </div>
 
-              <PulseLayer view={view} xOf={xOf} yOfBpm={yOfBpm} />
-
-              <TimeAxis view={view} xOf={xOf} />
-
-              {selectedSample ? (
-                <g className="timeline-cursor">
-                  <line
-                    x1={xOf(selectedSample.tUs)}
-                    y1={THINK_TOP}
-                    x2={xOf(selectedSample.tUs)}
-                    y2={CPL_BOTTOM}
-                  />
-                  <circle
-                    cx={xOf(selectedSample.tUs)}
-                    cy={yOfBpm(selectedSample.bpm)}
-                    r={4.5}
-                  />
-                </g>
-              ) : null}
-            </>
-          )}
-        </svg>
-      </div>
-
-      <p id={keysHintId} className="timeline-readout" aria-live="polite">
-        {readoutText}
-      </p>
+          <div className="readout-bar">
+            <p id={keysHintId} className="timeline-readout" aria-live="polite">
+              {readoutText}
+            </p>
+            {view.samples.length > 0 ? (
+              <div className="readout-controls" role="group" aria-label="Step through samples">
+                <button
+                  type="button"
+                  className="small-btn"
+                  disabled={activeIndex !== null && activeIndex <= 0}
+                  onClick={() => stepSample(-1)}
+                >
+                  Previous sample
+                </button>
+                <button
+                  type="button"
+                  className="small-btn"
+                  disabled={activeIndex !== null && activeIndex >= view.samples.length - 1}
+                  onClick={() => stepSample(1)}
+                >
+                  Next sample
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </>
+      )}
 
       {view.state === 'low_coverage' && view.refusal ? (
         <div className="refusal-panel" role="alert">
@@ -192,6 +253,84 @@ export function Timeline({ result }: { result: ReportResult | null }) {
         </div>
       ) : null}
     </section>
+  );
+}
+
+function TimelineTables({
+  view,
+  moveRows,
+  sampleRows,
+}: {
+  view: TimelineViewModel;
+  moveRows: ReturnType<typeof moveTableRows>;
+  sampleRows: ReturnType<typeof sampleTableRows>;
+}) {
+  return (
+    <div className="timeline-tables">
+      {moveRows.length > 0 ? (
+        <div className="table-wrap">
+          <table className="data-table">
+            <caption>Moves aligned to the session timeline ({moveRows.length})</caption>
+            <thead>
+              <tr>
+                <th scope="col">Game</th>
+                <th scope="col">Time</th>
+                <th scope="col">Move</th>
+                <th scope="col">Pulse</th>
+                <th scope="col">Band</th>
+                <th scope="col">CPL</th>
+                <th scope="col">Think</th>
+                <th scope="col">Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {moveRows.map((row, idx) => (
+                <tr key={`${row.gameLabel}-${idx}`} className={row.band === 'Elevated' ? 'row-elevated' : undefined}>
+                  <td>{row.gameLabel}</td>
+                  <td>{row.time}</td>
+                  <td>{row.san}</td>
+                  <td>{row.pulseBpm}</td>
+                  <td>{row.band}</td>
+                  <td>{row.cpl}</td>
+                  <td>{row.think}</td>
+                  <td>{row.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      <div className="table-wrap">
+        <table className="data-table">
+          <caption>
+            {view.state === 'low_coverage'
+              ? `Raw pulse samples (${sampleRows.length}, bands withheld)`
+              : `Pulse samples (${sampleRows.length})`}
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Time</th>
+              <th scope="col">Pulse</th>
+              <th scope="col">Confidence</th>
+              <th scope="col">Band / status</th>
+              <th scope="col">Gap before</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sampleRows.map((row, idx) => (
+              <tr key={`${row.time}-${idx}`} className={row.status === 'Elevated' ? 'row-elevated' : undefined}>
+                <td>{row.time}</td>
+                <td>{row.bpm}</td>
+                <td>{row.confidence}</td>
+                <td>{row.status}</td>
+                <td>{row.gapBeforeSec !== null ? `${row.gapBeforeSec} s gap` : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

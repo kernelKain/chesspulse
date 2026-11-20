@@ -8,7 +8,9 @@ import {
   cplBarRatio,
   endingMark,
   formatElapsed,
+  moveTableRows,
   sampleReadout,
+  sampleTableRows,
   splitPulseRuns,
   THINK_CAP_SEC,
   thinkTimeRatio,
@@ -160,5 +162,41 @@ describe('timeline helpers', () => {
       alignmentConfidenceLabel({ alignmentMode: 'inferred', toleranceSec: 18 }),
       'Inferred from paste order (±18 s)',
     );
+  });
+
+  it('produces table rows for moves and samples, marking gaps and withholding bands on refusal', () => {
+    const aligned = buildTimelineView(baseReport());
+    const moves = moveTableRows(aligned);
+    assert.equal(moves.length, 1);
+    assert.deepEqual(moves[0], {
+      gameLabel: 'G1',
+      time: '0:02',
+      san: 'e4',
+      pulseBpm: '84 bpm',
+      band: 'Elevated',
+      cpl: '140 cp',
+      think: '4.5 s',
+      note: 'Blunder',
+    });
+
+    const refusalView = buildTimelineView({
+      ok: false,
+      reason: 'low_coverage',
+      measured: 40,
+      threshold: 70,
+      remedy: 'Sit facing a lamp.',
+      trace: {
+        startUs: 0,
+        stopUs: 10_000_000,
+        samples: [sample(0, 70), sample(4, 92), sample(5, 68, 20, true)],
+      },
+    });
+    assert.deepEqual(moveTableRows(refusalView), []);
+    const samples = sampleTableRows(refusalView);
+    assert.equal(samples.length, 3);
+    assert.equal(samples[0]?.status, 'Raw (bands withheld)');
+    assert.equal(samples[1]?.gapBeforeSec, 4);
+    assert.equal(samples[1]?.status, 'Raw (bands withheld)');
+    assert.equal(samples[2]?.status, 'Low confidence');
   });
 });

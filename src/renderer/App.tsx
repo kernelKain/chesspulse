@@ -8,9 +8,11 @@ import {
   type SessionMeta,
 } from '../shared/contracts';
 import { CONFIDENCE_FLOOR } from '../shared/sensing';
+import { BandBars } from './BandBars';
 import { PasteScreen } from './PasteScreen';
 import { SensingStrip } from './SensingStrip';
 import { Timeline } from './Timeline';
+import { VerdictLine } from './VerdictLine';
 
 const TIME_CONTROLS = ['1+0', '3+2', '10+0'] as const;
 
@@ -183,23 +185,29 @@ export function App() {
     return (
       <main>
         <p className="label">ChessPulse · Report</p>
-        <h1>
-          {reportBuilding
-            ? 'Building report.'
-            : reportError
-              ? 'Report unavailable.'
-              : reportResult && !reportResult.ok
-                ? 'Review withheld.'
-                : 'Session timeline.'}
-        </h1>
         {reportBuilding ? (
-          <p aria-live="polite">Scoring positions locally with Stockfish…</p>
+          <>
+            <h1>Building report.</h1>
+            <p aria-live="polite">Scoring positions locally with Stockfish…</p>
+          </>
         ) : reportError ? (
-          <div className="refusal-panel" role="alert">
-            <p>{reportError}</p>
-          </div>
+          <>
+            <h1>Report unavailable.</h1>
+            <div className="refusal-panel" role="alert">
+              <p>{reportError}</p>
+            </div>
+          </>
+        ) : reportResult && reportResult.ok ? (
+          <>
+            <VerdictLine report={reportResult} />
+            <Timeline key={`ok-${reportResult.sessionId}`} result={reportResult} />
+            <BandBars report={reportResult} />
+          </>
         ) : (
-          <Timeline key={reportResult ? `${reportResult.ok}-${sessionId ?? ''}` : 'empty'} result={reportResult} />
+          <>
+            <h1>{reportResult ? 'Review withheld.' : 'Session timeline.'}</h1>
+            <Timeline key={`refusal-${sessionId ?? ''}`} result={reportResult} />
+          </>
         )}
         <div className="actions">
           <button type="button" onClick={() => setPhase('paste')}>
