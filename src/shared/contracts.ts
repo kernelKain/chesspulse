@@ -50,7 +50,8 @@ export const sessionMetaSchema = z
       })
       .strict()
       .optional(),
-    stopReason: stopReasonSchema,
+    // Absent while the session is still open. A crash must not look like a chosen stop.
+    stopReason: stopReasonSchema.optional(),
   })
   .strict();
 
