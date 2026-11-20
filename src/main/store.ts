@@ -172,6 +172,18 @@ export async function readMeta(root: string, sessionId: string): Promise<Session
   return parsed.data;
 }
 
+export async function saveReport(root: string, sessionId: string, text: string): Promise<void> {
+  await exclusive(root, async () => {
+    const dir = sessionDir(root, sessionId);
+    await stat(path.join(dir, 'meta.json'));
+    await writeAtomic(path.join(dir, 'report.json'), text);
+  });
+}
+
+export async function deleteReport(root: string, sessionId: string): Promise<void> {
+  await rm(path.join(sessionDir(root, sessionId), 'report.json'), { force: true });
+}
+
 export async function readSamples(root: string, sessionId: string): Promise<PulseSample[]> {
   const file = path.join(sessionDir(root, sessionId), 'samples.ndjson');
   let text: string;
