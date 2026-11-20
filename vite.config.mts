@@ -2,8 +2,8 @@ import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { contentSecurityPolicy } from './src/shared/security.mjs';
 
-function chesspulseCsp(): Plugin {
-  const policy = contentSecurityPolicy();
+function chesspulseCsp(development: boolean): Plugin {
+  const policy = contentSecurityPolicy(development);
   return {
     name: 'chesspulse-csp',
     transformIndexHtml(html) {
@@ -20,7 +20,7 @@ export default defineConfig(({ command }) => ({
   // Production is opened with loadFile, so asset URLs must be relative.
   // The dev server keeps the default root base.
   base: command === 'build' ? './' : '/',
-  plugins: [react(), chesspulseCsp()],
+  plugins: [react(), chesspulseCsp(command === 'serve')],
   build: {
     outDir: '../../dist',
     emptyOutDir: true,

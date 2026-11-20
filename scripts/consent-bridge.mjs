@@ -10,10 +10,11 @@ import { app, BrowserWindow } from 'electron';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(import.meta.dirname, '..');
+const page = pathToFileURL(path.join(root, 'dist/index.html')).href;
 const { registerConsentHandler } = require(path.join(root, 'dist-electron/main/consent.js'));
 
 app.whenReady().then(async () => {
-  registerConsentHandler();
+  registerConsentHandler(page);
   const win = new BrowserWindow({
     show: false,
     webPreferences: {
@@ -23,7 +24,6 @@ app.whenReady().then(async () => {
       nodeIntegration: false,
     },
   });
-  const page = pathToFileURL(path.join(root, 'dist/index.html')).href;
   await win.loadURL(page);
   const allowed = await win.webContents.executeJavaScript('window.chesspulse.setConsent(true)', true);
   const revoked = await win.webContents.executeJavaScript('window.chesspulse.setConsent(false)', true);

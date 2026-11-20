@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import type { PulseSample } from '../shared/contracts.js';
-import { readSamples } from './store.js';
+import { createSession, readMeta, readSamples } from './store.js';
 import {
   BASELINE_WINDOW_US,
   baselineFromSamples,
@@ -152,6 +153,35 @@ describe('session controller', () => {
     }
   });
 
+  it('stores the batch from the moment it was submitted', async () => {
+    const root = useRoot();
+    const started = await startSession(root, anchor, '3+2');
+    const seen: PulseSample[][] = [];
+    setSampleSink(root, (batch) => {
+      seen.push(batch.map((entry) => ({ ...entry })));
+    });
+    const submitted = sample(0, 70);
+    const batch = [submitted];
+    try {
+      const pending = ingestSamples(root, batch);
+      batch.push(sample(1_000, 90));
+      submitted.bpm = 140;
+      await pending;
+      assert.deepEqual(await readSamples(root, started.id), [sample(0, 70)]);
+      assert.deepEqual(seen, [[sample(0, 70)]]);
+    } finally {
+      setSampleSink(root, undefined);
+    }
+  });
+
+  it('does not accept samples while the sample file needs repair', async () => {
+    const root = useRoot();
+    const started = await startSession(root, anchor, '3+2');
+    await writeFile(path.join(root, 'sessions', started.id, 'samples.ndjson.repair'), '');
+    await assert.rejects(() => ingestSamples(root, [sample(0, 70)]), /needs repair/);
+    assert.deepEqual(await readSamples(root, started.id), []);
+  });
+
   it('publishes a stored batch and skips a rejected one', async () => {
     const root = useRoot();
     const seen: PulseSample[][] = [];
@@ -171,11 +201,44 @@ describe('session controller', () => {
     }
   });
 
+  it('recovers a later session when an earlier sample file cannot be read', async () => {
+    const root = useRoot();
+    const broken = await startSession(root, anchor, '1+0');
+    await ingestSamples(root, [sample(0, 70)]);
+    await writeFile(path.join(root, 'sessions', broken.id, 'samples.ndjson'), '{"not":"a sample"}\n');
+    const later = await createSession(root, {
+      startedAtEpochMs: anchor.epochMs + 60_000,
+      startAnchor: { monoUs: 60_000_000, epochMs: anchor.epochMs + 60_000 },
+    });
+    const { recovered, failures } = await recoverInterruptedSessions(root);
+    assert.deepEqual(failures.map((failure) => failure.id), [broken.id]);
+    assert.equal(recovered.length, 1);
+    assert.equal(recovered[0].id, later.id);
+    assert.equal(recovered[0].stopReason, 'crash');
+    assert.equal((await readMeta(root, broken.id)).stopReason, undefined);
+  });
+
+  it('can stop again after finalization fails', async () => {
+    const root = useRoot();
+    const started = await startSession(root, anchor, '3+2');
+    const file = path.join(root, 'sessions', started.id, 'meta.json');
+    const header = await readFile(file, 'utf8');
+    await writeFile(file, '{');
+    const stopAnchor = { monoUs: 1_000, epochMs: anchor.epochMs + 1 };
+    await assert.rejects(() => stopSession(root, stopAnchor, 'user'), /not valid/);
+    await assert.rejects(() => ingestSamples(root, [sample(0, 70)]), /No session is running/);
+    assert.equal(activeTimeControl(root), '3+2');
+    await writeFile(file, header);
+    const stopped = await stopSession(root, stopAnchor, 'user');
+    assert.equal(stopped.stopReason, 'user');
+    assert.equal(activeTimeControl(root), undefined);
+  });
+
   it('closes an interrupted session as a crash', async () => {
     const root = useRoot();
     const started = await startSession(root, anchor, '1+0');
     await ingestSamples(root, [sample(0, 72), sample(2_000_000, 74)]);
-    const recovered = await recoverInterruptedSessions(root);
+    const recovered = (await recoverInterruptedSessions(root)).recovered;
     assert.equal(recovered.length, 1);
     assert.equal(recovered[0].id, started.id);
     assert.equal(recovered[0].stopReason, 'crash');

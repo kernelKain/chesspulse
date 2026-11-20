@@ -112,6 +112,23 @@ describe('session store', () => {
     assert.deepEqual(await listSessions(root), [meta.id]);
   });
 
+  it('refuses another batch when the sample file is marked for repair', async () => {
+    const root = useRoot();
+    const meta = await createSession(root, {
+      startedAtEpochMs: anchor.epochMs,
+      startAnchor: anchor,
+    });
+    await appendSamples(root, meta.id, [sample(10)]);
+    const file = path.join(root, 'sessions', meta.id, 'samples.ndjson');
+    const before = await readFile(file, 'utf8');
+    await writeFile(path.join(root, 'sessions', meta.id, 'samples.ndjson.repair'), '');
+    await assert.rejects(
+      () => appendSamples(root, meta.id, [sample(20)]),
+      /needs repair/,
+    );
+    assert.equal(await readFile(file, 'utf8'), before);
+  });
+
   it('ignores a folder that has samples but no header', async () => {
     const root = useRoot();
     const id = createSessionId(anchor.epochMs, random);

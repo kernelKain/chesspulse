@@ -39,6 +39,7 @@ const sessionIndexSchema = z
   .strict();
 
 const tails = new Map<string, Promise<void>>();
+const tornSamples = new Set<string>();
 
 export interface NewSession {
   startedAtEpochMs: number;
@@ -104,6 +105,7 @@ export async function appendSamples(root: string, sessionId: string, samples: re
   if (parsed.length === 0) return;
   const body = parsed.map((sample) => JSON.stringify(sample)).join('\n') + '\n';
   await exclusive(root, async () => {
+    await assertSamplesAppendable(root, sessionId);
     const file = path.join(sessionDir(root, sessionId), 'samples.ndjson');
     try {
       await stat(file);
@@ -113,12 +115,39 @@ export async function appendSamples(root: string, sessionId: string, samples: re
     }
     const handle = await open(file, 'a', 0o600);
     try {
-      await handle.writeFile(body);
-      await handle.sync();
+      const before = (await handle.stat()).size;
+      try {
+        await handle.writeFile(body);
+        await handle.sync();
+      } catch (error) {
+        try {
+          await handle.truncate(before);
+          await handle.sync();
+        } catch {
+          await rememberTornSamples(root, sessionId);
+          throw new Error('The sample file needs repair before more samples can be stored.');
+        }
+        throw error;
+      }
     } finally {
       await handle.close();
     }
   });
+}
+
+export async function assertSamplesAppendable(root: string, sessionId: string): Promise<void> {
+  const key = tornKey(root, sessionId);
+  if (tornSamples.has(key)) {
+    throw new Error('The sample file needs repair before more samples can be stored.');
+  }
+  try {
+    await stat(path.join(sessionDir(root, sessionId), 'samples.ndjson.repair'));
+  } catch (error) {
+    if (isEnoent(error)) return;
+    throw error;
+  }
+  tornSamples.add(key);
+  throw new Error('The sample file needs repair before more samples can be stored.');
 }
 
 export async function readMeta(root: string, sessionId: string): Promise<SessionMeta> {
@@ -259,6 +288,20 @@ async function writeIndex(root: string, ids: readonly string[]): Promise<void> {
   const sessions = path.join(root, 'sessions');
   await mkdir(sessions, { recursive: true, mode: 0o700 });
   await writeAtomic(path.join(sessions, 'index.json'), jsonText({ schemaVersion: SCHEMA_VERSION, ids }));
+}
+
+async function rememberTornSamples(root: string, sessionId: string): Promise<void> {
+  tornSamples.add(tornKey(root, sessionId));
+  try {
+    const marker = await open(path.join(sessionDir(root, sessionId), 'samples.ndjson.repair'), 'wx', 0o600);
+    await marker.close();
+  } catch {
+    // This process still refuses further batches through tornSamples.
+  }
+}
+
+function tornKey(root: string, sessionId: string): string {
+  return `${path.resolve(root)}\0${sessionId}`;
 }
 
 function sessionDir(root: string, sessionId: string): string {

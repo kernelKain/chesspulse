@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { sampleBatchSchema, type PulseSample, type SessionMeta } from '../shared/contracts';
 import { CONFIDENCE_FLOOR } from '../shared/sensing';
 import { SensingStrip } from './SensingStrip';
@@ -16,6 +16,9 @@ export function App() {
   const [note, setNote] = useState('The camera stays off until you consent.');
   const [error, setError] = useState<string | null>(null);
   const bridge = window.chesspulse;
+  const grantedNow = useRef(false);
+  const startPending = useRef(false);
+  const revokedDuringStart = useRef(false);
 
   useEffect(() => {
     if (!bridge) return undefined;
@@ -33,19 +36,24 @@ export function App() {
       setNote('This page is open outside the ChessPulse window. The camera stays off.');
       return;
     }
-    if (phase === 'sensing') {
+    const revoking = grantedNow.current;
+    if (revoking && startPending.current) revokedDuringStart.current = true;
+    let stopFailed = false;
+    if (phase === 'sensing' || (revoking && startPending.current)) {
       try {
         const meta = await bridge.stopSession();
+        setError(null);
         setPhase('stopped');
         setNote(stoppedNote(meta));
       } catch {
+        stopFailed = true;
         setError('The session could not be stopped.');
-        return;
       }
     }
     try {
-      setError(null);
-      const next = await bridge.setConsent(!granted);
+      const next = await bridge.setConsent(!grantedNow.current);
+      if (!stopFailed) setError(null);
+      grantedNow.current = next.granted;
       setGranted(next.granted);
       if (!next.granted) setNote('The camera stays off until you consent.');
       else if (!next.cameraAllowed) {
@@ -61,15 +69,31 @@ export function App() {
       setNote('This page is open outside the ChessPulse window. The camera stays off.');
       return;
     }
+    revokedDuringStart.current = false;
+    startPending.current = true;
     try {
       await bridge.startSession(timeControl);
+      if (revokedDuringStart.current || !grantedNow.current) {
+        try {
+          const meta = await bridge.stopSession();
+          setPhase('stopped');
+          setNote(stoppedNote(meta));
+        } catch {
+          // Revocation already closed the session, or the start never opened one.
+        }
+        return;
+      }
       setError(null);
       setSamples([]);
       setSelectedIndex(null);
       setPhase('sensing');
       setNote('Waiting for a face.');
     } catch {
-      setError('The session did not start. The camera stays off.');
+      if (!revokedDuringStart.current && grantedNow.current) {
+        setError('The session did not start. The camera stays off.');
+      }
+    } finally {
+      startPending.current = false;
     }
   }
 

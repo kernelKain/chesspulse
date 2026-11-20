@@ -17,8 +17,11 @@ export function SensingStrip({
   selectedIndex: number | null;
   onSelect: (index: number) => void;
 }) {
-  const latest = samples[samples.length - 1];
-  const visible = latest ? samples.filter((sample) => latest.tUs - sample.tUs <= BASELINE_WINDOW_US) : [];
+  const ordered = [...samples].sort((left, right) => left.tUs - right.tUs);
+  const latest = ordered[ordered.length - 1];
+  const visible = latest
+    ? ordered.filter((sample) => latest.tUs - sample.tUs <= BASELINE_WINDOW_US)
+    : [];
   const shown = selectedIndex !== null ? samples[selectedIndex] : latest;
   const label = shown
     ? `${formatBpm(shown.bpm)} bpm, confidence ${shown.confidence}, ${shown.stable ? 'stable' : 'not stable'}`
@@ -57,9 +60,18 @@ export function SensingStrip({
             Nothing recorded yet.
           </text>
         ) : (
-          traceSegments(visible).map((segment) => (
-            <polyline key={segment[0].tUs} points={toPoints(segment, visible)} />
-          ))
+          traceSegments(visible).map((segment) =>
+            segment.length === 1 ? (
+              <circle
+                key={segment[0].tUs}
+                cx={xOf(segment[0].tUs, visible)}
+                cy={yOf(segment[0].bpm)}
+                r={3}
+              />
+            ) : (
+              <polyline key={segment[0].tUs} points={toPoints(segment, visible)} />
+            ),
+          )
         )}
         {shown && visible.some((sample) => sample.tUs === shown.tUs) ? (
           <circle cx={xOf(shown.tUs, visible)} cy={yOf(shown.bpm)} r={4} />

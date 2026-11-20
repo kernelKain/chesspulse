@@ -54,15 +54,17 @@ function registerSessionHandlers(): void {
 
 function installSessionGuards(): void {
   const devUrl = process.env.CHESSPULSE_RENDERER_URL;
-  const policy = contentSecurityPolicy();
   const urls = ['file://*'];
+  let development = false;
   if (devUrl) {
     try {
       urls.push(`${new URL(devUrl).origin}/*`);
+      development = true;
     } catch {
       // Navigation already rejects a dev URL that is not a URL.
     }
   }
+  const policy = contentSecurityPolicy(development);
 
   session.defaultSession.webRequest.onHeadersReceived({ urls }, (details, callback) => {
     callback({
@@ -142,7 +144,10 @@ app.whenReady().then(async () => {
   registerSessionHandlers();
   setSampleSink(defaultDataRoot(), publishSamples);
   try {
-    await recoverInterruptedSessions(defaultDataRoot());
+    const recovery = await recoverInterruptedSessions(defaultDataRoot());
+    for (const failure of recovery.failures) {
+      console.error(`${failure.id}: ${failure.message}`);
+    }
   } catch (error) {
     console.error(error instanceof Error ? error.message : 'An open session could not be closed.');
   }

@@ -8,7 +8,15 @@ import {
   CONFIDENCE_FLOOR,
   SAMPLE_HOLD_US,
 } from '../shared/sensing.js';
-import { appendSamples, createSession, listSessions, readMeta, readSamples, saveMeta } from './store.js';
+import {
+  appendSamples,
+  assertSamplesAppendable,
+  createSession,
+  listSessions,
+  readMeta,
+  readSamples,
+  saveMeta,
+} from './store.js';
 
 export { BASELINE_WINDOW_US, CONFIDENCE_FLOOR, SAMPLE_HOLD_US as MAX_SAMPLE_HOLD_US };
 export const MAX_SESSION_US = 90 * 60 * 1_000_000;
@@ -25,6 +33,7 @@ interface ActiveSession {
   resolveStopped: (meta: SessionMeta) => void;
   rejectStopped: (error: unknown) => void;
   stopRequest?: { anchor: SessionAnchor; reason: 'user' | 'sdkError' };
+  finishStop?: Promise<SessionMeta>;
 }
 
 const active = new Map<string, ActiveSession>();
@@ -110,11 +119,13 @@ export async function startSession(
 
 export async function ingestSamples(root: string, samples: readonly PulseSample[]): Promise<void> {
   const current = requireActive(root);
+  const batch = snapshotSamples(samples);
   const limit = current.anchor.monoUs + MAX_SESSION_US;
-  if (samples.some((sample) => sample.tUs > limit)) {
+  if (batch.some((sample) => sample.tUs > limit)) {
     throw new Error('A session cannot run longer than 90 minutes.');
   }
-  const run = current.ingest.then(() => commitSamples(root, current.id, samples));
+  await assertSamplesAppendable(root, current.id);
+  const run = current.ingest.then(() => commitSamples(root, current.id, batch));
   current.ingest = run.then(
     () => undefined,
     () => undefined,
@@ -144,33 +155,72 @@ export async function stopSession(
     current.stopRequest = { anchor: stopAnchor, reason };
     return current.stopped;
   }
-  if (current.state !== 'running' || !current.id) throw new Error('No session is running.');
-  current.state = 'stopping';
-  await current.ingest;
-  const meta = await readMeta(root, current.id);
-  const saved = await finalize(root, meta, stopAnchor, reason);
-  if (active.get(key) === current) active.delete(key);
-  return saved;
+  const sessionId = current.id;
+  if (!sessionId) throw new Error('No session is running.');
+  if (current.state === 'running') current.state = 'stopping';
+  else if (current.state !== 'stopping') throw new Error('No session is running.');
+  return beginStop(root, key, current, sessionId, stopAnchor, reason);
 }
 
-export async function recoverInterruptedSessions(root: string): Promise<SessionMeta[]> {
+function beginStop(
+  root: string,
+  key: string,
+  current: ActiveSession,
+  sessionId: string,
+  stopAnchor: SessionAnchor,
+  reason: 'user' | 'sdkError',
+): Promise<SessionMeta> {
+  if (current.finishStop) return current.finishStop;
+  const run = (async () => {
+    try {
+      await current.ingest;
+      const meta = await readMeta(root, sessionId);
+      const saved = await finalize(root, meta, stopAnchor, reason);
+      if (active.get(key) === current) active.delete(key);
+      return saved;
+    } catch (error) {
+      current.finishStop = undefined;
+      throw error;
+    }
+  })();
+  current.finishStop = run;
+  return run;
+}
+
+export interface SessionRecoveryFailure {
+  id: string;
+  message: string;
+}
+
+export async function recoverInterruptedSessions(root: string): Promise<{
+  recovered: SessionMeta[];
+  failures: SessionRecoveryFailure[];
+}> {
   const ids = await listSessions(root);
   const recovered: SessionMeta[] = [];
+  const failures: SessionRecoveryFailure[] = [];
   for (const id of ids) {
-    const meta = await readMeta(root, id);
-    if (meta.stopReason) continue;
-    const samples = await readSamples(root, id);
-    const lastUs = samples.reduce((max, sample) => Math.max(max, sample.tUs), meta.startAnchor.monoUs);
-    const stopAnchor = {
-      monoUs: lastUs,
-      epochMs: meta.startAnchor.epochMs + Math.round((lastUs - meta.startAnchor.monoUs) / 1000),
-    };
-    recovered.push(await finalize(root, meta, stopAnchor, 'crash'));
+    try {
+      const meta = await readMeta(root, id);
+      if (meta.stopReason) continue;
+      const samples = await readSamples(root, id);
+      const lastUs = samples.reduce((max, sample) => Math.max(max, sample.tUs), meta.startAnchor.monoUs);
+      const stopAnchor = {
+        monoUs: lastUs,
+        epochMs: meta.startAnchor.epochMs + Math.round((lastUs - meta.startAnchor.monoUs) / 1000),
+      };
+      recovered.push(await finalize(root, meta, stopAnchor, 'crash'));
+    } catch (error) {
+      failures.push({
+        id,
+        message: error instanceof Error ? error.message : 'The session could not be recovered.',
+      });
+    }
   }
   const key = path.resolve(root);
   const current = active.get(key);
   if (current && recovered.some((meta) => meta.id === current.id)) active.delete(key);
-  return recovered;
+  return { recovered, failures };
 }
 
 async function finalize(
@@ -222,6 +272,15 @@ async function commitSamples(root: string, sessionId: string, samples: readonly 
   } catch {
     // The batch is already in the file. The caller must not treat this as a reason to append it again.
   }
+}
+
+function snapshotSamples(samples: readonly PulseSample[]): PulseSample[] {
+  return samples.map((sample) => ({
+    tUs: sample.tUs,
+    bpm: sample.bpm,
+    confidence: sample.confidence,
+    stable: sample.stable,
+  }));
 }
 
 function requireActive(root: string): ActiveSession & { id: string } {
