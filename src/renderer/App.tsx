@@ -37,6 +37,21 @@ export function App() {
   const startPending = useRef(false);
   const revokedDuringStart = useRef(false);
   const reportRequestSeq = useRef(0);
+  const sessionIdRef = useRef<string | null>(null);
+
+  function adoptSession(nextId: string): void {
+    if (sessionIdRef.current === nextId) return;
+    sessionIdRef.current = nextId;
+    reportRequestSeq.current += 1;
+    setSessionId(nextId);
+    setError(null);
+    setPasteSlots([]);
+    setReportResult(null);
+    setReportBuilding(false);
+    setReportError(null);
+    setSamples([]);
+    setSelectedIndex(null);
+  }
 
   useEffect(() => {
     if (!bridge) return undefined;
@@ -60,7 +75,7 @@ export function App() {
     if (phase === 'sensing' || (revoking && startPending.current)) {
       try {
         const meta = await bridge.stopSession();
-        setSessionId(meta.id);
+        adoptSession(meta.id);
         setError(null);
         setPhase('stopped');
         setNote(stoppedNote(meta));
@@ -92,19 +107,11 @@ export function App() {
     startPending.current = true;
     try {
       const started = await bridge.startSession(timeControl);
-      reportRequestSeq.current += 1;
-      setSessionId(started.sessionId);
-      setError(null);
-      setPasteSlots([]);
-      setReportResult(null);
-      setReportBuilding(false);
-      setReportError(null);
-      setSamples([]);
-      setSelectedIndex(null);
+      adoptSession(started.sessionId);
       if (revokedDuringStart.current || !grantedNow.current) {
         try {
           const meta = await bridge.stopSession();
-          setSessionId(meta.id);
+          adoptSession(meta.id);
           setPhase('stopped');
           setNote(stoppedNote(meta));
         } catch {
@@ -127,7 +134,7 @@ export function App() {
     if (!bridge || phase !== 'sensing') return;
     try {
       const meta = await bridge.stopSession();
-      setSessionId(meta.id);
+      adoptSession(meta.id);
       setError(null);
       setPhase('stopped');
       setNote(stoppedNote(meta));

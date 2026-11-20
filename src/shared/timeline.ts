@@ -222,27 +222,29 @@ export function formatElapsed(tUs: number, startUs: number): string {
   return `${mins}:${String(rem).padStart(2, '0')}`;
 }
 
+export function sampleStatusText(sample: PulseSample, elevatedThresholdBpm: number | undefined): string {
+  const usable = sample.stable && sample.confidence >= CONFIDENCE_FLOOR;
+  if (!usable) return `low confidence (${sample.confidence})`;
+  if (elevatedThresholdBpm === undefined) return 'raw trace, bands withheld';
+  if (sample.bpm >= elevatedThresholdBpm) return 'elevated';
+  return 'settled';
+}
+
 export function sampleReadout(view: TimelineViewModel, sampleIndex: number): string {
   const sample = view.samples[sampleIndex];
   if (!sample) return 'Nothing recorded yet.';
 
   const time = formatElapsed(sample.tUs, view.startUs);
   const bpm = formatNumber(sample.bpm);
-  const usable = sample.stable && sample.confidence >= CONFIDENCE_FLOOR;
-  let bandText: string;
-  if (!usable) {
-    bandText = `low confidence (${sample.confidence})`;
-  } else if (view.state === 'low_coverage' || view.elevatedThresholdBpm === undefined) {
-    bandText = 'raw trace, bands withheld';
-  } else if (sample.bpm >= view.elevatedThresholdBpm) {
-    bandText = 'elevated';
-  } else {
-    bandText = 'settled';
-  }
+  const bandText = sampleStatusText(
+    sample,
+    view.state === 'low_coverage' ? undefined : view.elevatedThresholdBpm,
+  );
 
   const game = view.games.find((entry) => sample.tUs >= entry.startUs && sample.tUs <= entry.endUs);
   const gameText = game ? ` · Game ${game.index + 1}` : '';
-  const nearestMove = nearestMoveTo(view.moves, sample.tUs);
+  const gameMoves = game ? view.moves.filter((move) => move.gameIndex === game.index) : [];
+  const nearestMove = nearestMoveTo(gameMoves, sample.tUs);
   const moveText = nearestMove ? formatMoveReadout(nearestMove) : '';
 
   return `Sample ${sampleIndex + 1}/${view.samples.length} · ${time} · ${bpm} bpm · ${bandText}${gameText}${moveText}`;
@@ -404,6 +406,10 @@ function lowCoverageView(
   };
 }
 
+const BPM_AXIS_FLOOR = 35;
+const BPM_AXIS_CEILING = 200;
+const MIN_BPM_SPAN = 20;
+
 function sortSamples(samples: readonly PulseSample[]): PulseSample[] {
   return [...samples].sort((left, right) => left.tUs - right.tUs);
 }
@@ -428,10 +434,19 @@ function bpmDomain(
     max = Math.max(max, thresholdBpm);
   }
   if (!Number.isFinite(min) || !Number.isFinite(max)) return { yMinBpm: 50, yMaxBpm: 120 };
-  const yMinBpm = Math.max(35, Math.floor((min - 8) / 5) * 5);
-  const yMaxBpm = Math.min(200, Math.ceil((max + 8) / 5) * 5);
-  if (yMaxBpm - yMinBpm < 20) {
-    return { yMinBpm: Math.max(35, yMinBpm - 10), yMaxBpm: Math.min(200, yMaxBpm + 10) };
+  // The chart only draws 35–200. Padding first, then clamping, can put the floor above the ceiling
+  // when every reading sits outside that window.
+  let yMinBpm = Math.max(BPM_AXIS_FLOOR, Math.floor((min - 8) / 5) * 5);
+  let yMaxBpm = Math.min(BPM_AXIS_CEILING, Math.ceil((max + 8) / 5) * 5);
+  if (yMaxBpm - yMinBpm < MIN_BPM_SPAN) {
+    yMinBpm = Math.max(BPM_AXIS_FLOOR, yMinBpm - 10);
+    yMaxBpm = Math.min(BPM_AXIS_CEILING, yMaxBpm + 10);
+  }
+  if (yMaxBpm - yMinBpm < MIN_BPM_SPAN) {
+    if (max <= BPM_AXIS_FLOOR) return { yMinBpm: BPM_AXIS_FLOOR, yMaxBpm: BPM_AXIS_FLOOR + MIN_BPM_SPAN };
+    if (min >= BPM_AXIS_CEILING) return { yMinBpm: BPM_AXIS_CEILING - MIN_BPM_SPAN, yMaxBpm: BPM_AXIS_CEILING };
+    yMinBpm = Math.max(BPM_AXIS_FLOOR, Math.min(yMinBpm, BPM_AXIS_CEILING - MIN_BPM_SPAN));
+    yMaxBpm = yMinBpm + MIN_BPM_SPAN;
   }
   return { yMinBpm, yMaxBpm };
 }

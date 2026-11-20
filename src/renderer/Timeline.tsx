@@ -11,6 +11,7 @@ import {
   formatElapsed,
   moveTableRows,
   sampleReadout,
+  sampleStatusText,
   sampleTableRows,
   thinkTimeRatio,
   timeTicks,
@@ -753,7 +754,7 @@ function MiniGameTimeline({
     mini.samples.length === 0
       ? 'No pulse samples during this game.'
       : currentSample
-        ? `${formatElapsed(currentSample.tUs, sessionStartUs)} · ${formatBpm(currentSample.bpm)} bpm`
+        ? `${formatElapsed(currentSample.tUs, sessionStartUs)} · ${formatBpm(currentSample.bpm)} bpm · ${sampleStatusText(currentSample, mini.elevatedThresholdBpm)}`
         : `${mini.samples.length} samples · use arrow keys to step`;
 
   return (

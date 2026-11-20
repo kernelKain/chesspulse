@@ -11,6 +11,7 @@ import {
   formatElapsed,
   moveTableRows,
   sampleReadout,
+  sampleStatusText,
   sampleTableRows,
   splitPulseRuns,
   THINK_CAP_SEC,
@@ -150,6 +151,58 @@ describe('buildTimelineView', () => {
     assert.match(sampleReadout(aligned, 2), /elevated/);
     assert.match(sampleReadout(aligned, 2), /e4 \(140 cpl, 4.5 s think, blunder\)/);
 
+    const crossed = baseReport();
+    crossed.timeline.samples = [sample(9.2, 72), sample(11, 74)];
+    crossed.timeline.games = [
+      {
+        index: 0,
+        white: 'Ada',
+        black: 'Nim',
+        result: '1-0',
+        ending: 'checkmate',
+        includeInStats: true,
+        startUs: 0,
+        endUs: 10_000_000,
+      },
+      {
+        index: 1,
+        white: 'Nim',
+        black: 'Ada',
+        result: '0-1',
+        ending: 'resignation',
+        includeInStats: true,
+        startUs: 10_000_000,
+        endUs: 20_000_000,
+      },
+    ];
+    crossed.timeline.moves = [
+      {
+        gameIndex: 0,
+        moveIndex: 0,
+        san: 'e4',
+        tUs: 2_000_000,
+        cpl: 10,
+        thinkSec: 1,
+        blunder: false,
+        band: 'settled',
+      },
+      {
+        gameIndex: 1,
+        moveIndex: 0,
+        san: 'Nf3',
+        tUs: 10_500_000,
+        cpl: 20,
+        thinkSec: 2,
+        blunder: false,
+        band: 'settled',
+      },
+    ];
+    const duringFirst = buildTimelineView(crossed);
+    assert.match(sampleReadout(duringFirst, 0), /Game 1/);
+    assert.doesNotMatch(sampleReadout(duringFirst, 0), /Nf3/);
+    assert.match(sampleReadout(duringFirst, 1), /Game 2/);
+    assert.match(sampleReadout(duringFirst, 1), /Nf3 \(20 cpl, 2 s think\)/);
+
     const lowConf = buildTimelineView(
       baseReport({
         alignmentMode: 'starttime',
@@ -161,6 +214,26 @@ describe('buildTimelineView', () => {
     assert.equal(lowConf.confidenceLabel, 'Aligned from start time (±90 s)');
     assert.match(lowConf.banner ?? '', /±90 s/);
   });
+
+  it('keeps the bpm axis ordered when every reading is below 35 or above 200', () => {
+    const low = baseReport();
+    low.baselineBpm = 20;
+    low.timeline.baselineBpm = 20;
+    low.timeline.elevatedThresholdBpm = 30;
+    low.timeline.samples = [sample(0, 18), sample(1, 22)];
+    const lowView = buildTimelineView(low);
+    assert.equal(lowView.yMinBpm, 35);
+    assert.equal(lowView.yMaxBpm, 55);
+
+    const high = baseReport();
+    high.baselineBpm = 250;
+    high.timeline.baselineBpm = 250;
+    high.timeline.elevatedThresholdBpm = 260;
+    high.timeline.samples = [sample(0, 240), sample(1, 255)];
+    const highView = buildTimelineView(high);
+    assert.equal(highView.yMinBpm, 180);
+    assert.equal(highView.yMaxBpm, 200);
+  });
 });
 
 describe('timeline helpers', () => {
@@ -170,6 +243,10 @@ describe('timeline helpers', () => {
     assert.equal(cplBarRatio(CPL_CAP / 2), 0.5);
     assert.equal(thinkTimeRatio(THINK_CAP_SEC * 2), 1);
     assert.equal(formatElapsed(125_000_000, 0), '2:05');
+    assert.equal(sampleStatusText(sample(0, 84), 80), 'elevated');
+    assert.equal(sampleStatusText(sample(0, 70), 80), 'settled');
+    assert.equal(sampleStatusText(sample(0, 70, 20, false), 80), 'low confidence (20)');
+    assert.equal(sampleStatusText(sample(0, 70), undefined), 'raw trace, bands withheld');
     assert.deepEqual(endingMark('resignation'), { glyph: '✕', label: 'resignation' });
     assert.deepEqual(endingMark('timeout'), { glyph: '⏱', label: 'timeout' });
     assert.deepEqual(endingMark('checkmate'), { glyph: '♚', label: 'mate' });
