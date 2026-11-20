@@ -13,7 +13,7 @@ export function currentConsent(): boolean {
   return consentGranted;
 }
 
-export function registerConsentHandler(): void {
+export function registerConsentHandler(appFileUrl: string): void {
   ipcMain.handle(CONSENT_CHANNEL, (event, payload: unknown) => {
     const parsed = consentRequestSchema.safeParse(payload);
     if (!parsed.success) throw new Error('Consent was not a yes or no.');
@@ -23,6 +23,7 @@ export function registerConsentHandler(): void {
       cameraAllowed: grantsMediaPermission({
         permission: 'media',
         requestingUrl: event.senderFrame?.url,
+        appFileUrl,
         consentGranted,
         isMainFrame: true,
         mediaTypes: ['video'],

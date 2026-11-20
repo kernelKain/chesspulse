@@ -113,6 +113,45 @@ describe('session controller', () => {
     assert.equal((await readSamples(root, stopped.id)).length, 0);
   });
 
+  it('rejects a second start while the first is still opening', async () => {
+    const root = useRoot();
+    const pending = startSession(root, anchor, '3+2');
+    await assert.rejects(() => startSession(root, anchor, '10+0'), /already running/);
+    await pending;
+  });
+
+  it('does not leave a session running when stop wins the start', async () => {
+    const root = useRoot();
+    const pending = startSession(root, anchor, '1+0');
+    const stopped = stopSession(root, { monoUs: 5_000, epochMs: anchor.epochMs + 5 }, 'user');
+    await assert.rejects(pending, /The session was stopped/);
+    const meta = await stopped;
+    assert.equal(meta.stopReason, 'user');
+    assert.equal(activeTimeControl(root), undefined);
+  });
+
+  it('rejects new samples once stopping has begun', async () => {
+    const root = useRoot();
+    await startSession(root, anchor, '3+2');
+    const stopping = stopSession(root, { monoUs: 1_000, epochMs: anchor.epochMs + 1 }, 'user');
+    await assert.rejects(() => ingestSamples(root, [sample(0, 70)]), /No session is running/);
+    await stopping;
+  });
+
+  it('keeps a stored batch when the sink throws', async () => {
+    const root = useRoot();
+    setSampleSink(root, () => {
+      throw new Error('sink down');
+    });
+    try {
+      const started = await startSession(root, anchor, '3+2');
+      await ingestSamples(root, [sample(0, 70)]);
+      assert.equal((await readSamples(root, started.id)).length, 1);
+    } finally {
+      setSampleSink(root, undefined);
+    }
+  });
+
   it('publishes a stored batch and skips a rejected one', async () => {
     const root = useRoot();
     const seen: PulseSample[][] = [];

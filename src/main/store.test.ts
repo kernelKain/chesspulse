@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -83,6 +83,8 @@ describe('session store', () => {
     const file = path.join(root, 'sessions', meta.id, 'samples.ndjson');
     await writeFile(file, `${JSON.stringify(sample(1))}\n{"tUs":`);
     assert.deepEqual(await readSamples(root, meta.id), [sample(1)]);
+    await writeFile(file, '{"tUs":');
+    assert.deepEqual(await readSamples(root, meta.id), []);
     await writeFile(file, '{"not":"a sample"}\n');
     await assert.rejects(() => readSamples(root, meta.id), /not a pulse sample/);
   });
@@ -108,6 +110,15 @@ describe('session store', () => {
     });
     await rm(path.join(root, 'sessions', 'index.json'));
     assert.deepEqual(await listSessions(root), [meta.id]);
+  });
+
+  it('ignores a folder that has samples but no header', async () => {
+    const root = useRoot();
+    const id = createSessionId(anchor.epochMs, random);
+    const dir = path.join(root, 'sessions', id);
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, 'samples.ndjson'), '');
+    assert.deepEqual(await listSessions(root), []);
   });
 
   it('rejects a session id that leaves the store', async () => {

@@ -72,9 +72,9 @@ export async function createSession(root: string, draft: NewSession, bytes?: Uin
   await exclusive(root, async () => {
     const dir = sessionDir(root, meta.id);
     await mkdir(dir, { recursive: true, mode: 0o700 });
-    await writeAtomic(path.join(dir, 'meta.json'), jsonText(meta));
     const samples = await open(path.join(dir, 'samples.ndjson'), 'a', 0o600);
     await samples.close();
+    await writeAtomic(path.join(dir, 'meta.json'), jsonText(meta));
     const ids = await readIndexIds(root);
     if (!ids.includes(meta.id)) await writeIndex(root, [...ids, meta.id].sort());
   });
@@ -153,7 +153,7 @@ export async function readSamples(root: string, sessionId: string): Promise<Puls
     throw error;
   }
   if (text.length === 0) return [];
-  const complete = text.endsWith('\n') ? text.slice(0, -1) : text.slice(0, text.lastIndexOf('\n'));
+  const complete = completeSampleText(text);
   if (complete.length === 0) return [];
   return complete.split('\n').map((line, index) => {
     let value: unknown;
@@ -188,6 +188,15 @@ export async function findMediaFiles(root: string): Promise<string[]> {
     found.push(path.relative(root, path.join(parent, entry.name)));
   }
   return found.sort();
+}
+
+function completeSampleText(text: string): string {
+  if (!text.endsWith('\n')) {
+    const lastNewline = text.lastIndexOf('\n');
+    if (lastNewline === -1) return '';
+    return text.slice(0, lastNewline);
+  }
+  return text.slice(0, -1);
 }
 
 function parseMeta(value: unknown): SessionMeta {

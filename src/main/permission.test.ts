@@ -6,6 +6,7 @@ function request(overrides: Partial<MediaPermissionInput> = {}): MediaPermission
   return {
     permission: 'media',
     requestingUrl: 'file:///tmp/chesspulse/index.html',
+    appFileUrl: 'file:///tmp/chesspulse/index.html',
     consentGranted: true,
     isMainFrame: true,
     mediaTypes: ['video'],
@@ -20,6 +21,13 @@ describe('grantsMediaPermission', () => {
 
   it('denies the camera when consent is absent', () => {
     assert.equal(grantsMediaPermission(request({ consentGranted: false })), false);
+  });
+
+  it('denies a different local file', () => {
+    assert.equal(
+      grantsMediaPermission(request({ requestingUrl: 'file:///tmp/other/index.html' })),
+      false,
+    );
   });
 
   it('denies the dev server and any remote page', () => {

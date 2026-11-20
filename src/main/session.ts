@@ -16,9 +16,15 @@ export const MAX_SESSION_US = 90 * 60 * 1_000_000;
 const sampleSinks = new Map<string, (samples: readonly PulseSample[]) => void>();
 
 interface ActiveSession {
-  id: string;
+  id?: string;
   anchor: SessionAnchor;
   timeControl: string;
+  state: 'starting' | 'running' | 'stopping';
+  ingest: Promise<void>;
+  stopped: Promise<SessionMeta>;
+  resolveStopped: (meta: SessionMeta) => void;
+  rejectStopped: (error: unknown) => void;
+  stopRequest?: { anchor: SessionAnchor; reason: 'user' | 'sdkError' };
 }
 
 const active = new Map<string, ActiveSession>();
@@ -77,12 +83,29 @@ export async function startSession(
   if (!parsed.success) throw new Error('Choose a time control before starting.');
   const key = path.resolve(root);
   if (active.has(key)) throw new Error('A session is already running.');
-  const meta = await createSession(root, {
-    startedAtEpochMs: anchor.epochMs,
-    startAnchor: anchor,
-  });
-  active.set(key, { id: meta.id, anchor, timeControl: parsed.data.timeControl });
-  return meta;
+  const reservation = reserve(anchor, parsed.data.timeControl);
+  active.set(key, reservation);
+  let stoppedEarly = false;
+  try {
+    const meta = await createSession(root, {
+      startedAtEpochMs: anchor.epochMs,
+      startAnchor: anchor,
+    });
+    if (reservation.state === 'stopping' && reservation.stopRequest) {
+      const saved = await finalize(root, meta, reservation.stopRequest.anchor, reservation.stopRequest.reason);
+      if (active.get(key) === reservation) active.delete(key);
+      reservation.resolveStopped(saved);
+      stoppedEarly = true;
+      throw new Error('The session was stopped.');
+    }
+    reservation.id = meta.id;
+    reservation.state = 'running';
+    return meta;
+  } catch (error) {
+    if (!stoppedEarly && active.get(key) === reservation) active.delete(key);
+    if (!stoppedEarly) reservation.rejectStopped(error);
+    throw error;
+  }
 }
 
 export async function ingestSamples(root: string, samples: readonly PulseSample[]): Promise<void> {
@@ -91,8 +114,12 @@ export async function ingestSamples(root: string, samples: readonly PulseSample[
   if (samples.some((sample) => sample.tUs > limit)) {
     throw new Error('A session cannot run longer than 90 minutes.');
   }
-  await appendSamples(root, current.id, samples);
-  sampleSinks.get(path.resolve(root))?.(samples);
+  const run = current.ingest.then(() => commitSamples(root, current.id, samples));
+  current.ingest = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }
 
 export function setSampleSink(
@@ -109,10 +136,20 @@ export async function stopSession(
   stopAnchor: SessionAnchor,
   reason: 'user' | 'sdkError',
 ): Promise<SessionMeta> {
-  const current = requireActive(root);
+  const key = path.resolve(root);
+  const current = active.get(key);
+  if (!current) throw new Error('No session is running.');
+  if (current.state === 'starting') {
+    current.state = 'stopping';
+    current.stopRequest = { anchor: stopAnchor, reason };
+    return current.stopped;
+  }
+  if (current.state !== 'running' || !current.id) throw new Error('No session is running.');
+  current.state = 'stopping';
+  await current.ingest;
   const meta = await readMeta(root, current.id);
   const saved = await finalize(root, meta, stopAnchor, reason);
-  active.delete(path.resolve(root));
+  if (active.get(key) === current) active.delete(key);
   return saved;
 }
 
@@ -159,10 +196,38 @@ export function activeTimeControl(root: string): string | undefined {
   return active.get(path.resolve(root))?.timeControl;
 }
 
-function requireActive(root: string): ActiveSession {
+function reserve(anchor: SessionAnchor, timeControl: string): ActiveSession {
+  let resolveStopped: (meta: SessionMeta) => void = () => undefined;
+  let rejectStopped: (error: unknown) => void = () => undefined;
+  const stopped = new Promise<SessionMeta>((resolve, reject) => {
+    resolveStopped = resolve;
+    rejectStopped = reject;
+  });
+  stopped.catch(() => undefined);
+  return {
+    anchor,
+    timeControl,
+    state: 'starting',
+    ingest: Promise.resolve(),
+    stopped,
+    resolveStopped,
+    rejectStopped,
+  };
+}
+
+async function commitSamples(root: string, sessionId: string, samples: readonly PulseSample[]): Promise<void> {
+  await appendSamples(root, sessionId, samples);
+  try {
+    sampleSinks.get(path.resolve(root))?.(samples);
+  } catch {
+    // The batch is already in the file. The caller must not treat this as a reason to append it again.
+  }
+}
+
+function requireActive(root: string): ActiveSession & { id: string } {
   const current = active.get(path.resolve(root));
-  if (!current) throw new Error('No session is running.');
-  return current;
+  if (!current || current.state !== 'running' || !current.id) throw new Error('No session is running.');
+  return current as ActiveSession & { id: string };
 }
 
 function median(values: readonly number[]): number {

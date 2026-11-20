@@ -16,14 +16,18 @@ describe('contentSecurityPolicy', () => {
   });
 
   it('matches the policy Vite injects', async () => {
-    const viteCopy = (await import(
-      pathToFileURL(path.join(process.cwd(), 'src/shared/security.mjs')).href
-    )) as { contentSecurityPolicy: () => string };
+    const viteCopy = (await import(pathToFileURL(path.join(__dirname, '../../src/shared/security.mjs')).href)) as {
+      contentSecurityPolicy: () => string;
+    };
+    const compiled = (await import(pathToFileURL(path.join(__dirname, 'security.js')).href)) as {
+      contentSecurityPolicy: () => string;
+    };
     assert.equal(viteCopy.contentSecurityPolicy(), policy);
+    assert.equal(compiled.contentSecurityPolicy(), policy);
   });
 
   it('leaves a placeholder for the build to replace', () => {
-    const html = readFileSync(path.join(process.cwd(), 'src/renderer/index.html'), 'utf8');
+    const html = readFileSync(path.join(__dirname, '../../src/renderer/index.html'), 'utf8');
     assert.match(html, /__CHESSPULSE_CSP__/);
   });
 });

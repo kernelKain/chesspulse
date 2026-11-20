@@ -17,6 +17,8 @@ npm test
 npm run dev
 ```
 
+`npm test` is the unit suite. `npm run test:consent` is separate: it builds `dist/` and `dist-electron/` first, then opens Electron. It is not part of `npm test` and does not run without that build.
+
 `npm run dev` opens the window against the local page at `http://127.0.0.1:5173`. `npm run build` then `npm start` opens the built page from disk.
 
 If Electron aborts because the sandbox helper is not setuid, start the built app with `--no-sandbox`. That flag is a development workaround.
@@ -29,7 +31,7 @@ The SmartSpectra key and any model key belong in `.env` only. `.env.example` lis
 
 ## Consent and data
 
-The camera stays off until you press **Allow the camera**. Revoking consent stops an open session. Video is granted only to the main frame of a `file://` page, and only for the camera, not the microphone or the screen. The dev page is `http://127.0.0.1:5173`, so it can record consent and still cannot open the camera.
+The camera stays off until you press **Allow the camera**. Revoking consent stops an open session. Video is granted only to the main frame of this app's own built page, not to every file on disk, and only for the camera, not the microphone or the screen. The dev page is `http://127.0.0.1:5173`, so it can record consent and still cannot open the camera.
 
 A session is a folder of numbers: `meta.json` and `samples.ndjson`. No image or video file is written. The folder is under `$XDG_DATA_HOME/chesspulse` or `~/.local/share/chesspulse`. Deleting that folder deletes the session. Nothing in the app is uploaded, and there is no account.
 

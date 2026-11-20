@@ -122,6 +122,13 @@ button:focus-visible,
   margin-top: 4px;
 }
 
+.hint,
+.live {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .choices,
 .actions {
   display: flex;

@@ -38,7 +38,18 @@ export function SensingStrip({
   }
 
   return (
-    <div className="strip" tabIndex={0} role="img" aria-label={label} onKeyDown={onKey}>
+    <div
+      className="strip"
+      tabIndex={0}
+      role="group"
+      aria-roledescription="pulse trace"
+      aria-label="Pulse trace"
+      aria-describedby="strip-keys"
+      onKeyDown={onKey}
+    >
+      <p id="strip-keys" className="hint">
+        Left and right arrow keys move through samples.
+      </p>
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="presentation">
         <line className="axis" x1={PAD} y1={HEIGHT - PAD} x2={WIDTH - PAD} y2={HEIGHT - PAD} />
         {visible.length === 0 ? (
@@ -54,8 +65,15 @@ export function SensingStrip({
           <circle cx={xOf(shown.tUs, visible)} cy={yOf(shown.bpm)} r={4} />
         ) : null}
       </svg>
-      <p className="readout">{shown ? formatBpm(shown.bpm) : '—'}</p>
-      <p className="unit">bpm</p>
+      <p className="readout" aria-hidden="true">
+        {shown ? formatBpm(shown.bpm) : '—'}
+      </p>
+      <p className="unit" aria-hidden="true">
+        bpm
+      </p>
+      <p className="live" aria-live="polite">
+        {label}
+      </p>
     </div>
   );
 }

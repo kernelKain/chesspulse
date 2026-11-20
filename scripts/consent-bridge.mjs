@@ -1,6 +1,8 @@
 // What: opens the built page in a hidden window and calls the consent bridge.
 // Why: the unit tests do not load Electron, so they cannot see the preload or a file:// URL.
 // Removed: a broken bridge would still look green in the Node tests.
+// Prerequisite: dist/index.html and dist-electron/ must already exist. This file is not a
+// standalone test. Run it through `npm run test:consent`, which builds both outputs first.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';

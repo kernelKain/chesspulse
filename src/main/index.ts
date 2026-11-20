@@ -2,6 +2,7 @@
 // Why: the camera, engine, and files will live here later, outside the page.
 // Removed: the renderer would have no desktop process to attach to.
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, ipcMain, session } from 'electron';
 import {
   sampleBatchSchema,
@@ -26,6 +27,10 @@ function publishSamples(samples: readonly unknown[]): void {
     if (win.isDestroyed()) continue;
     win.webContents.send(SAMPLE_CHANNEL, batch);
   }
+}
+
+function appFileUrl(): string {
+  return pathToFileURL(path.join(__dirname, '../../dist/index.html')).href;
 }
 
 function currentAnchor(): { monoUs: number; epochMs: number } {
@@ -72,6 +77,7 @@ function installSessionGuards(): void {
     grantsMediaPermission({
       permission,
       requestingUrl: details.requestingUrl ?? requestingOrigin,
+      appFileUrl: appFileUrl(),
       consentGranted: currentConsent(),
       isMainFrame: details.isMainFrame,
       mediaType: details.mediaType,
@@ -84,6 +90,7 @@ function installSessionGuards(): void {
       grantsMediaPermission({
         permission,
         requestingUrl: details.requestingUrl,
+        appFileUrl: appFileUrl(),
         consentGranted: currentConsent(),
         isMainFrame: details.isMainFrame,
         mediaTypes,
@@ -131,7 +138,7 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   installSessionGuards();
-  registerConsentHandler();
+  registerConsentHandler(appFileUrl());
   registerSessionHandlers();
   setSampleSink(defaultDataRoot(), publishSamples);
   try {
