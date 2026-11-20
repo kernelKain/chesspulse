@@ -17,7 +17,7 @@ export function positionsFromMoves(sans: readonly string[]): MovePosition[] {
     const fenBefore = chess.fen();
     let played: { after: string } | null = null;
     try {
-      played = chess.move(san);
+      played = chess.move(san, { strict: true });
     } catch {
       played = null;
     }

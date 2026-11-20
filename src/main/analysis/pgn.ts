@@ -53,7 +53,9 @@ export function parsePgn(pgn: string, index: number): PgnParseResult {
     return invalid(index, 'The movetext result does not match the Result tag.');
   }
 
-  const endTime = epochPair(parts.headers.get('EndDate'), parts.headers.get('EndTime'));
+  const endDate = parts.headers.get('EndDate');
+  const endClock = parts.headers.get('EndTime');
+  const endTime = endClock === undefined ? undefined : epochPair(endDate, endClock);
   if (endTime === 'bad') return invalid(index, 'EndDate and EndTime are not a complete UTC time.');
   const startTime = epochPair(parts.headers.get('UTCDate'), parts.headers.get('UTCTime'));
   if (startTime === 'bad') return invalid(index, 'UTCDate and UTCTime are not a complete UTC time.');
@@ -248,10 +250,14 @@ function clockFromComment(comment: string): number | undefined | 'bad' {
   return tenths / 10;
 }
 
+const UNKNOWN_DATE = '????.??.??';
+const UNKNOWN_TIME = '??:??:??';
+
 function epochPair(date: string | undefined, time: string | undefined): number | undefined | 'bad' {
   if (date === undefined && time === undefined) return undefined;
   if (date === undefined || time === undefined) return 'bad';
-  if (date.includes('?') || time.includes('?')) return undefined;
+  if (date === UNKNOWN_DATE && time === UNKNOWN_TIME) return undefined;
+  if (date.includes('?') || time.includes('?')) return 'bad';
   const day = /^(\d{4})\.(\d{2})\.(\d{2})$/.exec(date);
   const clock = /^(\d{2}):(\d{2}):(\d{2})$/.exec(time);
   if (!day || !clock) return 'bad';
@@ -280,11 +286,12 @@ function classifyEnding(
   moves: readonly { san: string }[],
 ): PgnGame['ending'] {
   const text = termination?.toLowerCase() ?? '';
-  if (text.includes('abort')) return 'aborted';
-  if (text.includes('abandon')) return 'abandoned';
-  if (text.includes('checkmate')) return 'checkmate';
-  if (text.includes('resign')) return 'resignation';
-  if (text.includes('on time') || text.includes('timeout')) return 'timeout';
+  const reason = text.match(/\bwon by ([a-z]+)\b/)?.[1] ?? text.match(/\bwon on ([a-z]+)\b/)?.[1] ?? text;
+  if (reason.includes('abort')) return 'aborted';
+  if (reason.includes('abandon')) return 'abandoned';
+  if (reason.includes('checkmate')) return 'checkmate';
+  if (reason.includes('resign')) return 'resignation';
+  if (reason.includes('time')) return 'timeout';
   if (moves.at(-1)?.san.endsWith('#')) return 'checkmate';
   return 'unknown';
 }

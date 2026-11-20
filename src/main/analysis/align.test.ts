@@ -134,6 +134,21 @@ describe('alignGames', () => {
     assert.equal(aligned.traceGaps[0]?.durationUs, 10_000_000 - SAMPLE_HOLD_US);
   });
 
+  it('lets a usable sample from before the game cover the opening', () => {
+    const played = game({ index: 0, endTimeEpochMs: EPOCH + 12_000, moves: [{ san: 'e4', clockSec: 50 }] });
+    const samples: PulseSample[] = [
+      { tUs: 1_500_000, bpm: 70, confidence: 80, stable: true },
+      { tUs: 0, bpm: 70, confidence: 80, stable: true },
+      { tUs: 12_000_000, bpm: 72, confidence: 80, stable: true },
+    ];
+    const aligned = alignGames([played], clock, samples);
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    assert.equal(aligned.traceGaps.length, 1);
+    assert.equal(aligned.traceGaps[0]?.fromUs, 1_500_000 + SAMPLE_HOLD_US);
+    assert.equal(aligned.traceGaps[0]?.toUs, 12_000_000);
+  });
+
   it('does not place a clockless game or a session with no stop', () => {
     const clockless = game({ index: 3, moves: [{ san: 'e4' }] });
     const missingClocks = alignGames([clockless], clock);
@@ -204,5 +219,55 @@ describe('alignGames', () => {
     assert.equal(fitted.ok, true);
     if (!fitted.ok) return;
     assert.equal(fitted.games[0]?.alignment.toleranceSec, 0);
+  });
+
+  it('rejects a span outside the recording and keeps one inside it', () => {
+    const late: SessionClock = {
+      startAnchor: { monoUs: 5_000_000, epochMs: EPOCH + 5_000 },
+      stopAnchor: { monoUs: 20_000_000, epochMs: EPOCH + 20_000 },
+    };
+    const before = alignGames(
+      [game({ index: 0, endTimeEpochMs: EPOCH + 10_000, moves: [{ san: 'e4', clockSec: 50 }] })],
+      late,
+    );
+    assert.equal(before.ok, false);
+    if (before.ok) return;
+    assert.match(before.banner, /outside the session clock/);
+
+    const open: SessionClock = { startAnchor: { monoUs: 0, epochMs: EPOCH } };
+    const contained = alignGames(
+      [game({ index: 0, endTimeEpochMs: EPOCH + 10_000, moves: [{ san: 'e4', clockSec: 50 }] })],
+      open,
+    );
+    assert.equal(contained.ok, true);
+  });
+
+  it('places a timeout flag after the last move by the unused clock', () => {
+    const flagged = alignGames(
+      [
+        game({
+          index: 0,
+          ending: 'timeout',
+          endTimeEpochMs: EPOCH + 70_000,
+          moves: [{ san: 'e4', clockSec: 50 }],
+        }),
+      ],
+      clock,
+    );
+    assert.equal(flagged.ok, true);
+    if (!flagged.ok) return;
+    assert.equal(flagged.games[0]?.endUs, 70_000_000);
+    assert.equal(flagged.games[0]?.startUs, 0);
+    assert.equal(flagged.moveTimes[0]?.tUs, 10_000_000);
+    assert.equal(flagged.games[0]?.alignment.toleranceSec, ENDTIME_TOLERANCE_SEC);
+
+    const unknown = alignGames(
+      [game({ index: 0, ending: 'timeout', moves: [], endTimeEpochMs: EPOCH + 10_000, timeControl: undefined })],
+      clock,
+    );
+    assert.equal(unknown.ok, true);
+    if (!unknown.ok) return;
+    assert.equal(unknown.games[0]?.alignment.toleranceSec, STARTTIME_TOLERANCE_SEC);
+    assert.equal(unknown.moveTimes.length, 0);
   });
 });

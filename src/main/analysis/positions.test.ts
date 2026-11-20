@@ -20,4 +20,13 @@ describe('positionsFromMoves', () => {
     assert.equal(positions[1]?.illegal, true);
     assert.equal(positions[1]?.fenAfter, undefined);
   });
+
+  it('rejects a capture written without the capture mark', () => {
+    const loose = positionsFromMoves(['e4', 'e5', 'Nf3', 'Nc6', 'Ne5']);
+    assert.equal(loose.at(-1)?.san, 'Ne5');
+    assert.equal(loose.at(-1)?.illegal, true);
+    const captured = positionsFromMoves(['e4', 'e5', 'Nf3', 'Nc6', 'Nxe5']);
+    assert.equal(captured.at(-1)?.san, 'Nxe5');
+    assert.equal(captured.at(-1)?.illegal, false);
+  });
 });

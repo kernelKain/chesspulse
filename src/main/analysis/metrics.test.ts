@@ -99,7 +99,7 @@ describe('verdictLine', () => {
     assert.equal(summary.elevatedBlunders, 5);
     assert.equal(
       verdictLine(summary, { elevatedMinutes: 11, deltaBpm: 18 }),
-      '8 blunders, 5 of them in the 11 minutes your pulse stayed 18 bpm above baseline. Accuracy 71% settled, 54% elevated.',
+      '8 blunders, 5 of them in the 11 minutes your pulse was elevated, peaking 18 bpm above baseline. Accuracy 71% settled, 54% elevated.',
     );
     const thin = analyseMoves([
       counted({ band: 'elevated', accuracy: 10, blunder: true }),
@@ -119,7 +119,7 @@ describe('verdictLine', () => {
     const scored = analyseMoves(Array.from({ length: 5 }, () => counted({ band: 'settled', accuracy: 80 })));
     assert.match(
       verdictLine(scored, { elevatedMinutes: 1.4, deltaBpm: 12 }),
-      /in the 1 minute your pulse stayed 12 bpm above baseline/,
+      /in the 1 minute your pulse was elevated, peaking 12 bpm above baseline/,
     );
     const mate = analyseMoves([
       { cpl: null, accuracy: null, blunder: false, band: 'settled', includeInStats: true },
@@ -129,6 +129,18 @@ describe('verdictLine', () => {
     const line = verdictLine(mate, { elevatedMinutes: 0, deltaBpm: 0 });
     assert.match(line, /no centipawn score/);
     assert.equal(line.includes('blunder'), false);
+    const clean = analyseMoves([counted({ band: null, accuracy: 90, blunder: false })]);
+    assert.match(verdictLine(clean, {}), /^0 blunders/);
+    const empty = verdictLine(analyseMoves([]), {});
+    assert.match(empty, /Not enough scored moves/);
+    assert.equal(empty.includes('blunder'), false);
+    const several = analyseMoves([
+      counted({ band: 'elevated', accuracy: 40, blunder: true }),
+      counted({ band: 'elevated', accuracy: 40, blunder: true }),
+    ]);
+    const omitted = verdictLine(several, {});
+    assert.match(omitted, /while your pulse was elevated/);
+    assert.equal(omitted.includes('peaking'), false);
   });
 
   it('does not import a model', () => {

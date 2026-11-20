@@ -38,6 +38,8 @@ export interface AnalysisSummary {
   elevatedBlunders: number;
   /** Included moves with no centipawn score. They are not blunders. */
   unscored: number;
+  /** Included moves that received a centipawn score. */
+  scored: number;
 }
 
 export function centipawnLoss(before: Score, after: Score): number | null {
@@ -86,23 +88,26 @@ export function analyseMoves(moves: readonly MoveMetric[]): AnalysisSummary {
     blunders: counted.filter((move) => move.blunder).length,
     elevatedBlunders: counted.filter((move) => move.blunder && move.band === 'elevated').length,
     unscored: counted.filter((move) => move.accuracy === null).length,
+    scored: counted.filter((move) => move.accuracy !== null).length,
   };
 }
 
 export function verdictLine(
   summary: AnalysisSummary,
-  moment: { elevatedMinutes: number; deltaBpm: number; gapClause?: string },
+  moment: { elevatedMinutes?: number; deltaBpm?: number; gapClause?: string },
 ): string {
-  const minutes = Math.max(0, Math.round(moment.elevatedMinutes));
-  if (summary.unscored > 0 && summary.blunders === 0 && summary.settled.moves === 0 && summary.elevated.moves === 0) {
+  const minutes =
+    moment.elevatedMinutes === undefined ? undefined : Math.max(0, Math.round(moment.elevatedMinutes));
+  if (summary.scored === 0) {
     const word = summary.unscored === 1 ? 'move' : 'moves';
-    return `Not enough scored moves for a verdict. ${summary.unscored} ${word} had no centipawn score and were left out.`;
+    const leftOut = summary.unscored > 0 ? ` ${summary.unscored} ${word} had no centipawn score and were left out.` : '';
+    return `Not enough scored moves for a verdict.${leftOut}`;
   }
   const blunderWord = summary.blunders === 1 ? 'blunder' : 'blunders';
   const minuteWord = minutes === 1 ? 'minute' : 'minutes';
   const where =
-    minutes > 0
-      ? `in the ${minutes} ${minuteWord} your pulse stayed ${moment.deltaBpm} bpm above baseline`
+    minutes !== undefined && minutes > 0 && moment.deltaBpm !== undefined
+      ? `in the ${minutes} ${minuteWord} your pulse was elevated, peaking ${moment.deltaBpm} bpm above baseline`
       : 'while your pulse was elevated';
   const leftOut =
     summary.unscored > 0

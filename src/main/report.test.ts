@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import type { PulseSample } from '../shared/contracts.js';
-import { buildReport, COVERAGE_GATE_PCT, formatResult } from './report.js';
+import { SAMPLE_HOLD_US } from '../shared/sensing.js';
+import { bandAt, buildReport, COVERAGE_GATE_PCT, elevatedClaim, formatResult } from './report.js';
 import { ingestSamples, startSession, stopSession } from './session.js';
 
 const roots: string[] = [];
@@ -50,6 +51,27 @@ function pgnAt(endEpochMs: number): string {
 `;
 }
 
+describe('bandAt', () => {
+  it('uses the latest sample before the move and does not skip a weak one', () => {
+    const earlier = sample(0, 90);
+    const weak = { tUs: 500_000, bpm: 60, confidence: 10, stable: true };
+    assert.equal(bandAt([earlier, weak], 500_000, 70), null);
+    assert.equal(bandAt([earlier], 500_000, 70), 'elevated');
+    assert.equal(bandAt([earlier], earlier.tUs + SAMPLE_HOLD_US, 70), 'elevated');
+    assert.equal(bandAt([earlier], earlier.tUs + SAMPLE_HOLD_US + 1, 70), null);
+  });
+
+  it('omits a pooled duration when elevated blunders fall in separate stretches', () => {
+    const calm = sample(0, 90);
+    const later = sample(5_000_000, 100);
+    assert.equal(elevatedClaim([calm, later], 0, 10_000_000, 70, [0, 5_000_000]), undefined);
+    assert.deepEqual(elevatedClaim([calm, later], 0, 10_000_000, 70, [0]), {
+      elevatedMinutes: SAMPLE_HOLD_US / 60_000_000,
+      deltaBpm: 20,
+    });
+  });
+});
+
 describe('buildReport', () => {
   it('refuses a 40 percent trace and writes no report', async () => {
     const root = useRoot();
@@ -92,5 +114,8 @@ describe('buildReport', () => {
     const saved = JSON.parse(await readFile(path.join(root, 'sessions', id, 'report.json'), 'utf8')) as unknown;
     assert.deepEqual(saved, first);
     assert.equal(formatResult(first), `${first.verdict}\n`);
+    assert.equal(first.banner, undefined);
+    const withBanner = formatResult({ ...first, banner: 'No EndTime in this paste.' });
+    assert.equal(withBanner, `${first.verdict}\nNo EndTime in this paste.\n`);
   });
 });

@@ -65,12 +65,18 @@ export async function buildReport(
   const owned = engine === undefined;
   const scorer = engine ?? createEngine();
   try {
-    const moves = await scoreAlignedMoves(aligned.games, aligned.moveTimes, samples, baseline, scorer);
-    const summary = analyseMoves(moves);
-    const moment = elevatedMoment(samples, meta.startAnchor.monoUs, stop.monoUs, baseline);
+    const scoredMoves = await scoreAlignedMoves(aligned.games, aligned.moveTimes, samples, baseline, scorer);
+    const summary = analyseMoves(scoredMoves.metrics);
+    const claim = elevatedClaim(
+      samples,
+      meta.startAnchor.monoUs,
+      stop.monoUs,
+      baseline,
+      scoredMoves.elevatedBlunderTimes,
+    );
     const verdict = verdictLine(summary, {
-      elevatedMinutes: moment.minutes,
-      deltaBpm: moment.deltaBpm,
+      elevatedMinutes: claim?.elevatedMinutes,
+      deltaBpm: claim?.deltaBpm,
       gapClause: gapClause(aligned.gaps),
     });
     const coverage = coverageFromSamples(samples, meta.startAnchor.monoUs, stop.monoUs);
@@ -95,7 +101,9 @@ export async function buildReport(
 }
 
 export function formatResult(result: Report | Refusal): string {
-  if (result.ok) return `${result.verdict}\n`;
+  if (result.ok) {
+    return result.banner ? `${result.verdict}\n${result.banner}\n` : `${result.verdict}\n`;
+  }
   if (result.reason === 'low_coverage') {
     return `No report for this session.\nCoverage was ${result.measured}%; a review needs ${result.threshold}%.\n${result.remedy}\n`;
   }
@@ -161,7 +169,7 @@ async function scoreAlignedMoves(
   samples: readonly PulseSample[],
   baseline: number,
   engine: Evaluator,
-): Promise<MoveMetric[]> {
+): Promise<{ metrics: MoveMetric[]; elevatedBlunderTimes: (number | null)[] }> {
   const cache = new Map<string, Promise<PositionEval>>();
   const evaluate = (fen: string): Promise<PositionEval> => {
     const cached = cache.get(fen);
@@ -171,6 +179,7 @@ async function scoreAlignedMoves(
     return pending;
   };
   const metrics: MoveMetric[] = [];
+  const elevatedBlunderTimes: (number | null)[] = [];
   for (const aligned of games) {
     if (!aligned.game.includeInStats) continue;
     const sans = aligned.game.moves.map((move) => move.san);
@@ -193,46 +202,85 @@ async function scoreAlignedMoves(
       const before = await evaluate(position.fenBefore);
       const after = await evaluate(position.fenAfter);
       const band = when?.tUs === undefined || when.tUs === null ? null : bandAt(samples, when.tUs, baseline);
-      metrics.push(scoreMove(before, after, band, aligned.game.includeInStats));
+      const metric = scoreMove(before, after, band, aligned.game.includeInStats);
+      if (metric.blunder && metric.band === 'elevated') elevatedBlunderTimes.push(when?.tUs ?? null);
+      metrics.push(metric);
     }
   }
-  return metrics;
+  return { metrics, elevatedBlunderTimes };
 }
 
-function bandAt(samples: readonly PulseSample[], tUs: number, baseline: number): ReturnType<typeof bandFor> {
-  let chosen: PulseSample | undefined;
+export function bandAt(samples: readonly PulseSample[], tUs: number, baseline: number): ReturnType<typeof bandFor> {
+  let latest: PulseSample | undefined;
   for (const sample of samples) {
-    if (!isUsableSample(sample, CONFIDENCE_FLOOR)) continue;
-    if (sample.tUs <= tUs && tUs <= sample.tUs + SAMPLE_HOLD_US && (!chosen || sample.tUs >= chosen.tUs)) {
-      chosen = sample;
-    }
+    if (sample.tUs <= tUs && (!latest || sample.tUs >= latest.tUs)) latest = sample;
   }
-  if (!chosen) return null;
-  return bandFor(chosen.bpm, baseline);
+  if (!latest || !isUsableSample(latest, CONFIDENCE_FLOOR)) return null;
+  if (tUs > latest.tUs + SAMPLE_HOLD_US) return null;
+  return bandFor(latest.bpm, baseline);
 }
 
-function elevatedMoment(
+export function elevatedClaim(
   samples: readonly PulseSample[],
   startUs: number,
   stopUs: number,
   baseline: number,
-): { minutes: number; deltaBpm: number } {
+  blunderTimes: readonly (number | null)[],
+): { elevatedMinutes: number; deltaBpm: number } | undefined {
+  if (blunderTimes.length === 0 || blunderTimes.some((time) => time === null)) return undefined;
+  const periods = elevatedPeriods(samples, startUs, stopUs, baseline);
+  const hit = new Set<number>();
+  for (const time of blunderTimes) {
+    const index = periods.findIndex((period) => (time ?? -1) >= period.fromUs && (time ?? -1) <= period.toUs);
+    if (index < 0) return undefined;
+    hit.add(index);
+    if (hit.size > 1) return undefined;
+  }
+  const period = periods[[...hit][0] ?? -1];
+  if (!period) return undefined;
+  return {
+    elevatedMinutes: (period.toUs - period.fromUs) / 60_000_000,
+    deltaBpm: Math.round(period.deltaBpm),
+  };
+}
+
+function elevatedPeriods(
+  samples: readonly PulseSample[],
+  startUs: number,
+  stopUs: number,
+  baseline: number,
+): { fromUs: number; toUs: number; deltaBpm: number }[] {
   const ordered = samples
     .filter((sample) => sample.tUs >= startUs && sample.tUs <= stopUs)
     .sort((left, right) => left.tUs - right.tUs);
-  let usableUs = 0;
-  let delta = 0;
+  const periods: { fromUs: number; toUs: number; deltaBpm: number }[] = [];
+  let current: { fromUs: number; toUs: number; deltaBpm: number } | undefined;
   for (let index = 0; index < ordered.length; index += 1) {
     const sample = ordered[index];
-    if (!sample || !isUsableSample(sample, CONFIDENCE_FLOOR)) continue;
-    if (bandFor(sample.bpm, baseline) !== 'elevated') continue;
+    if (!sample || !isUsableSample(sample, CONFIDENCE_FLOOR) || bandFor(sample.bpm, baseline) !== 'elevated') {
+      current = undefined;
+      continue;
+    }
     const nextUs = index + 1 < ordered.length ? ordered[index + 1]?.tUs ?? stopUs : stopUs;
     const gap = nextUs - sample.tUs;
-    if (gap <= 0) continue;
-    usableUs += Math.min(gap, SAMPLE_HOLD_US);
-    delta = Math.max(delta, sample.bpm - baseline);
+    const end = sample.tUs + (gap > 0 ? Math.min(gap, SAMPLE_HOLD_US) : 0);
+    if (!current) {
+      current = { fromUs: sample.tUs, toUs: end, deltaBpm: sample.bpm - baseline };
+      periods.push(current);
+    } else {
+      current.toUs = end;
+      current.deltaBpm = Math.max(current.deltaBpm, sample.bpm - baseline);
+    }
+    const next = ordered[index + 1];
+    const continues =
+      next !== undefined &&
+      gap > 0 &&
+      gap <= SAMPLE_HOLD_US &&
+      isUsableSample(next, CONFIDENCE_FLOOR) &&
+      bandFor(next.bpm, baseline) === 'elevated';
+    if (!continues) current = undefined;
   }
-  return { minutes: Math.round(usableUs / 60_000_000), deltaBpm: Math.round(delta) };
+  return periods;
 }
 
 function gapClause(gaps: readonly { afterIndex: number; beforeIndex: number; durationUs: number }[]): string | undefined {

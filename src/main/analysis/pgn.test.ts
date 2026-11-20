@@ -247,5 +247,46 @@ describe('parsePgn failures', () => {
     assert.equal(impossible.ok, false);
     assert.equal(joined.ok, false);
     assert.equal(setup.ok, false);
+    const unknown = parsePgn(
+      '[White "Ada"]\n[Black "Nim"]\n[Result "1-0"]\n[EndDate "????.??.??"]\n[EndTime "??:??:??"]\n\n1. e4 1-0\n',
+      0,
+    );
+    const partial = parsePgn(
+      '[White "Ada"]\n[Black "Nim"]\n[Result "1-0"]\n[EndDate "2024.??.01"]\n[EndTime "12:00:00"]\n\n1. e4 1-0\n',
+      0,
+    );
+    assert.equal(unknown.ok, true);
+    if (!unknown.ok) return;
+    assert.equal(unknown.game.endTimeEpochMs, undefined);
+    assert.equal(partial.ok, false);
+    const dateOnly = parsePgn(
+      '[White "Ada"]\n[Black "Nim"]\n[Result "1-0"]\n[EndDate "2024.02.28"]\n\n1. e4 1-0\n',
+      0,
+    );
+    const timeOnly = parsePgn(
+      '[White "Ada"]\n[Black "Nim"]\n[Result "1-0"]\n[EndTime "12:00:00"]\n\n1. e4 1-0\n',
+      0,
+    );
+    assert.equal(dateOnly.ok, true);
+    if (!dateOnly.ok) return;
+    assert.equal(dateOnly.game.endTimeEpochMs, undefined);
+    assert.equal(timeOnly.ok, false);
+  });
+
+  it('classifies a resignation even when the winner name contains abort', () => {
+    const resigned = parsePgn(
+      '[White "AbortMission"]\n[Black "Nim"]\n[Result "1-0"]\n[Termination "AbortMission won by resignation"]\n\n1. e4 1-0\n',
+      0,
+    );
+    const aborted = parsePgn(
+      '[White "Ada"]\n[Black "Nim"]\n[Result "*"]\n[Termination "Game aborted"]\n\n*\n',
+      0,
+    );
+    assert.equal(resigned.ok, true);
+    if (!resigned.ok) return;
+    assert.equal(resigned.game.ending, 'resignation');
+    assert.equal(aborted.ok, true);
+    if (!aborted.ok) return;
+    assert.equal(aborted.game.ending, 'aborted');
   });
 });

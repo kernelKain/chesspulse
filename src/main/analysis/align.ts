@@ -151,6 +151,29 @@ function placementMode(games: readonly PgnGame[]): 'endtime' | 'starttime' | 'in
   return 'mixed';
 }
 
+function unplayedTimeoutUs(game: PgnGame): number | null {
+  if (game.ending !== 'timeout') return 0;
+  if (game.moves.length === 0) return null;
+  const flaggerStarts = game.moves.length % 2 === 1 ? 1 : 0;
+  let clockSec: number | undefined;
+  for (let index = flaggerStarts; index < game.moves.length; index += 2) {
+    const clock = game.moves[index]?.clockSec;
+    if (clock !== undefined) clockSec = clock;
+  }
+  if (clockSec === undefined) clockSec = baseSec(game.timeControl) ?? undefined;
+  if (clockSec === undefined) return null;
+  return Math.round(clockSec * 1_000_000);
+}
+
+function baseSec(timeControl: string | undefined): number | null {
+  if (timeControl === undefined) return null;
+  const increment = /^(\d+)\+(\d+)$/.exec(timeControl);
+  if (increment?.[1]) return Number(increment[1]);
+  const sudden = /^(\d+)$/.exec(timeControl);
+  if (sudden?.[1]) return Number(sudden[1]);
+  return null;
+}
+
 function durationUs(game: PgnGame): number | 'missing' | 'negative' {
   if (game.moves.length === 0) return 0;
   const thinks = thinkTimeSec(game);
@@ -171,15 +194,19 @@ function place(
 ): { ok: true; games: AlignedGame[]; banner?: string } | { ok: false; banner: string } {
   if (mode === 'endtime') {
     return stamp(games, durations, (game, duration) => {
-      const endUs = monoUsFromEpochMs(clock, game.endTimeEpochMs ?? 0);
-      return { startUs: endUs - duration, endUs, toleranceSec: ENDTIME_TOLERANCE_SEC };
-    }, 'endtime');
+      const flagUs = monoUsFromEpochMs(clock, game.endTimeEpochMs ?? 0);
+      const unplayed = unplayedTimeoutUs(game);
+      if (unplayed === null) {
+        return { startUs: flagUs - duration, endUs: flagUs, toleranceSec: STARTTIME_TOLERANCE_SEC };
+      }
+      return { startUs: flagUs - duration - unplayed, endUs: flagUs, toleranceSec: ENDTIME_TOLERANCE_SEC };
+    }, 'endtime', clock);
   }
   if (mode === 'starttime') {
     const stamped = stamp(games, durations, (game, duration) => {
       const startUs = monoUsFromEpochMs(clock, game.startTimeEpochMs ?? 0);
       return { startUs, endUs: startUs + duration, toleranceSec: STARTTIME_TOLERANCE_SEC };
-    }, 'starttime');
+    }, 'starttime', clock);
     if (!stamped.ok) return stamped;
     return { ok: true, games: stamped.games, banner: STARTTIME_BANNER };
   }
@@ -202,7 +229,7 @@ function place(
     ...game,
     alignment: { mode: 'inferred' as const, toleranceSec: slackSec },
   }));
-  const checked = rejectOutside(withTolerance);
+  const checked = rejectOutside(withTolerance, clock);
   if (!checked.ok) return checked;
   return {
     ok: true,
@@ -216,12 +243,13 @@ function stamp(
   durations: readonly number[],
   at: (game: PgnGame, duration: number) => { startUs: number; endUs: number; toleranceSec: number },
   mode: 'endtime' | 'starttime',
+  clock: SessionClock,
 ): { ok: true; games: AlignedGame[] } | { ok: false; banner: string } {
   const placed = games.map((game, index) => {
     const span = at(game, durations[index] ?? 0);
     return aligned(game, span.startUs, span.endUs, mode, span.toleranceSec);
   });
-  return rejectOutside(placed);
+  return rejectOutside(placed, clock);
 }
 
 function aligned(
@@ -236,8 +264,16 @@ function aligned(
 
 function rejectOutside(
   games: readonly AlignedGame[],
+  clock: SessionClock,
 ): { ok: true; games: AlignedGame[] } | { ok: false; banner: string } {
-  const outside = games.some((game) => game.startUs < 0 || game.endUs < game.startUs);
+  const recordedStart = clock.startAnchor.monoUs;
+  const recordedStop = clock.stopAnchor?.monoUs;
+  const outside = games.some((game) => {
+    if (game.endUs < game.startUs) return true;
+    if (game.startUs < recordedStart || game.endUs < recordedStart) return true;
+    if (recordedStop !== undefined && (game.startUs > recordedStop || game.endUs > recordedStop)) return true;
+    return false;
+  });
   if (outside) {
     return { ok: false, banner: 'A game time falls outside the session clock, so it was not placed.' };
   }
@@ -275,7 +311,11 @@ function betweenGameGaps(games: readonly AlignedGame[]): BetweenGameGap[] {
 function traceGapsFor(game: AlignedGame, samples: readonly PulseSample[]): TraceGap[] {
   if (game.endUs <= game.startUs) return [];
   const ordered = samples
-    .filter((sample) => sample.tUs >= game.startUs && sample.tUs <= game.endUs && usable(sample))
+    .filter((sample) => {
+      if (!usable(sample) || sample.tUs > game.endUs) return false;
+      if (sample.tUs >= game.startUs) return true;
+      return sample.tUs + SAMPLE_HOLD_US > game.startUs;
+    })
     .sort((left, right) => left.tUs - right.tUs);
   const gaps: TraceGap[] = [];
   let cursor = game.startUs;
