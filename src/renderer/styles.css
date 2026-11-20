@@ -3,6 +3,12 @@
   background: #0e1012;
   font-family: ui-sans-serif, system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
+  --bg: #0e1012;
+  --surface: #161a1d;
+  --line: #262c31;
+  --text: #e9e7e3;
+  --muted: #98a0a6;
+  --warn: #c9a227;
 }
 
 body {
@@ -12,6 +18,7 @@ body {
 main {
   min-height: 100vh;
   box-sizing: border-box;
+  max-width: 960px;
   padding: 48px;
 }
 
@@ -31,7 +38,117 @@ h1 {
 
 p {
   margin: 0;
-  color: #98a0a6;
+  color: var(--muted);
   max-width: 36rem;
   line-height: 1.5;
+}
+
+button {
+  margin: 0;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+
+button[aria-pressed='true'] {
+  border-color: var(--text);
+}
+
+button:disabled {
+  color: var(--muted);
+}
+
+button:focus-visible,
+.strip:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.indicator {
+  display: inline-block;
+  margin: 0 0 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--text);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.strip {
+  margin-top: 32px;
+  color: var(--text);
+}
+
+.strip svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.strip .axis {
+  stroke: var(--line);
+}
+
+.strip .empty {
+  fill: var(--muted);
+  font-size: 14px;
+}
+
+.strip polyline {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.strip circle {
+  fill: currentColor;
+}
+
+.readout {
+  margin: 12px 0 0;
+  color: var(--text);
+  font-family: ui-monospace, monospace;
+  font-size: 40px;
+  line-height: 1;
+}
+
+.unit {
+  margin-top: 4px;
+}
+
+.hint,
+.live {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.choices,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+@media (max-width: 699px) {
+  main {
+    padding: 16px;
+  }
+
+  h1 {
+    font-size: 28px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none;
+  }
 }

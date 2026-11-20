@@ -50,7 +50,8 @@ export const sessionMetaSchema = z
       })
       .strict()
       .optional(),
-    stopReason: stopReasonSchema,
+    // Absent while the session is still open. A crash must not look like a chosen stop.
+    stopReason: stopReasonSchema.optional(),
   })
   .strict();
 
@@ -132,6 +133,8 @@ export const sessionStartResultSchema = z
   })
   .strict();
 
+export const sessionStopRequestSchema = z.object({}).strict();
+
 export const sampleBatchSchema = z.array(pulseSampleSchema);
 
 export const validationMessageSchema = z
@@ -175,6 +178,20 @@ export const insightDisabledSchema = z
   .object({
     disabled: z.literal(true),
     reason: z.string().min(1),
+  })
+  .strict();
+
+/** Main-process consent. The page cannot open the camera by omitting this. */
+export const consentRequestSchema = z
+  .object({
+    granted: z.boolean(),
+  })
+  .strict();
+
+export const consentStateSchema = z
+  .object({
+    granted: z.boolean(),
+    cameraAllowed: z.boolean(),
   })
   .strict();
 

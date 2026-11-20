@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  consentRequestSchema,
   pulseSampleSchema,
   refusalSchema,
   reportBuildRequestSchema,
@@ -36,6 +37,13 @@ describe('refusalSchema', () => {
       reason: 'low_coverage',
       remedy: 'Record a longer session.',
     });
+    assert.equal(parsed.success, false);
+  });
+});
+
+describe('consentRequestSchema', () => {
+  it('rejects a consent payload that adds a field', () => {
+    const parsed = consentRequestSchema.safeParse({ granted: true, video: true });
     assert.equal(parsed.success, false);
   });
 });
