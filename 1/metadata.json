@@ -1,0 +1,42 @@
+{
+  "cli_version": "0.12.3-nightly.202610310614.54b6a5cac",
+  "checkpoint_id": "01M7XAB606DG8HTH22EDXQTSV6",
+  "session_id": "d6b1b35a-f091-4e0d-877b-6701b713d9fa",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-20T20:28:39.487302123Z",
+  "branch": "report",
+  "checkpoints_count": 1,
+  "save_step_count": 1,
+  "files_touched": [
+    "package.json",
+    "src/shared/contracts.ts"
+  ],
+  "agent": "Cursor",
+  "model": "grok-4.7-high-fast",
+  "turn_id": "ebd37ea72fa6",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 4785,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 424704,
+    "output_tokens": 1228,
+    "api_call_count": 1
+  },
+  "redaction": {
+    "replacements": 0,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 0,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 1
+  }
+}
