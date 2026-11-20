@@ -3,6 +3,7 @@
 // Removed: the renderer would have no desktop process to attach to.
 import path from 'node:path';
 import { app, BrowserWindow, session } from 'electron';
+import { allowsNavigation } from './navigation.js';
 
 function rendererTarget(): string {
   const devUrl = process.env.CHESSPULSE_RENDERER_URL;
@@ -27,9 +28,7 @@ function createWindow(): void {
 
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event, url) => {
-    const devUrl = process.env.CHESSPULSE_RENDERER_URL;
-    if (devUrl && url.startsWith(devUrl)) return;
-    if (url.startsWith('file:')) return;
+    if (allowsNavigation(url, process.env.CHESSPULSE_RENDERER_URL)) return;
     event.preventDefault();
   });
   win.webContents.on('did-finish-load', () => {
