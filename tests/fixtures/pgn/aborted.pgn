@@ -1,0 +1,9 @@
+[Event "Live Chess"]
+[Site "Chess.com"]
+[White "Ada"]
+[Black "Nim"]
+[Result "*"]
+[TimeControl "180+2"]
+[Termination "Game aborted"]
+
+*

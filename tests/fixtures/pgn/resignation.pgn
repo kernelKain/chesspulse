@@ -1,0 +1,13 @@
+[Event "Live Chess"]
+[Site "Chess.com"]
+[White "Ada"]
+[Black "Nim"]
+[Result "0-1"]
+[TimeControl "180+2"]
+[Termination "Nim won by resignation"]
+[UTCDate "2026.11.20"]
+[UTCTime "12:00:00"]
+[EndDate "2026.11.20"]
+[EndTime "12:06:00"]
+
+1. e4 {[%clk 0:02:59]} e5 {[%clk 0:02:58]} 2. Nf3 {[%clk 0:02:58]} Nc6 {[%clk 0:02:56]} 0-1

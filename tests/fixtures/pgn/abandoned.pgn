@@ -1,0 +1,11 @@
+[Event "Live Chess"]
+[Site "Chess.com"]
+[White "Ada"]
+[Black "Nim"]
+[Result "*"]
+[TimeControl "600"]
+[Termination "Game abandoned"]
+[EndDate "2026.11.20"]
+[EndTime "12:30:00"]
+
+1. d4 {[%clk 0:09:58]} d5 {[%clk 0:09:57]} *
