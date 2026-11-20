@@ -1,0 +1,9 @@
+Create and check out a new branch for the current changes.
+- Use the configured branch name prefix "cursor/" (for example, "cursor/short-description").
+- Current branch: main.
+- Base branch: main.
+- Give the branch a short, informative name based on the work.
+- Do not stage, commit, or push; leave the working tree exactly as it is.
+<timestamp>Friday, Nov 20, 2026, 6:35 PM (UTC+5:30)</timestamp>
+
+Execute the selected diff-tab create-branch action.
