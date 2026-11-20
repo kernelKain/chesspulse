@@ -8,6 +8,7 @@
   --line: #262c31;
   --text: #e9e7e3;
   --muted: #98a0a6;
+  --accent: #e0663a;
   --ok: #6f8f7b;
   --warn: #c9a227;
 }
@@ -65,7 +66,8 @@ button:disabled {
 
 button:focus-visible,
 textarea:focus-visible,
-.strip:focus-visible {
+.strip:focus-visible,
+.timeline-frame:focus-visible {
   outline: 2px solid var(--text);
   outline-offset: 2px;
 }
@@ -258,6 +260,252 @@ textarea {
   color: var(--warn);
   font-size: 14px;
   max-width: none;
+}
+
+.timeline {
+  margin-top: 24px;
+}
+
+.timeline-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+
+.timeline-title {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.timeline-confidence {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.timeline-confidence.tone-warn {
+  color: var(--warn);
+}
+
+.timeline-banner {
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.timeline-frame {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px;
+}
+
+.timeline-frame svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.game-band-even {
+  fill: rgba(255, 255, 255, 0.025);
+}
+
+.game-band-odd {
+  fill: rgba(0, 0, 0, 0.14);
+}
+
+.game-band-label {
+  fill: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.elevated-hatch-line {
+  stroke: var(--accent);
+  stroke-opacity: 0.22;
+  stroke-width: 1;
+}
+
+.threshold-line {
+  stroke: var(--accent);
+  stroke-opacity: 0.7;
+  stroke-dasharray: 4 4;
+  stroke-width: 1;
+}
+
+.threshold-label {
+  fill: var(--text);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.baseline-line {
+  stroke: var(--muted);
+  stroke-dasharray: 4 4;
+  stroke-width: 1;
+}
+
+.baseline-label {
+  fill: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.grid-line,
+.rail-sep,
+.axis-line,
+.axis-tick-mark {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.y-tick,
+.rail-label,
+.axis-tick {
+  fill: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.empty-caption {
+  fill: var(--muted);
+  font-size: 14px;
+}
+
+.ending-stem {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.ending-mark text {
+  fill: var(--text);
+  font-size: 12px;
+}
+
+.ending-word {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.think-dot {
+  fill: var(--muted);
+  fill-opacity: 0.65;
+}
+
+.cpl-tick {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+
+.cpl-tick.cpl-blunder {
+  stroke: var(--text);
+  stroke-width: 2;
+}
+
+.cpl-blunder-cap {
+  fill: var(--text);
+}
+
+.cpl-unscored {
+  fill: var(--line);
+}
+
+.pulse-line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.pulse-line.pulse-settled {
+  stroke: var(--text);
+  stroke-width: 1.75;
+}
+
+.pulse-line.pulse-elevated {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.pulse-line.pulse-desaturated {
+  stroke: var(--muted);
+  stroke-opacity: 0.65;
+  stroke-width: 1.5;
+}
+
+.pulse-dot.pulse-settled {
+  fill: var(--text);
+}
+
+.pulse-dot.pulse-elevated {
+  fill: var(--accent);
+}
+
+.pulse-dot.pulse-desaturated {
+  fill: var(--muted);
+  fill-opacity: 0.65;
+}
+
+.pulse-weak {
+  fill: var(--bg);
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.timeline-cursor line {
+  stroke: var(--text);
+  stroke-opacity: 0.45;
+  stroke-dasharray: 2 2;
+  stroke-width: 1;
+}
+
+.timeline-cursor circle {
+  fill: var(--text);
+}
+
+.timeline-readout {
+  margin-top: 10px;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  max-width: none;
+}
+
+.refusal-panel {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.refusal-panel h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 560;
+  color: var(--text);
+}
+
+.refusal-metric {
+  margin-bottom: 8px;
+  color: var(--warn);
+  font-family: ui-monospace, monospace;
+  font-size: 14px;
+}
+
+@media (max-width: 1099px) {
+  .ending-word {
+    display: none;
+  }
 }
 
 .indicator {

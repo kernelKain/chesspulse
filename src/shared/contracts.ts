@@ -102,6 +102,15 @@ export const alignedGameSchema = z
   })
   .strict();
 
+export const lowCoverageTraceSchema = z
+  .object({
+    startUs: monoUsSchema,
+    stopUs: monoUsSchema,
+    baselineBpm: z.number().finite().optional(),
+    samples: z.array(pulseSampleSchema),
+  })
+  .strict();
+
 export const refusalSchema = z
   .object({
     ok: z.literal(false),
@@ -109,6 +118,45 @@ export const refusalSchema = z
     measured: z.number().finite().optional(),
     threshold: z.number().finite().optional(),
     remedy: z.string().min(1),
+    trace: lowCoverageTraceSchema.optional(),
+  })
+  .strict();
+
+export const timelineGameSchema = z
+  .object({
+    index: z.number().int().nonnegative(),
+    white: z.string(),
+    black: z.string(),
+    result: z.string(),
+    ending: endingSchema,
+    includeInStats: z.boolean(),
+    startUs: monoUsSchema,
+    endUs: monoUsSchema,
+  })
+  .strict();
+
+export const timelineMoveSchema = z
+  .object({
+    gameIndex: z.number().int().nonnegative(),
+    moveIndex: z.number().int().nonnegative(),
+    san: z.string().min(1),
+    tUs: monoUsSchema.nullable(),
+    cpl: z.number().finite().nonnegative().nullable(),
+    thinkSec: z.number().finite().nonnegative().nullable(),
+    blunder: z.boolean(),
+    band: z.enum(['settled', 'elevated']).nullable(),
+  })
+  .strict();
+
+export const timelineDataSchema = z
+  .object({
+    startUs: monoUsSchema,
+    stopUs: monoUsSchema,
+    baselineBpm: z.number().finite(),
+    elevatedThresholdBpm: z.number().finite(),
+    samples: z.array(pulseSampleSchema),
+    games: z.array(timelineGameSchema),
+    moves: z.array(timelineMoveSchema),
   })
   .strict();
 
@@ -143,8 +191,11 @@ export const reportSchema = z
     alignmentMode: alignmentModeSchema,
     toleranceSec: z.number().finite().nonnegative(),
     banner: z.string().min(1).optional(),
+    timeline: timelineDataSchema,
   })
   .strict();
+
+export const reportResultSchema = z.discriminatedUnion('ok', [reportSchema, refusalSchema]);
 
 export const aiProviderSchema = z.enum([
   'openai',
@@ -319,8 +370,13 @@ export type SessionAnchor = z.infer<typeof sessionAnchorSchema>;
 export type SessionMeta = z.infer<typeof sessionMetaSchema>;
 export type PgnGame = z.infer<typeof pgnGameSchema>;
 export type AlignedGame = z.infer<typeof alignedGameSchema>;
+export type LowCoverageTrace = z.infer<typeof lowCoverageTraceSchema>;
 export type Refusal = z.infer<typeof refusalSchema>;
+export type TimelineGame = z.infer<typeof timelineGameSchema>;
+export type TimelineMove = z.infer<typeof timelineMoveSchema>;
+export type TimelineData = z.infer<typeof timelineDataSchema>;
 export type Report = z.infer<typeof reportSchema>;
+export type ReportResult = z.infer<typeof reportResultSchema>;
 export type PasteGameSummary = z.infer<typeof pasteGameSummarySchema>;
 export type PasteSlot = z.infer<typeof pasteSlotSchema>;
 export type PasteState = z.infer<typeof pasteStateSchema>;

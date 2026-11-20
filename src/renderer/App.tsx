@@ -1,17 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  reportResultSchema,
   sampleBatchSchema,
   type PasteValidation,
   type PulseSample,
+  type ReportResult,
   type SessionMeta,
 } from '../shared/contracts';
 import { CONFIDENCE_FLOOR } from '../shared/sensing';
 import { PasteScreen } from './PasteScreen';
 import { SensingStrip } from './SensingStrip';
+import { Timeline } from './Timeline';
 
 const TIME_CONTROLS = ['1+0', '3+2', '10+0'] as const;
 
-type Phase = 'idle' | 'sensing' | 'stopped' | 'paste';
+type Phase = 'idle' | 'sensing' | 'stopped' | 'paste' | 'report';
 
 export function App() {
   const [granted, setGranted] = useState(false);
@@ -19,6 +22,9 @@ export function App() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [pasteSlots, setPasteSlots] = useState<string[]>([]);
+  const [reportResult, setReportResult] = useState<ReportResult | null>(null);
+  const [reportBuilding, setReportBuilding] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [samples, setSamples] = useState<PulseSample[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [note, setNote] = useState('The camera stays off until you consent.');
@@ -27,6 +33,7 @@ export function App() {
   const grantedNow = useRef(false);
   const startPending = useRef(false);
   const revokedDuringStart = useRef(false);
+  const reportRequestSeq = useRef(0);
 
   useEffect(() => {
     if (!bridge) return undefined;
@@ -94,8 +101,12 @@ export function App() {
         }
         return;
       }
+      reportRequestSeq.current += 1;
       setError(null);
       setPasteSlots([]);
+      setReportResult(null);
+      setReportBuilding(false);
+      setReportError(null);
       setSamples([]);
       setSelectedIndex(null);
       setPhase('sensing');
@@ -122,11 +133,32 @@ export function App() {
     }
   }
 
-  function onPasteContinue(pgns: string[], validation: PasteValidation): void {
+  async function onPasteContinue(pgns: string[], _validation: PasteValidation): Promise<void> {
+    const seq = ++reportRequestSeq.current;
     setPasteSlots(pgns);
-    setPhase('stopped');
-    const count = `${validation.summary.total} ${validation.summary.total === 1 ? 'game' : 'games'}`;
-    setNote(`${count} validated and ready for the report view.`);
+    setReportError(null);
+    setReportResult(null);
+    setPhase('report');
+    if (!bridge || !sessionId) {
+      setReportError('No stored session is available for this report.');
+      return;
+    }
+    setReportBuilding(true);
+    try {
+      const raw = await bridge.buildReport(sessionId, pgns);
+      if (seq !== reportRequestSeq.current) return;
+      const parsed = reportResultSchema.safeParse(raw);
+      if (!parsed.success) {
+        setReportError('The report returned an unexpected shape.');
+        return;
+      }
+      setReportResult(parsed.data);
+    } catch (caught: unknown) {
+      if (seq !== reportRequestSeq.current) return;
+      setReportError(caught instanceof Error ? caught.message : 'The report could not be built.');
+    } finally {
+      if (seq === reportRequestSeq.current) setReportBuilding(false);
+    }
   }
 
   if (phase === 'paste') {
@@ -139,8 +171,44 @@ export function App() {
             setPasteSlots(currentSlots);
             setPhase('stopped');
           }}
-          onContinue={onPasteContinue}
+          onContinue={(pgns, validation) => {
+            void onPasteContinue(pgns, validation);
+          }}
         />
+      </main>
+    );
+  }
+
+  if (phase === 'report') {
+    return (
+      <main>
+        <p className="label">ChessPulse · Report</p>
+        <h1>
+          {reportBuilding
+            ? 'Building report.'
+            : reportError
+              ? 'Report unavailable.'
+              : reportResult && !reportResult.ok
+                ? 'Review withheld.'
+                : 'Session timeline.'}
+        </h1>
+        {reportBuilding ? (
+          <p aria-live="polite">Scoring positions locally with Stockfish…</p>
+        ) : reportError ? (
+          <div className="refusal-panel" role="alert">
+            <p>{reportError}</p>
+          </div>
+        ) : (
+          <Timeline key={reportResult ? `${reportResult.ok}-${sessionId ?? ''}` : 'empty'} result={reportResult} />
+        )}
+        <div className="actions">
+          <button type="button" onClick={() => setPhase('paste')}>
+            Edit pasted PGNs
+          </button>
+          <button type="button" onClick={() => setPhase('stopped')}>
+            Back to session
+          </button>
+        </div>
       </main>
     );
   }
