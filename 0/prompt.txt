@@ -1,0 +1,1 @@
+stop genearting step learning notes for all further steps, also genrate env and env exaple file so that i can put my api keys in there
