@@ -8,6 +8,7 @@
   --line: #262c31;
   --text: #e9e7e3;
   --muted: #98a0a6;
+  --ok: #6f8f7b;
   --warn: #c9a227;
 }
 
@@ -63,9 +64,200 @@ button:disabled {
 }
 
 button:focus-visible,
+textarea:focus-visible,
 .strip:focus-visible {
   outline: 2px solid var(--text);
   outline-offset: 2px;
+}
+
+.primary-btn {
+  border-color: var(--text);
+}
+
+.primary-btn:disabled {
+  border-color: var(--line);
+}
+
+.small-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.paste-banner {
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.paste-banner.tone-ok {
+  border-color: var(--ok);
+}
+
+.paste-banner.tone-warn {
+  border-color: var(--warn);
+}
+
+.banner-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.state-tag,
+.slot-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.state-tag.tone-ok,
+.slot-badge.tone-ok {
+  border-color: var(--ok);
+  color: var(--text);
+}
+
+.state-tag.tone-ok svg,
+.slot-badge.tone-ok svg {
+  color: var(--ok);
+}
+
+.state-tag.tone-warn,
+.slot-badge.tone-warn {
+  border-color: var(--warn);
+  color: var(--text);
+}
+
+.banner-counts {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.banner-message {
+  color: var(--text);
+  max-width: none;
+}
+
+.banner-sub {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 14px;
+  max-width: none;
+}
+
+.slot-list {
+  list-style: none;
+  margin: 24px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.paste-slot {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.paste-slot.status-valid {
+  border-color: var(--ok);
+}
+
+.paste-slot.status-invalid,
+.paste-slot.status-order_error {
+  border-color: var(--warn);
+}
+
+.slot-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.slot-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.slot-title label {
+  font-size: 16px;
+  font-weight: 560;
+  color: var(--text);
+}
+
+.slot-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.slot-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.meta-players {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.meta-detail {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.meta-excluded {
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.slot-error {
+  margin-top: 8px;
+  color: var(--warn);
+  font-size: 14px;
+  max-width: none;
 }
 
 .indicator {

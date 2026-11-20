@@ -1,16 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
-import { sampleBatchSchema, type PulseSample, type SessionMeta } from '../shared/contracts';
+import {
+  sampleBatchSchema,
+  type PasteValidation,
+  type PulseSample,
+  type SessionMeta,
+} from '../shared/contracts';
 import { CONFIDENCE_FLOOR } from '../shared/sensing';
+import { PasteScreen } from './PasteScreen';
 import { SensingStrip } from './SensingStrip';
 
 const TIME_CONTROLS = ['1+0', '3+2', '10+0'] as const;
 
-type Phase = 'idle' | 'sensing' | 'stopped';
+type Phase = 'idle' | 'sensing' | 'stopped' | 'paste';
 
 export function App() {
   const [granted, setGranted] = useState(false);
   const [timeControl, setTimeControl] = useState<(typeof TIME_CONTROLS)[number]>('3+2');
   const [phase, setPhase] = useState<Phase>('idle');
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [pasteSlots, setPasteSlots] = useState<string[]>([]);
   const [samples, setSamples] = useState<PulseSample[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [note, setNote] = useState('The camera stays off until you consent.');
@@ -42,6 +50,7 @@ export function App() {
     if (phase === 'sensing' || (revoking && startPending.current)) {
       try {
         const meta = await bridge.stopSession();
+        setSessionId(meta.id);
         setError(null);
         setPhase('stopped');
         setNote(stoppedNote(meta));
@@ -72,10 +81,12 @@ export function App() {
     revokedDuringStart.current = false;
     startPending.current = true;
     try {
-      await bridge.startSession(timeControl);
+      const started = await bridge.startSession(timeControl);
+      setSessionId(started.sessionId);
       if (revokedDuringStart.current || !grantedNow.current) {
         try {
           const meta = await bridge.stopSession();
+          setSessionId(meta.id);
           setPhase('stopped');
           setNote(stoppedNote(meta));
         } catch {
@@ -84,6 +95,7 @@ export function App() {
         return;
       }
       setError(null);
+      setPasteSlots([]);
       setSamples([]);
       setSelectedIndex(null);
       setPhase('sensing');
@@ -101,12 +113,36 @@ export function App() {
     if (!bridge || phase !== 'sensing') return;
     try {
       const meta = await bridge.stopSession();
+      setSessionId(meta.id);
       setError(null);
       setPhase('stopped');
       setNote(stoppedNote(meta));
     } catch {
       setError('The session could not be stopped.');
     }
+  }
+
+  function onPasteContinue(pgns: string[], validation: PasteValidation): void {
+    setPasteSlots(pgns);
+    setPhase('stopped');
+    const count = `${validation.summary.total} ${validation.summary.total === 1 ? 'game' : 'games'}`;
+    setNote(`${count} validated and ready for the report view.`);
+  }
+
+  if (phase === 'paste') {
+    return (
+      <main>
+        <PasteScreen
+          sessionId={sessionId}
+          initialSlots={pasteSlots.length > 0 ? pasteSlots : undefined}
+          onBack={(currentSlots) => {
+            setPasteSlots(currentSlots);
+            setPhase('stopped');
+          }}
+          onContinue={onPasteContinue}
+        />
+      </main>
+    );
   }
 
   return (
@@ -131,6 +167,11 @@ export function App() {
         </div>
       ) : null}
       <div className="actions">
+        {phase === 'stopped' ? (
+          <button type="button" className="primary-btn" onClick={() => setPhase('paste')}>
+            Paste PGNs
+          </button>
+        ) : null}
         {phase === 'sensing' ? (
           <button type="button" onClick={() => void onStop()}>
             Stop sensing

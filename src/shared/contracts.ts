@@ -229,6 +229,91 @@ export const consentStateSchema = z
   })
   .strict();
 
+const IPC_PASTE_BYTE_LIMIT = 4_000_000;
+
+export const pgnValidateRequestSchema = z
+  .object({
+    slots: z.array(z.string()).max(25),
+  })
+  .strict()
+  .refine(
+    (value) => new TextEncoder().encode(value.slots.join('\n')).length <= IPC_PASTE_BYTE_LIMIT,
+    { message: 'PGN paste exceeds the IPC size limit.' },
+  );
+
+const pasteGameSummarySchema = z
+  .object({
+    white: z.string(),
+    black: z.string(),
+    result: z.string(),
+    ending: endingSchema,
+    moveCount: z.number().int().nonnegative(),
+    hasClocks: z.boolean(),
+    partialClocks: z.boolean(),
+    includeInStats: z.boolean(),
+    timeControl: z.string().optional(),
+  })
+  .strict();
+
+export const pasteSlotSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      slotIndex: z.number().int().nonnegative(),
+      status: z.literal('empty'),
+    })
+    .strict(),
+  z
+    .object({
+      slotIndex: z.number().int().nonnegative(),
+      status: z.literal('valid'),
+      game: pasteGameSummarySchema,
+    })
+    .strict(),
+  z
+    .object({
+      slotIndex: z.number().int().nonnegative(),
+      status: z.literal('order_error'),
+      game: pasteGameSummarySchema,
+      message: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      slotIndex: z.number().int().nonnegative(),
+      status: z.literal('invalid'),
+      message: z.string().min(1),
+    })
+    .strict(),
+]);
+
+export const pasteStateSchema = z.enum([
+  'empty',
+  'partial',
+  'out_of_order',
+  'clockless',
+  'valid',
+  'invalid',
+]);
+
+export const pasteValidationSchema = z
+  .object({
+    state: pasteStateSchema,
+    order: z.enum(['none', 'checked', 'unverified', 'invalid']),
+    clockless: z.boolean(),
+    canBuild: z.boolean(),
+    message: z.string().min(1),
+    summary: z
+      .object({
+        total: z.number().int().nonnegative(),
+        includedInStats: z.number().int().nonnegative(),
+        aborted: z.number().int().nonnegative(),
+        abandoned: z.number().int().nonnegative(),
+      })
+      .strict(),
+    slots: z.array(pasteSlotSchema),
+  })
+  .strict();
+
 export type PulseSample = z.infer<typeof pulseSampleSchema>;
 export type SessionAnchor = z.infer<typeof sessionAnchorSchema>;
 export type SessionMeta = z.infer<typeof sessionMetaSchema>;
@@ -236,3 +321,7 @@ export type PgnGame = z.infer<typeof pgnGameSchema>;
 export type AlignedGame = z.infer<typeof alignedGameSchema>;
 export type Refusal = z.infer<typeof refusalSchema>;
 export type Report = z.infer<typeof reportSchema>;
+export type PasteGameSummary = z.infer<typeof pasteGameSummarySchema>;
+export type PasteSlot = z.infer<typeof pasteSlotSchema>;
+export type PasteState = z.infer<typeof pasteStateSchema>;
+export type PasteValidation = z.infer<typeof pasteValidationSchema>;
