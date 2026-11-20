@@ -3,7 +3,55 @@
 // Removed: the renderer would have no desktop process to attach to.
 import path from 'node:path';
 import { app, BrowserWindow, session } from 'electron';
+import { contentSecurityPolicy } from '../shared/security.js';
 import { allowsNavigation } from './navigation.js';
+import { currentConsent, registerConsentHandler } from './consent.js';
+import { grantsMediaPermission } from './permission.js';
+
+function installSessionGuards(): void {
+  const devUrl = process.env.CHESSPULSE_RENDERER_URL;
+  const policy = contentSecurityPolicy();
+  const urls = ['file://*'];
+  if (devUrl) {
+    try {
+      urls.push(`${new URL(devUrl).origin}/*`);
+    } catch {
+      // Navigation already rejects a dev URL that is not a URL.
+    }
+  }
+
+  session.defaultSession.webRequest.onHeadersReceived({ urls }, (details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [policy],
+      },
+    });
+  });
+
+  session.defaultSession.setPermissionCheckHandler((_contents, permission, requestingOrigin, details) =>
+    grantsMediaPermission({
+      permission,
+      requestingUrl: details.requestingUrl ?? requestingOrigin,
+      consentGranted: currentConsent(),
+      isMainFrame: details.isMainFrame,
+      mediaType: details.mediaType,
+    }),
+  );
+
+  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) => {
+    const mediaTypes = 'mediaTypes' in details ? details.mediaTypes : undefined;
+    callback(
+      grantsMediaPermission({
+        permission,
+        requestingUrl: details.requestingUrl,
+        consentGranted: currentConsent(),
+        isMainFrame: details.isMainFrame,
+        mediaTypes,
+      }),
+    );
+  });
+}
 
 function rendererTarget(): string {
   const devUrl = process.env.CHESSPULSE_RENDERER_URL;
@@ -43,9 +91,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => {
-    callback(false);
-  });
+  installSessionGuards();
+  registerConsentHandler();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

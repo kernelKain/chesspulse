@@ -3,6 +3,11 @@
   background: #0e1012;
   font-family: ui-sans-serif, system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
+  --bg: #0e1012;
+  --surface: #161a1d;
+  --line: #262c31;
+  --text: #e9e7e3;
+  --muted: #98a0a6;
 }
 
 body {
@@ -31,7 +36,23 @@ h1 {
 
 p {
   margin: 0;
-  color: #98a0a6;
+  color: var(--muted);
   max-width: 36rem;
   line-height: 1.5;
+}
+
+button {
+  margin-top: 24px;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
 }

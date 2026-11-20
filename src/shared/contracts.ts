@@ -178,6 +178,20 @@ export const insightDisabledSchema = z
   })
   .strict();
 
+/** Main-process consent. The page cannot open the camera by omitting this. */
+export const consentRequestSchema = z
+  .object({
+    granted: z.boolean(),
+  })
+  .strict();
+
+export const consentStateSchema = z
+  .object({
+    granted: z.boolean(),
+    cameraAllowed: z.boolean(),
+  })
+  .strict();
+
 export type PulseSample = z.infer<typeof pulseSampleSchema>;
 export type SessionAnchor = z.infer<typeof sessionAnchorSchema>;
 export type SessionMeta = z.infer<typeof sessionMetaSchema>;
