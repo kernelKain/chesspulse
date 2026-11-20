@@ -1,7 +1,7 @@
 // What: turns pasted chess.com PGNs into games, clocks, endings, and think times.
 // Why: the report's order, timeline, and accuracy stats all start from this parse.
 // Removed: a missing clock would become a zero, and an aborted game would enter the stats.
-// Legality is not replayed here. chess.js is the approved checker and is not installed yet.
+// Legality is not replayed here. Move legality is checked when positions are built for the engine.
 import { pgnGameSchema, type PgnGame } from '../../shared/contracts.js';
 
 const MAX_GAMES = 20;

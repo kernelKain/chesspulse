@@ -79,7 +79,7 @@ Prompt 2 runs at A1 with commit mode ASK. Blueprint §4 records that decision.
 | Smallest coherent step | Each step is one meaningful outcome, verifiable in under a minute; otherwise split it. |
 | Explain before, not after | State approach and trade-off in 3–5 lines before a significant change. No 400-line diff followed by an explanation. |
 | No unexplained code | Every non-obvious file, function and dependency gets a short *what / why / what breaks if removed* note. |
-| Teach-back gate | Learning notes after each meaningful step. The four blueprint checkpoints are the explain-back gates. An unanswered checkpoint pauses the next phase. Minor edits are not blocked on a quiz. |
+| Teach-back gate | Do not send step learning notes in chat. Write what was done, why, the data flow, and the limitation into `docs/phases/phase-NN.md`. The blueprint checkpoints stay there for the user to read. They do not pause the chat. |
 | No hidden magic | No scaffolding generators, no configuration the user cannot justify in an interview. If a library does heavy lifting, name the specific thing it does. |
 | Ask, don't assume | One focused question beats building the wrong thing. Use reversible defaults for trivia only. |
 | Honesty about state | "Untested", "works on my machine" and "I could not verify this" are acceptable. Invented success is not. |
@@ -187,6 +187,8 @@ Prompt 2 does not start those drafts. **Never publish, post or submit.** The use
 6. **Docs updated** — which `docs/` files changed.
 7. **Next step** — what's next, and whether it needs approval.
 
+Do not append a step-learning-notes block. The user reads `docs/phases/` for that material. A short "what this means" stays in the report.
+
 Tight prose, structure over paragraphs. Assume intelligence, not familiarity with this SDK.
 
 ---
@@ -199,7 +201,7 @@ What crossed over, and what did not:
 | Adopted | Not adopted, and why |
 |---|---|
 | Phase-gated delivery with approval per phase | Its **product definition** (vitals web app, general-wellness positioning) — ChessPulse's approved packet governs. |
-| Teach-back gate; no unexplained code; explain before | Its **browser-only measurement architecture question** — already settled: the SDK has no browser build, so Electron/Node hosts it. |
+| Phase notes instead of chat learning notes; no unexplained code; explain before | Its **browser-only measurement architecture question** — already settled: the SDK has no browser build, so Electron/Node hosts it. |
 | `docs/` ignored; decisions log; Q&A file; phase notes | Its **prompt-compiler rules** (2048-byte cap, 15 s / 60 s buffers, pulse/HRV/breathing-only payloads) — those fit its insight feature, not ChessPulse's post-game narrative layer. |
 | Secrets only via env; `.env.example` committed | Its **OpenRouter** default — conflicts with packet amendments A1/A2 (five providers including OpenCode). The packet wins. |
 | TypeScript strict; validate boundaries; a11y as done | Its **frontend-first phase order** — conflicts with the packet's proof-first order (real session report before polish). The blueprint wins. |
