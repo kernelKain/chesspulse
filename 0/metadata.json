@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.12.3-nightly.202610310614.54b6a5cac",
+  "checkpoint_id": "01M7WXD6V96G021BDAMFK4B62E",
+  "session_id": "86f6e549-bc20-4b7b-bbbb-38f078ab32db",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-20T16:42:39.880367381Z",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "agent": "Cursor",
+  "model": "",
+  "checkpoint_transcript_start": 263,
+  "transcript_lines_at_start": 263,
+  "compact_transcript_start": 51,
+  "redaction": {
+    "replacements": 1,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 1,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
