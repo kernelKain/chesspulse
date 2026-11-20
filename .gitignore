@@ -1,0 +1,63 @@
+# ---------------------------------------------------------------------------
+# ChessPulse .gitignore
+#
+# docs/ is private working material: the product packet, the engineering
+# blueprint, decisions, phase notes, drafts, scripts and media.
+# Nothing in docs/ is tracked. Un-ignore single files deliberately when the
+# user chooses to publish one — never bulk-un-ignore the directory.
+# ---------------------------------------------------------------------------
+docs/
+
+# Vendor proof sample used to test Electron before the product scaffold exists.
+# It is not the app, and it must not be committed (native runtimes, possible local keys).
+spikes/
+
+# Secrets: never tracked. Only the empty template is committed.
+.env
+.env.*
+!.env.example
+
+# ---------------------------------------------------------------------------
+# Node / TypeScript build output
+# ---------------------------------------------------------------------------
+node_modules/
+dist/
+dist-electron/
+out/
+build/
+.vite/
+coverage/
+*.tsbuildinfo
+*.local
+
+# ---------------------------------------------------------------------------
+# Packaging artefacts (Electron builds, engine binaries fetched at install)
+# ---------------------------------------------------------------------------
+release/
+*.AppImage
+*.deb
+*.rpm
+*.snap
+*.exe
+*.dmg
+
+# ---------------------------------------------------------------------------
+# Logs and local captures (a captured session must never land in git).
+# PGN test fixtures under tests/fixtures/ are intentionally tracked so the
+# public parse suite can run; real captured sessions are not.
+# ---------------------------------------------------------------------------
+logs/
+*.log
+npm-debug.log*
+sessions/
+*.session.json
+
+# ---------------------------------------------------------------------------
+# Editor / OS noise
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp

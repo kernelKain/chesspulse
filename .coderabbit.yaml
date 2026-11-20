@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# What: review rules for the CodeRabbit GitHub app.
+# Why: review comments stay proposals and do not expand the product.
+# Removed: a pull request would be reviewed with CodeRabbit's defaults, including extra diagrams and repeated passes.
+language: en-US
+reviews:
+  profile: chill
+  high_level_summary: true
+  sequence_diagrams: false
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 2
+    base_branches:
+      - main
+  path_filters:
+    - "src/**"
+    - "scripts/**"
+    - "package.json"
+    - "package-lock.json"
+    - "tsconfig.json"
+    - "tsconfig.electron.json"
+    - "vite.config.mts"
+    - "!dist/**"
+    - "!dist-electron/**"
+  path_instructions:
+    - path: "**"
+      instructions: |
+        Comments are proposals. They are not scope changes and they are not test evidence.
+        Do not suggest hosted backends, accounts, cloud sync, or new product features.
+        Do not suggest medical or diagnostic claims.
+        Do not ask for secrets, API keys, or .env values.
+        This is a local-only Electron app. Flag defects, security issues, and contract mismatches.
+chat:
+  auto_reply: false
