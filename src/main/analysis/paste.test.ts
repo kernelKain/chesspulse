@@ -74,13 +74,14 @@ describe('validatePasteBatch', () => {
     assert.match(result.message, /Game 2 is missing EndTime/);
   });
 
-  it('marks clockless games with the blueprint notice', async () => {
+  it('marks clockless games honestly and blocks building without move clocks', async () => {
     const clocklessGame = stripClocks(await fixture('checkmate.pgn'));
     const result = validatePasteBatch([clocklessGame]);
     assert.equal(result.state, 'clockless');
     assert.equal(result.clockless, true);
     assert.equal(result.message, CLOCKLESS_MESSAGE);
-    assert.equal(result.canBuild, true);
+    assert.match(result.message, /accuracy by band are unavailable/);
+    assert.equal(result.canBuild, false);
     assert.equal(result.slots[0]?.status, 'valid');
     if (result.slots[0]?.status === 'valid') {
       assert.equal(result.slots[0].game.hasClocks, false);

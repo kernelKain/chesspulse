@@ -262,7 +262,7 @@ export function Timeline({ result }: { result: ReportResult | null }) {
         </>
       )}
 
-      {view.state === 'low_coverage' && view.refusal ? (
+      {view.refusal ? (
         <div className="refusal-panel" role="alert">
           <h2>No report for this session.</h2>
           {view.refusal.measured !== undefined && view.refusal.threshold !== undefined ? (

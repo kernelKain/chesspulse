@@ -344,11 +344,17 @@ export function timeTicks(startUs: number, stopUs: number): number[] {
           ? 300
           : 600;
   const stepUs = stepSec * 1_000_000;
+  const minEndGapUs = (stopUs - startUs) * 0.08;
   const ticks: number[] = [startUs];
   for (let t = startUs + stepUs; t < stopUs; t += stepUs) {
     ticks.push(t);
   }
-  if (ticks[ticks.length - 1] !== stopUs) ticks.push(stopUs);
+  if (ticks[ticks.length - 1] !== stopUs) {
+    if (ticks.length > 1 && stopUs - ticks[ticks.length - 1] < minEndGapUs) {
+      ticks.pop();
+    }
+    ticks.push(stopUs);
+  }
   return ticks;
 }
 

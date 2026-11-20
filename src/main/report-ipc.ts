@@ -9,12 +9,21 @@ import { defaultDataRoot } from './store.js';
 export const REPORT_BUILD_CHANNEL = 'cp:report:build';
 
 export function registerReportHandler(dataRoot: () => string = defaultDataRoot): void {
+  // Serialize builds so concurrent IPC calls do not race on report.json or spawn overlapping Stockfish workers.
+  let queue: Promise<unknown> = Promise.resolve();
   ipcMain.handle(REPORT_BUILD_CHANNEL, async (_event, payload: unknown) => {
     const parsed = reportBuildRequestSchema.safeParse(payload);
     if (!parsed.success) {
       throw new Error('Choose a valid session and up to 20 PGNs under 2 MB.');
     }
-    const result = await buildReport(dataRoot(), parsed.data.sessionId, parsed.data.pgns);
-    return reportResultSchema.parse(result);
+    const run = queue.then(async () => {
+      const result = await buildReport(dataRoot(), parsed.data.sessionId, parsed.data.pgns);
+      return reportResultSchema.parse(result);
+    });
+    queue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   });
 }

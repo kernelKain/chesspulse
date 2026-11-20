@@ -92,7 +92,15 @@ export function App() {
     startPending.current = true;
     try {
       const started = await bridge.startSession(timeControl);
+      reportRequestSeq.current += 1;
       setSessionId(started.sessionId);
+      setError(null);
+      setPasteSlots([]);
+      setReportResult(null);
+      setReportBuilding(false);
+      setReportError(null);
+      setSamples([]);
+      setSelectedIndex(null);
       if (revokedDuringStart.current || !grantedNow.current) {
         try {
           const meta = await bridge.stopSession();
@@ -104,14 +112,6 @@ export function App() {
         }
         return;
       }
-      reportRequestSeq.current += 1;
-      setError(null);
-      setPasteSlots([]);
-      setReportResult(null);
-      setReportBuilding(false);
-      setReportError(null);
-      setSamples([]);
-      setSelectedIndex(null);
       setPhase('sensing');
       setNote('Waiting for a face.');
     } catch {

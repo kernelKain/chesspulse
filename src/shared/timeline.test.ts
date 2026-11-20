@@ -15,6 +15,7 @@ import {
   splitPulseRuns,
   THINK_CAP_SEC,
   thinkTimeRatio,
+  timeTicks,
 } from './timeline.js';
 
 function sample(tSec: number, bpm: number, confidence = 80, stable = true): PulseSample {
@@ -236,5 +237,18 @@ describe('timeline helpers', () => {
       trace: { startUs: 0, stopUs: 10_000_000, samples: [sample(0, 70)] },
     });
     assert.deepEqual(buildGameMiniViews(refusalView), []);
+  });
+
+  it('omits a nearby interior time tick so the endpoint label does not overlap', () => {
+    const closeEnd = timeTicks(0, 905 * 1_000_000);
+    assert.deepEqual(
+      closeEnd.map((t) => t / 1_000_000),
+      [0, 300, 600, 905],
+    );
+    const spacedEnd = timeTicks(0, 1000 * 1_000_000);
+    assert.deepEqual(
+      spacedEnd.map((t) => t / 1_000_000),
+      [0, 300, 600, 900, 1000],
+    );
   });
 });

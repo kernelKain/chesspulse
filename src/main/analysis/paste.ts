@@ -13,7 +13,7 @@ import { parsePgn, parsePgnBatch } from './pgn.js';
 const MAX_GAMES = 20;
 const PASTE_BYTE_LIMIT = 2_000_000;
 export const CLOCKLESS_MESSAGE =
-  'These games have no clock data. Think time is unavailable; accuracy by band still works.';
+  'These games have no move clock data. Without clocks, moves cannot be placed on the pulse timeline, so think time and accuracy by band are unavailable.';
 
 interface FilledSlot {
   slotIndex: number;
@@ -169,7 +169,7 @@ export function validatePasteBatch(slots: readonly string[]): PasteValidation {
     state,
     order: batch.order,
     clockless,
-    canBuild: hasIncludedGame,
+    canBuild: hasIncludedGame && !clockless,
     message,
     summary: batch.summary,
     slots: slots.map((_text, slotIndex): PasteSlot => {
