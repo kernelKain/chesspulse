@@ -102,6 +102,15 @@ export const alignedGameSchema = z
   })
   .strict();
 
+export const lowCoverageTraceSchema = z
+  .object({
+    startUs: monoUsSchema,
+    stopUs: monoUsSchema,
+    baselineBpm: z.number().finite().optional(),
+    samples: z.array(pulseSampleSchema),
+  })
+  .strict();
+
 export const refusalSchema = z
   .object({
     ok: z.literal(false),
@@ -109,6 +118,60 @@ export const refusalSchema = z
     measured: z.number().finite().optional(),
     threshold: z.number().finite().optional(),
     remedy: z.string().min(1),
+    trace: lowCoverageTraceSchema.optional(),
+  })
+  .strict();
+
+export const timelineGameSchema = z
+  .object({
+    index: z.number().int().nonnegative(),
+    white: z.string(),
+    black: z.string(),
+    result: z.string(),
+    ending: endingSchema,
+    includeInStats: z.boolean(),
+    startUs: monoUsSchema,
+    endUs: monoUsSchema,
+  })
+  .strict();
+
+export const timelineMoveSchema = z
+  .object({
+    gameIndex: z.number().int().nonnegative(),
+    moveIndex: z.number().int().nonnegative(),
+    san: z.string().min(1),
+    tUs: monoUsSchema.nullable(),
+    cpl: z.number().finite().nonnegative().nullable(),
+    thinkSec: z.number().finite().nonnegative().nullable(),
+    blunder: z.boolean(),
+    band: z.enum(['settled', 'elevated']).nullable(),
+  })
+  .strict();
+
+export const timelineDataSchema = z
+  .object({
+    startUs: monoUsSchema,
+    stopUs: monoUsSchema,
+    baselineBpm: z.number().finite(),
+    elevatedThresholdBpm: z.number().finite(),
+    samples: z.array(pulseSampleSchema),
+    games: z.array(timelineGameSchema),
+    moves: z.array(timelineMoveSchema),
+  })
+  .strict();
+
+export const reportGameSchema = z
+  .object({
+    index: z.number().int().nonnegative(),
+    white: z.string(),
+    black: z.string(),
+    result: z.string(),
+    ending: endingSchema,
+    includeInStats: z.boolean(),
+    moveCount: z.number().int().nonnegative(),
+    blunders: z.number().int().nonnegative(),
+    aligned: z.boolean(),
+    timeControl: z.string().optional(),
   })
   .strict();
 
@@ -143,8 +206,12 @@ export const reportSchema = z
     alignmentMode: alignmentModeSchema,
     toleranceSec: z.number().finite().nonnegative(),
     banner: z.string().min(1).optional(),
+    games: z.array(reportGameSchema),
+    timeline: timelineDataSchema,
   })
   .strict();
+
+export const reportResultSchema = z.discriminatedUnion('ok', [reportSchema, refusalSchema]);
 
 export const aiProviderSchema = z.enum([
   'openai',
@@ -229,10 +296,105 @@ export const consentStateSchema = z
   })
   .strict();
 
+const IPC_PASTE_BYTE_LIMIT = 4_000_000;
+
+export const pgnValidateRequestSchema = z
+  .object({
+    slots: z.array(z.string()).max(25),
+  })
+  .strict()
+  .refine(
+    (value) => new TextEncoder().encode(value.slots.join('\n')).length <= IPC_PASTE_BYTE_LIMIT,
+    { message: 'PGN paste exceeds the IPC size limit.' },
+  );
+
+const pasteGameSummarySchema = z
+  .object({
+    white: z.string(),
+    black: z.string(),
+    result: z.string(),
+    ending: endingSchema,
+    moveCount: z.number().int().nonnegative(),
+    hasClocks: z.boolean(),
+    partialClocks: z.boolean(),
+    includeInStats: z.boolean(),
+    timeControl: z.string().optional(),
+  })
+  .strict();
+
+export const pasteSlotSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      slotIndex: z.number().int().nonnegative(),
+      status: z.literal('empty'),
+    })
+    .strict(),
+  z
+    .object({
+      slotIndex: z.number().int().nonnegative(),
+      status: z.literal('valid'),
+      game: pasteGameSummarySchema,
+    })
+    .strict(),
+  z
+    .object({
+      slotIndex: z.number().int().nonnegative(),
+      status: z.literal('order_error'),
+      game: pasteGameSummarySchema,
+      message: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      slotIndex: z.number().int().nonnegative(),
+      status: z.literal('invalid'),
+      message: z.string().min(1),
+    })
+    .strict(),
+]);
+
+export const pasteStateSchema = z.enum([
+  'empty',
+  'partial',
+  'out_of_order',
+  'clockless',
+  'valid',
+  'invalid',
+]);
+
+export const pasteValidationSchema = z
+  .object({
+    state: pasteStateSchema,
+    order: z.enum(['none', 'checked', 'unverified', 'invalid']),
+    clockless: z.boolean(),
+    canBuild: z.boolean(),
+    message: z.string().min(1),
+    summary: z
+      .object({
+        total: z.number().int().nonnegative(),
+        includedInStats: z.number().int().nonnegative(),
+        aborted: z.number().int().nonnegative(),
+        abandoned: z.number().int().nonnegative(),
+      })
+      .strict(),
+    slots: z.array(pasteSlotSchema),
+  })
+  .strict();
+
 export type PulseSample = z.infer<typeof pulseSampleSchema>;
 export type SessionAnchor = z.infer<typeof sessionAnchorSchema>;
 export type SessionMeta = z.infer<typeof sessionMetaSchema>;
 export type PgnGame = z.infer<typeof pgnGameSchema>;
 export type AlignedGame = z.infer<typeof alignedGameSchema>;
+export type LowCoverageTrace = z.infer<typeof lowCoverageTraceSchema>;
 export type Refusal = z.infer<typeof refusalSchema>;
+export type TimelineGame = z.infer<typeof timelineGameSchema>;
+export type TimelineMove = z.infer<typeof timelineMoveSchema>;
+export type TimelineData = z.infer<typeof timelineDataSchema>;
+export type ReportGame = z.infer<typeof reportGameSchema>;
 export type Report = z.infer<typeof reportSchema>;
+export type ReportResult = z.infer<typeof reportResultSchema>;
+export type PasteGameSummary = z.infer<typeof pasteGameSummarySchema>;
+export type PasteSlot = z.infer<typeof pasteSlotSchema>;
+export type PasteState = z.infer<typeof pasteStateSchema>;
+export type PasteValidation = z.infer<typeof pasteValidationSchema>;

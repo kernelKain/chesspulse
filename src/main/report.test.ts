@@ -89,6 +89,8 @@ describe('buildReport', () => {
     assert.match(result.remedy, /lamp in front of you/);
     assert.equal('verdict' in result, false);
     assert.equal('settled' in result, false);
+    assert.equal(result.trace?.samples.length, 4);
+    assert.equal(result.trace?.stopUs, 10_000_000);
     await assert.rejects(readFile(path.join(root, 'sessions', id, 'report.json'), 'utf8'));
     assert.match(formatResult(result), /No report for this session/);
     assert.match(formatResult(result), /40%/);
@@ -111,6 +113,14 @@ describe('buildReport', () => {
     assert.deepEqual(second, first);
     if (!first.ok) return;
     assert.match(first.verdict, /blunder/);
+    assert.equal(first.games.length, 1);
+    assert.equal(first.games[0]?.ending, 'checkmate');
+    assert.equal(first.games[0]?.includeInStats, true);
+    assert.equal(first.games[0]?.aligned, true);
+    assert.equal(first.timeline.samples.length, 10);
+    assert.equal(first.timeline.games.length, 1);
+    assert.equal(first.timeline.moves.length, 1);
+    assert.equal(first.timeline.elevatedThresholdBpm, 80);
     const saved = JSON.parse(await readFile(path.join(root, 'sessions', id, 'report.json'), 'utf8')) as unknown;
     assert.deepEqual(saved, first);
     assert.equal(formatResult(first), `${first.verdict}\n`);

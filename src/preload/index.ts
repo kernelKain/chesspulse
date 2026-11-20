@@ -7,6 +7,8 @@ const CONSENT_CHANNEL = 'cp:consent:set';
 const SESSION_START_CHANNEL = 'cp:session:start';
 const SESSION_STOP_CHANNEL = 'cp:session:stop';
 const SAMPLE_CHANNEL = 'cp:sample:batch';
+const PASTE_VALIDATE_CHANNEL = 'cp:pgn:validate';
+const REPORT_BUILD_CHANNEL = 'cp:report:build';
 
 interface ConsentState {
   granted: boolean;
@@ -69,6 +71,31 @@ contextBridge.exposeInMainWorld('chesspulse', {
     return () => {
       ipcRenderer.removeListener(SAMPLE_CHANNEL, handler);
     };
+  },
+  validatePgns(slots: unknown): Promise<unknown> {
+    if (!Array.isArray(slots) || !slots.every((item) => typeof item === 'string')) {
+      return Promise.reject(new Error('Paste entries must be text.'));
+    }
+    return ipcRenderer.invoke(PASTE_VALIDATE_CHANNEL, { slots }).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('state' in value) || !('slots' in value)) {
+        throw new Error('The window returned an unexpected paste validation.');
+      }
+      return value;
+    });
+  },
+  buildReport(sessionId: unknown, pgns: unknown): Promise<unknown> {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      return Promise.reject(new Error('No session is selected for this report.'));
+    }
+    if (!Array.isArray(pgns) || !pgns.every((item) => typeof item === 'string')) {
+      return Promise.reject(new Error('Paste entries must be text.'));
+    }
+    return ipcRenderer.invoke(REPORT_BUILD_CHANNEL, { sessionId, pgns }).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('ok' in value) || typeof value.ok !== 'boolean') {
+        throw new Error('The window returned an unexpected report.');
+      }
+      return value;
+    });
   },
 });
 

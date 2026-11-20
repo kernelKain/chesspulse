@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   consentRequestSchema,
+  pasteValidationSchema,
+  pgnValidateRequestSchema,
   pulseSampleSchema,
   refusalSchema,
   reportBuildRequestSchema,
@@ -55,5 +57,29 @@ describe('reportBuildRequestSchema', () => {
       pgns: Array.from({ length: 21 }, () => '1. e4'),
     });
     assert.equal(parsed.success, false);
+  });
+});
+
+describe('pgnValidateRequestSchema', () => {
+  it('rejects extra fields and non-string slots', () => {
+    assert.equal(pgnValidateRequestSchema.safeParse({ slots: ['1. e4'], extra: true }).success, false);
+    assert.equal(pgnValidateRequestSchema.safeParse({ slots: [123] }).success, false);
+    assert.equal(pgnValidateRequestSchema.safeParse({ slots: [''] }).success, true);
+  });
+});
+
+describe('pasteValidationSchema', () => {
+  it('accepts an empty paste validation result and rejects extra fields', () => {
+    const empty = {
+      state: 'empty',
+      order: 'none',
+      clockless: false,
+      canBuild: false,
+      message: 'Paste chess.com PGNs oldest first.',
+      summary: { total: 0, includedInStats: 0, aborted: 0, abandoned: 0 },
+      slots: [{ slotIndex: 0, status: 'empty' }],
+    };
+    assert.equal(pasteValidationSchema.safeParse(empty).success, true);
+    assert.equal(pasteValidationSchema.safeParse({ ...empty, demo: true }).success, false);
   });
 });

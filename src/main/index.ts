@@ -13,6 +13,8 @@ import {
 import { contentSecurityPolicy } from '../shared/security.js';
 import { allowsNavigation } from './navigation.js';
 import { currentConsent, registerConsentHandler } from './consent.js';
+import { registerPasteHandler } from './paste.js';
+import { registerReportHandler } from './report-ipc.js';
 import { grantsMediaPermission } from './permission.js';
 import { recoverInterruptedSessions, setSampleSink, startSession, stopSession } from './session.js';
 import { defaultDataRoot } from './store.js';
@@ -142,6 +144,8 @@ app.whenReady().then(async () => {
   installSessionGuards();
   registerConsentHandler(appFileUrl());
   registerSessionHandlers();
+  registerPasteHandler();
+  registerReportHandler();
   setSampleSink(defaultDataRoot(), publishSamples);
   try {
     const recovery = await recoverInterruptedSessions(defaultDataRoot());

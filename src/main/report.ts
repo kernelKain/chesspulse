@@ -3,10 +3,10 @@
 // Removed: a thin trace would still produce a confident sentence.
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { bandFor } from './analysis/bands.js';
+import { bandFor, ELEVATED_MARGIN_BPM } from './analysis/bands.js';
 import { alignGames } from './analysis/align.js';
 import { analyseMoves, scoreMove, verdictLine, type MoveMetric } from './analysis/metrics.js';
-import { parsePgnBatch } from './analysis/pgn.js';
+import { parsePgnBatch, thinkTimeSec } from './analysis/pgn.js';
 import { positionsFromMoves } from './analysis/positions.js';
 import { createEngine, type PositionEval } from './engine.js';
 import { baselineFromSamples, coverageFromSamples, isUsableSample } from './session.js';
@@ -17,6 +17,7 @@ import {
   type Refusal,
   type Report,
   type SessionMeta,
+  type TimelineMove,
 } from '../shared/contracts.js';
 import { CONFIDENCE_FLOOR, SAMPLE_HOLD_US } from '../shared/sensing.js';
 
@@ -81,6 +82,11 @@ export async function buildReport(
     });
     const coverage = coverageFromSamples(samples, meta.startAnchor.monoUs, stop.monoUs);
     const first = aligned.games[0];
+    const alignedIndices = new Set(aligned.games.map((entry) => entry.game.index));
+    const blundersByGame = new Map<number, number>();
+    for (const move of scoredMoves.timelineMoves) {
+      if (move.blunder) blundersByGame.set(move.gameIndex, (blundersByGame.get(move.gameIndex) ?? 0) + 1);
+    }
     const report = reportSchema.parse({
       ok: true,
       sessionId,
@@ -92,6 +98,38 @@ export async function buildReport(
       alignmentMode: first?.alignment.mode ?? 'inferred',
       toleranceSec: first?.alignment.toleranceSec ?? 0,
       ...(aligned.banner ? { banner: aligned.banner } : {}),
+      games: parsed.games.map((game) => ({
+        index: game.index,
+        white: game.white,
+        black: game.black,
+        result: game.result,
+        ending: game.ending,
+        includeInStats: game.includeInStats,
+        moveCount: game.moves.length,
+        blunders: blundersByGame.get(game.index) ?? 0,
+        aligned: alignedIndices.has(game.index),
+        ...(game.timeControl !== undefined ? { timeControl: game.timeControl } : {}),
+      })),
+      timeline: {
+        startUs: meta.startAnchor.monoUs,
+        stopUs: stop.monoUs,
+        baselineBpm: baseline,
+        elevatedThresholdBpm: baseline + ELEVATED_MARGIN_BPM,
+        samples: samples.filter(
+          (sample) => sample.tUs >= meta.startAnchor.monoUs && sample.tUs <= stop.monoUs,
+        ),
+        games: aligned.games.map((entry) => ({
+          index: entry.game.index,
+          white: entry.game.white,
+          black: entry.game.black,
+          result: entry.game.result,
+          ending: entry.game.ending,
+          includeInStats: entry.game.includeInStats,
+          startUs: entry.startUs,
+          endUs: entry.endUs,
+        })),
+        moves: scoredMoves.timelineMoves,
+      },
     });
     await saveReport(root, sessionId, JSON.stringify(report, null, 2) + '\n');
     return report;
@@ -141,35 +179,56 @@ function defaultRoot(): string {
 }
 
 function gate(meta: SessionMeta, samples: readonly PulseSample[], pgns: readonly string[]): Refusal | null {
-  if (samples.length === 0 || !meta.stopAnchor) {
+  const stopAnchor = meta.stopAnchor;
+  if (samples.length === 0 || !stopAnchor) {
     return { ok: false, reason: 'no_trace', remedy: 'Stop the session before building a report.' };
   }
   if (pgns.length === 0) {
     return { ok: false, reason: 'no_games', remedy: 'Paste at least one game.' };
   }
-  const coverage = coverageFromSamples(samples, meta.startAnchor.monoUs, meta.stopAnchor.monoUs);
+  const coverage = coverageFromSamples(samples, meta.startAnchor.monoUs, stopAnchor.monoUs);
   if (coverage.totalUs === 0) {
     return { ok: false, reason: 'no_trace', remedy: 'Stop the session before building a report.' };
   }
   if (coverage.pct < COVERAGE_GATE_PCT) {
+    const baseline = meta.baselineBpm ?? baselineFromSamples(samples, meta.startAnchor.monoUs)?.baselineBpm;
     return {
       ok: false,
       reason: 'low_coverage',
       measured: Math.floor(coverage.pct),
       threshold: COVERAGE_GATE_PCT,
       remedy: LOW_COVERAGE_REMEDY,
+      trace: {
+        startUs: meta.startAnchor.monoUs,
+        stopUs: stopAnchor.monoUs,
+        ...(baseline !== undefined ? { baselineBpm: baseline } : {}),
+        samples: samples.filter(
+          (sample) => sample.tUs >= meta.startAnchor.monoUs && sample.tUs <= stopAnchor.monoUs,
+        ),
+      },
     };
   }
   return null;
 }
 
 async function scoreAlignedMoves(
-  games: readonly { game: { index: number; moves: { san: string }[]; includeInStats: boolean } }[],
+  games: readonly {
+    game: {
+      index: number;
+      moves: { san: string; clockSec?: number }[];
+      timeControl?: string;
+      includeInStats: boolean;
+    };
+  }[],
   moveTimes: readonly { gameIndex: number; moveIndex: number; tUs: number | null }[],
   samples: readonly PulseSample[],
   baseline: number,
   engine: Evaluator,
-): Promise<{ metrics: MoveMetric[]; elevatedBlunderTimes: (number | null)[] }> {
+): Promise<{
+  metrics: MoveMetric[];
+  elevatedBlunderTimes: (number | null)[];
+  timelineMoves: TimelineMove[];
+}> {
   const cache = new Map<string, Promise<PositionEval>>();
   const evaluate = (fen: string): Promise<PositionEval> => {
     const cached = cache.get(fen);
@@ -180,20 +239,34 @@ async function scoreAlignedMoves(
   };
   const metrics: MoveMetric[] = [];
   const elevatedBlunderTimes: (number | null)[] = [];
+  const timelineMoves: TimelineMove[] = [];
   for (const aligned of games) {
     if (!aligned.game.includeInStats) continue;
     const sans = aligned.game.moves.map((move) => move.san);
+    const thinks = thinkTimeSec(aligned.game);
     const positions = positionsFromMoves(sans);
     for (let moveIndex = 0; moveIndex < sans.length; moveIndex += 1) {
       const position = positions[moveIndex];
       if (!position || position.illegal || !position.fenAfter) {
         for (let rest = moveIndex; rest < sans.length; rest += 1) {
+          const when = moveTimes.find((time) => time.gameIndex === aligned.game.index && time.moveIndex === rest);
+          const rawThink = thinks[rest] ?? null;
           metrics.push({
             cpl: null,
             accuracy: null,
             blunder: false,
             band: null,
             includeInStats: true,
+          });
+          timelineMoves.push({
+            gameIndex: aligned.game.index,
+            moveIndex: rest,
+            san: sans[rest] ?? '',
+            tUs: when?.tUs ?? null,
+            cpl: null,
+            thinkSec: rawThink !== null && rawThink >= 0 ? rawThink : null,
+            blunder: false,
+            band: null,
           });
         }
         break;
@@ -205,9 +278,20 @@ async function scoreAlignedMoves(
       const metric = scoreMove(before, after, band, aligned.game.includeInStats);
       if (metric.blunder && metric.band === 'elevated') elevatedBlunderTimes.push(when?.tUs ?? null);
       metrics.push(metric);
+      const rawThink = thinks[moveIndex] ?? null;
+      timelineMoves.push({
+        gameIndex: aligned.game.index,
+        moveIndex,
+        san: sans[moveIndex] ?? '',
+        tUs: when?.tUs ?? null,
+        cpl: metric.cpl,
+        thinkSec: rawThink !== null && rawThink >= 0 ? rawThink : null,
+        blunder: metric.blunder,
+        band: metric.band,
+      });
     }
   }
-  return { metrics, elevatedBlunderTimes };
+  return { metrics, elevatedBlunderTimes, timelineMoves };
 }
 
 export function bandAt(samples: readonly PulseSample[], tUs: number, baseline: number): ReturnType<typeof bandFor> {
@@ -290,7 +374,11 @@ function gapClause(gaps: readonly { afterIndex: number; beforeIndex: number; dur
   }, undefined);
   if (!gap) return undefined;
   const minutes = Math.round(gap.durationUs / 60_000_000);
-  const waited = minutes >= 1 ? `${minutes} minutes` : `${Math.max(1, Math.round(gap.durationUs / 1_000_000))} seconds`;
+  const seconds = Math.max(1, Math.round(gap.durationUs / 1_000_000));
+  const waited =
+    minutes >= 1
+      ? `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`
+      : `${seconds} ${seconds === 1 ? 'second' : 'seconds'}`;
   return `Between games ${gap.afterIndex + 1} and ${gap.beforeIndex + 1} you waited ${waited}.`;
 }
 
