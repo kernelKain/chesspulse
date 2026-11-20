@@ -686,6 +686,131 @@ textarea {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
+.report-layout {
+  display: flex;
+  flex-direction: column;
+}
+
+.timeline-mini-stack {
+  display: none;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mini-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mini-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mini-title {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 560;
+  overflow-wrap: anywhere;
+}
+
+.mini-ending {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.mini-frame {
+  padding: 8px;
+}
+
+.mini-readout {
+  font-size: 12px;
+}
+
+.game-list-section {
+  margin-top: 32px;
+}
+
+.game-list-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+
+.game-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.game-row {
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.game-row-excluded {
+  opacity: 0.78;
+}
+
+.game-row-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+}
+
+.game-index {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.game-players {
+  color: var(--text);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+  flex: 1 1 200px;
+}
+
+.game-result {
+  color: var(--text);
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+}
+
+.game-row-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.game-ending {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.game-detail {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+
 @media (max-width: 699px) {
   .verdict-line {
     font-size: 20px;
@@ -693,6 +818,33 @@ textarea {
 
   .band-grid {
     grid-template-columns: 1fr;
+  }
+
+  .report-layout .verdict-section {
+    order: 1;
+  }
+
+  .report-layout .band-bars {
+    order: 2;
+    margin-top: 0;
+    margin-bottom: 24px;
+  }
+
+  .report-layout .timeline {
+    order: 3;
+    margin-top: 0;
+  }
+
+  .report-layout .game-list-section {
+    order: 4;
+  }
+
+  .timeline-wide {
+    display: none;
+  }
+
+  .timeline-mini-stack {
+    display: flex;
   }
 }
 

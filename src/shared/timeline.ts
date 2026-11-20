@@ -48,6 +48,22 @@ export interface TimelineSampleRow {
   gapBeforeSec: number | null;
 }
 
+export interface GameMiniTimelineView {
+  game: TimelineGame;
+  ending: EndingMark;
+  spanLabel: string;
+  startUs: number;
+  stopUs: number;
+  baselineBpm?: number;
+  elevatedThresholdBpm?: number;
+  yMinBpm: number;
+  yMaxBpm: number;
+  samples: PulseSample[];
+  usableRuns: PulseRun[];
+  weakSamples: PulseSample[];
+  moves: TimelineMove[];
+}
+
 export interface TimelineViewModel {
   state: TimelineState;
   startUs: number;
@@ -272,6 +288,36 @@ export function sampleTableRows(view: TimelineViewModel): TimelineSampleRow[] {
       confidence: sample.confidence,
       status,
       gapBeforeSec,
+    };
+  });
+}
+
+export function buildGameMiniViews(view: TimelineViewModel): GameMiniTimelineView[] {
+  if (view.state === 'low_coverage' || view.state === 'empty') return [];
+  return view.games.map((game) => {
+    const startUs = game.startUs;
+    const stopUs = Math.max(game.endUs, game.startUs + 1_000_000);
+    const samples = view.samples.filter(
+      (sample) => sample.tUs >= game.startUs && sample.tUs <= game.endUs,
+    );
+    const { usableRuns, weakSamples } = splitPulseRuns(samples, view.elevatedThresholdBpm);
+    const moves = view.moves.filter((move) => move.gameIndex === game.index);
+    return {
+      game,
+      ending: endingMark(game.ending),
+      spanLabel: `${formatElapsed(game.startUs, view.startUs)} – ${formatElapsed(game.endUs, view.startUs)}`,
+      startUs,
+      stopUs,
+      ...(view.baselineBpm !== undefined ? { baselineBpm: view.baselineBpm } : {}),
+      ...(view.elevatedThresholdBpm !== undefined
+        ? { elevatedThresholdBpm: view.elevatedThresholdBpm }
+        : {}),
+      yMinBpm: view.yMinBpm,
+      yMaxBpm: view.yMaxBpm,
+      samples,
+      usableRuns,
+      weakSamples,
+      moves,
     };
   });
 }

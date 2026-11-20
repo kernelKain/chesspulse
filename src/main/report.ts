@@ -82,6 +82,11 @@ export async function buildReport(
     });
     const coverage = coverageFromSamples(samples, meta.startAnchor.monoUs, stop.monoUs);
     const first = aligned.games[0];
+    const alignedIndices = new Set(aligned.games.map((entry) => entry.game.index));
+    const blundersByGame = new Map<number, number>();
+    for (const move of scoredMoves.timelineMoves) {
+      if (move.blunder) blundersByGame.set(move.gameIndex, (blundersByGame.get(move.gameIndex) ?? 0) + 1);
+    }
     const report = reportSchema.parse({
       ok: true,
       sessionId,
@@ -93,6 +98,18 @@ export async function buildReport(
       alignmentMode: first?.alignment.mode ?? 'inferred',
       toleranceSec: first?.alignment.toleranceSec ?? 0,
       ...(aligned.banner ? { banner: aligned.banner } : {}),
+      games: parsed.games.map((game) => ({
+        index: game.index,
+        white: game.white,
+        black: game.black,
+        result: game.result,
+        ending: game.ending,
+        includeInStats: game.includeInStats,
+        moveCount: game.moves.length,
+        blunders: blundersByGame.get(game.index) ?? 0,
+        aligned: alignedIndices.has(game.index),
+        ...(game.timeControl !== undefined ? { timeControl: game.timeControl } : {}),
+      })),
       timeline: {
         startUs: meta.startAnchor.monoUs,
         stopUs: stop.monoUs,

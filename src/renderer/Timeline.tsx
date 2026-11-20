@@ -4,6 +4,7 @@
 import { useId, useState, type KeyboardEvent } from 'react';
 import type { ReportResult } from '../shared/contracts';
 import {
+  buildGameMiniViews,
   buildTimelineView,
   cplBarRatio,
   endingMark,
@@ -13,6 +14,7 @@ import {
   sampleTableRows,
   thinkTimeRatio,
   timeTicks,
+  type GameMiniTimelineView,
   type TimelineViewModel,
 } from '../shared/timeline';
 
@@ -92,6 +94,11 @@ export function Timeline({ result }: { result: ReportResult | null }) {
   const selectedSample = activeIndex !== null ? view.samples[activeIndex] : undefined;
   const moveRows = mode === 'table' ? moveTableRows(view) : [];
   const sampleRows = mode === 'table' ? sampleTableRows(view) : [];
+  const miniViews =
+    mode === 'chart' && view.state !== 'low_coverage' && view.games.length > 0
+      ? buildGameMiniViews(view)
+      : [];
+  const hasMiniStack = miniViews.length > 0;
 
   return (
     <section className={`timeline timeline-${view.state}`} aria-label="Session timeline">
@@ -136,108 +143,122 @@ export function Timeline({ result }: { result: ReportResult | null }) {
         <TimelineTables view={view} moveRows={moveRows} sampleRows={sampleRows} />
       ) : (
         <>
-          <div
-            className="timeline-frame"
-            tabIndex={0}
-            role="group"
-            aria-roledescription="session timeline"
-            aria-label="Pulse, move error, think time, and game endings"
-            aria-describedby={keysHintId}
-            onKeyDown={onKeyDown}
-            onFocus={() => {
-              if (selectedIndex === null && view.samples.length > 0) setSelectedIndex(0);
-            }}
-          >
-            <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="presentation">
-              <defs>
-                <pattern
-                  id={hatchId}
-                  width="8"
-                  height="8"
-                  patternUnits="userSpaceOnUse"
-                  patternTransform="rotate(45)"
-                >
-                  <line x1="0" y1="0" x2="0" y2="8" className="elevated-hatch-line" />
-                </pattern>
-              </defs>
+          <div className={hasMiniStack ? 'timeline-wide' : undefined}>
+            <div
+              className="timeline-frame"
+              tabIndex={0}
+              role="group"
+              aria-roledescription="session timeline"
+              aria-label="Pulse, move error, think time, and game endings"
+              aria-describedby={keysHintId}
+              onKeyDown={onKeyDown}
+              onFocus={() => {
+                if (selectedIndex === null && view.samples.length > 0) setSelectedIndex(0);
+              }}
+            >
+              <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="presentation">
+                <defs>
+                  <pattern
+                    id={hatchId}
+                    width="8"
+                    height="8"
+                    patternUnits="userSpaceOnUse"
+                    patternTransform="rotate(45)"
+                  >
+                    <line x1="0" y1="0" x2="0" y2="8" className="elevated-hatch-line" />
+                  </pattern>
+                </defs>
 
-              {view.state === 'empty' ? (
-                <EmptySvg />
-              ) : (
-                <>
-                  <GameBands view={view} xOf={xOf} />
+                {view.state === 'empty' ? (
+                  <EmptySvg />
+                ) : (
+                  <>
+                    <GameBands view={view} xOf={xOf} />
 
-                  {view.state !== 'low_coverage' && view.elevatedThresholdBpm !== undefined ? (
-                    <ElevatedZone
-                      hatchId={hatchId}
-                      thresholdBpm={view.elevatedThresholdBpm}
-                      yOfBpm={yOfBpm}
-                    />
-                  ) : null}
-
-                  {view.baselineBpm !== undefined ? (
-                    <BaselineHairline baselineBpm={view.baselineBpm} yOfBpm={yOfBpm} />
-                  ) : null}
-
-                  <RailGuides showChessRails={view.state !== 'low_coverage'} view={view} yOfBpm={yOfBpm} />
-
-                  {view.state !== 'low_coverage' ? (
-                    <>
-                      <EndingRail view={view} xOf={xOf} />
-                      <ThinkRail view={view} xOf={xOf} />
-                      <CplRail view={view} xOf={xOf} />
-                    </>
-                  ) : null}
-
-                  <PulseLayer view={view} xOf={xOf} yOfBpm={yOfBpm} />
-
-                  <TimeAxis view={view} xOf={xOf} />
-
-                  {selectedSample ? (
-                    <g className="timeline-cursor">
-                      <line
-                        x1={xOf(selectedSample.tUs)}
-                        y1={THINK_TOP}
-                        x2={xOf(selectedSample.tUs)}
-                        y2={CPL_BOTTOM}
+                    {view.state !== 'low_coverage' && view.elevatedThresholdBpm !== undefined ? (
+                      <ElevatedZone
+                        hatchId={hatchId}
+                        thresholdBpm={view.elevatedThresholdBpm}
+                        yOfBpm={yOfBpm}
                       />
-                      <circle
-                        cx={xOf(selectedSample.tUs)}
-                        cy={yOfBpm(selectedSample.bpm)}
-                        r={4.5}
-                      />
-                    </g>
-                  ) : null}
-                </>
-              )}
-            </svg>
+                    ) : null}
+
+                    {view.baselineBpm !== undefined ? (
+                      <BaselineHairline baselineBpm={view.baselineBpm} yOfBpm={yOfBpm} />
+                    ) : null}
+
+                    <RailGuides showChessRails={view.state !== 'low_coverage'} view={view} yOfBpm={yOfBpm} />
+
+                    {view.state !== 'low_coverage' ? (
+                      <>
+                        <EndingRail view={view} xOf={xOf} />
+                        <ThinkRail view={view} xOf={xOf} />
+                        <CplRail view={view} xOf={xOf} />
+                      </>
+                    ) : null}
+
+                    <PulseLayer view={view} xOf={xOf} yOfBpm={yOfBpm} />
+
+                    <TimeAxis view={view} xOf={xOf} />
+
+                    {selectedSample ? (
+                      <g className="timeline-cursor">
+                        <line
+                          x1={xOf(selectedSample.tUs)}
+                          y1={THINK_TOP}
+                          x2={xOf(selectedSample.tUs)}
+                          y2={CPL_BOTTOM}
+                        />
+                        <circle
+                          cx={xOf(selectedSample.tUs)}
+                          cy={yOfBpm(selectedSample.bpm)}
+                          r={4.5}
+                        />
+                      </g>
+                    ) : null}
+                  </>
+                )}
+              </svg>
+            </div>
+
+            <div className="readout-bar">
+              <p id={keysHintId} className="timeline-readout" aria-live="polite">
+                {readoutText}
+              </p>
+              {view.samples.length > 0 ? (
+                <div className="readout-controls" role="group" aria-label="Step through samples">
+                  <button
+                    type="button"
+                    className="small-btn"
+                    disabled={activeIndex !== null && activeIndex <= 0}
+                    onClick={() => stepSample(-1)}
+                  >
+                    Previous sample
+                  </button>
+                  <button
+                    type="button"
+                    className="small-btn"
+                    disabled={activeIndex !== null && activeIndex >= view.samples.length - 1}
+                    onClick={() => stepSample(1)}
+                  >
+                    Next sample
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
 
-          <div className="readout-bar">
-            <p id={keysHintId} className="timeline-readout" aria-live="polite">
-              {readoutText}
-            </p>
-            {view.samples.length > 0 ? (
-              <div className="readout-controls" role="group" aria-label="Step through samples">
-                <button
-                  type="button"
-                  className="small-btn"
-                  disabled={activeIndex !== null && activeIndex <= 0}
-                  onClick={() => stepSample(-1)}
-                >
-                  Previous sample
-                </button>
-                <button
-                  type="button"
-                  className="small-btn"
-                  disabled={activeIndex !== null && activeIndex >= view.samples.length - 1}
-                  onClick={() => stepSample(1)}
-                >
-                  Next sample
-                </button>
-              </div>
-            ) : null}
-          </div>
+          {hasMiniStack ? (
+            <div className="timeline-mini-stack" aria-label="Per-game timelines">
+              {miniViews.map((mini) => (
+                <MiniGameTimeline
+                  key={mini.game.index}
+                  mini={mini}
+                  sessionStartUs={view.startUs}
+                />
+              ))}
+            </div>
+          ) : null}
         </>
       )}
 
@@ -664,4 +685,210 @@ function TimeAxis({
 
 function formatBpm(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+const MINI_W = 540;
+const MINI_H = 192;
+const MINI_LEFT = 40;
+const MINI_RIGHT = 12;
+const MINI_PLOT_W = MINI_W - MINI_LEFT - MINI_RIGHT;
+const MINI_THINK_TOP = 14;
+const MINI_THINK_BOTTOM = 32;
+const MINI_PULSE_TOP = 40;
+const MINI_PULSE_BOTTOM = 126;
+const MINI_CPL_TOP = 136;
+const MINI_CPL_BOTTOM = 172;
+
+function MiniGameTimeline({
+  mini,
+  sessionStartUs,
+}: {
+  mini: GameMiniTimelineView;
+  sessionStartUs: number;
+}) {
+  const [selected, setSelected] = useState<number | null>(null);
+  const hatchId = useId();
+  const active =
+    mini.samples.length === 0 || selected === null
+      ? null
+      : Math.min(mini.samples.length - 1, Math.max(0, selected));
+
+  function onKey(event: KeyboardEvent<HTMLDivElement>): void {
+    if (mini.samples.length === 0) return;
+    const current = active ?? 0;
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      setSelected(Math.max(0, current - 1));
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      setSelected(Math.min(mini.samples.length - 1, current + 1));
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      setSelected(0);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      setSelected(mini.samples.length - 1);
+    }
+  }
+
+  const xOf = (tUs: number): number => {
+    if (mini.stopUs <= mini.startUs) return MINI_LEFT;
+    const ratio = (tUs - mini.startUs) / (mini.stopUs - mini.startUs);
+    return MINI_LEFT + Math.min(1, Math.max(0, ratio)) * MINI_PLOT_W;
+  };
+
+  const yOf = (bpm: number): number => {
+    const span = mini.yMaxBpm - mini.yMinBpm;
+    if (span <= 0) return (MINI_PULSE_TOP + MINI_PULSE_BOTTOM) / 2;
+    const clamped = Math.min(mini.yMaxBpm, Math.max(mini.yMinBpm, bpm));
+    return MINI_PULSE_TOP + ((mini.yMaxBpm - clamped) / span) * (MINI_PULSE_BOTTOM - MINI_PULSE_TOP);
+  };
+
+  const players =
+    mini.game.white || mini.game.black
+      ? `${mini.game.white || 'Unknown'} vs ${mini.game.black || 'Unknown'}`
+      : 'Players unnamed';
+  const currentSample = active !== null ? mini.samples[active] : undefined;
+  const readout =
+    mini.samples.length === 0
+      ? 'No pulse samples during this game.'
+      : currentSample
+        ? `${formatElapsed(currentSample.tUs, sessionStartUs)} · ${formatBpm(currentSample.bpm)} bpm`
+        : `${mini.samples.length} samples · use arrow keys to step`;
+
+  return (
+    <article className="mini-card">
+      <div className="mini-header">
+        <span className="mini-title">
+          G{mini.game.index + 1} · {players}
+        </span>
+        <span className="mini-ending">
+          <span aria-hidden="true">{mini.ending.glyph}</span> {mini.ending.label} · {mini.game.result} · {mini.spanLabel}
+        </span>
+      </div>
+      <div
+        className="timeline-frame mini-frame"
+        tabIndex={0}
+        role="group"
+        aria-label={`Game ${mini.game.index + 1} timeline`}
+        onKeyDown={onKey}
+        onFocus={() => {
+          if (selected === null && mini.samples.length > 0) setSelected(0);
+        }}
+      >
+        <svg viewBox={`0 0 ${MINI_W} ${MINI_H}`} role="presentation">
+          <defs>
+            <pattern
+              id={hatchId}
+              width="8"
+              height="8"
+              patternUnits="userSpaceOnUse"
+              patternTransform="rotate(45)"
+            >
+              <line x1="0" y1="0" x2="0" y2="8" className="elevated-hatch-line" />
+            </pattern>
+          </defs>
+          {mini.elevatedThresholdBpm !== undefined ? (
+            <>
+              <rect
+                x={MINI_LEFT}
+                y={MINI_PULSE_TOP}
+                width={MINI_PLOT_W}
+                height={Math.max(0, yOf(mini.elevatedThresholdBpm) - MINI_PULSE_TOP)}
+                fill={`url(#${hatchId})`}
+              />
+              <line
+                className="threshold-line"
+                x1={MINI_LEFT}
+                y1={yOf(mini.elevatedThresholdBpm)}
+                x2={MINI_LEFT + MINI_PLOT_W}
+                y2={yOf(mini.elevatedThresholdBpm)}
+              />
+            </>
+          ) : null}
+          {mini.baselineBpm !== undefined ? (
+            <line
+              className="baseline-line"
+              x1={MINI_LEFT}
+              y1={yOf(mini.baselineBpm)}
+              x2={MINI_LEFT + MINI_PLOT_W}
+              y2={yOf(mini.baselineBpm)}
+            />
+          ) : null}
+          <text className="y-tick" x={MINI_LEFT - 6} y={MINI_PULSE_TOP + 4} textAnchor="end">
+            {mini.yMaxBpm}
+          </text>
+          <text className="y-tick" x={MINI_LEFT - 6} y={MINI_PULSE_BOTTOM} textAnchor="end">
+            {mini.yMinBpm}
+          </text>
+          <line className="rail-sep" x1={MINI_LEFT} y1={MINI_CPL_BOTTOM} x2={MINI_LEFT + MINI_PLOT_W} y2={MINI_CPL_BOTTOM} />
+          {mini.moves.map((move) => {
+            if (move.tUs === null || move.thinkSec === null) return null;
+            const ratio = thinkTimeRatio(move.thinkSec);
+            return (
+              <circle
+                key={`mt-${move.moveIndex}`}
+                className="think-dot"
+                cx={xOf(move.tUs)}
+                cy={MINI_THINK_BOTTOM - ratio * (MINI_THINK_BOTTOM - MINI_THINK_TOP - 2) - 1}
+                r={2}
+              />
+            );
+          })}
+          {mini.moves.map((move) => {
+            if (move.tUs === null) return null;
+            const x = xOf(move.tUs);
+            if (move.cpl === null) {
+              return <circle key={`mc-${move.moveIndex}`} className="cpl-unscored" cx={x} cy={MINI_CPL_BOTTOM - 2} r={1.5} />;
+            }
+            const h = Math.max(3, cplBarRatio(move.cpl) * (MINI_CPL_BOTTOM - MINI_CPL_TOP));
+            return (
+              <line
+                key={`mc-${move.moveIndex}`}
+                className={move.blunder ? 'cpl-tick cpl-blunder' : 'cpl-tick'}
+                x1={x}
+                y1={MINI_CPL_BOTTOM}
+                x2={x}
+                y2={MINI_CPL_BOTTOM - h}
+              />
+            );
+          })}
+          {mini.usableRuns.map((run, idx) => {
+            const cls = run.kind === 'elevated' ? 'pulse-line pulse-elevated' : 'pulse-line pulse-settled';
+            if (run.points.length === 1 && run.points[0]) {
+              return (
+                <circle
+                  key={`mp-${idx}`}
+                  className={run.kind === 'elevated' ? 'pulse-dot pulse-elevated' : 'pulse-dot pulse-settled'}
+                  cx={xOf(run.points[0].tUs)}
+                  cy={yOf(run.points[0].bpm)}
+                  r={3}
+                />
+              );
+            }
+            const pts = run.points.map((s) => `${xOf(s.tUs).toFixed(1)},${yOf(s.bpm).toFixed(1)}`).join(' ');
+            return <polyline key={`mr-${idx}`} className={cls} points={pts} />;
+          })}
+          {mini.weakSamples.map((s) => (
+            <circle key={`mw-${s.tUs}`} className="pulse-weak" cx={xOf(s.tUs)} cy={yOf(s.bpm)} r={2.5} />
+          ))}
+          {currentSample ? (
+            <g className="timeline-cursor">
+              <line x1={xOf(currentSample.tUs)} y1={MINI_THINK_TOP} x2={xOf(currentSample.tUs)} y2={MINI_CPL_BOTTOM} />
+              <circle cx={xOf(currentSample.tUs)} cy={yOf(currentSample.bpm)} r={4} />
+            </g>
+          ) : null}
+          <text className="axis-tick" x={MINI_LEFT} y={MINI_H - 4} textAnchor="start">
+            {formatElapsed(mini.startUs, sessionStartUs)}
+          </text>
+          <text className="axis-tick" x={MINI_LEFT + MINI_PLOT_W} y={MINI_H - 4} textAnchor="end">
+            {formatElapsed(mini.stopUs, sessionStartUs)}
+          </text>
+        </svg>
+      </div>
+      <p className="timeline-readout mini-readout" aria-live="polite">
+        {readout}
+      </p>
+    </article>
+  );
 }

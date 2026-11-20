@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import type { PulseSample, Refusal, Report } from './contracts.js';
 import {
   alignmentConfidenceLabel,
+  buildGameMiniViews,
   buildTimelineView,
   CPL_CAP,
   cplBarRatio,
@@ -31,6 +32,20 @@ function baseReport(overrides: Partial<Report> = {}): Report {
     elevated: { band: 'elevated', moves: 5, status: 'ok', accuracy: 58 },
     alignmentMode: 'endtime',
     toleranceSec: 1,
+    games: [
+      {
+        index: 0,
+        white: 'Ada',
+        black: 'Nim',
+        result: '1-0',
+        ending: 'checkmate',
+        includeInStats: true,
+        moveCount: 1,
+        blunders: 1,
+        aligned: true,
+        timeControl: '60',
+      },
+    ],
     timeline: {
       startUs: 0,
       stopUs: 60_000_000,
@@ -198,5 +213,28 @@ describe('timeline helpers', () => {
     assert.equal(samples[1]?.gapBeforeSec, 4);
     assert.equal(samples[1]?.status, 'Raw (bands withheld)');
     assert.equal(samples[2]?.status, 'Low confidence');
+  });
+
+  it('builds stacked per-game mini-timeline views sharing the session bpm scale', () => {
+    const view = buildTimelineView(baseReport());
+    const minis = buildGameMiniViews(view);
+    assert.equal(minis.length, 1);
+    assert.equal(minis[0]?.game.index, 0);
+    assert.equal(minis[0]?.ending.glyph, '♚');
+    assert.equal(minis[0]?.spanLabel, '0:00 – 0:30');
+    assert.equal(minis[0]?.yMinBpm, view.yMinBpm);
+    assert.equal(minis[0]?.yMaxBpm, view.yMaxBpm);
+    assert.equal(minis[0]?.moves.length, 1);
+    assert.equal(minis[0]?.usableRuns.length, 2);
+
+    const refusalView = buildTimelineView({
+      ok: false,
+      reason: 'low_coverage',
+      measured: 30,
+      threshold: 70,
+      remedy: 'Sit facing a lamp.',
+      trace: { startUs: 0, stopUs: 10_000_000, samples: [sample(0, 70)] },
+    });
+    assert.deepEqual(buildGameMiniViews(refusalView), []);
   });
 });

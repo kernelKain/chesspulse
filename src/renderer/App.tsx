@@ -9,6 +9,7 @@ import {
 } from '../shared/contracts';
 import { CONFIDENCE_FLOOR } from '../shared/sensing';
 import { BandBars } from './BandBars';
+import { GameList } from './GameList';
 import { PasteScreen } from './PasteScreen';
 import { SensingStrip } from './SensingStrip';
 import { Timeline } from './Timeline';
@@ -198,11 +199,12 @@ export function App() {
             </div>
           </>
         ) : reportResult && reportResult.ok ? (
-          <>
+          <div className="report-layout">
             <VerdictLine report={reportResult} />
             <Timeline key={`ok-${reportResult.sessionId}`} result={reportResult} />
             <BandBars report={reportResult} />
-          </>
+            <GameList report={reportResult} />
+          </div>
         ) : (
           <>
             <h1>{reportResult ? 'Review withheld.' : 'Session timeline.'}</h1>

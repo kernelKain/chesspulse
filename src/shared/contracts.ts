@@ -160,6 +160,21 @@ export const timelineDataSchema = z
   })
   .strict();
 
+export const reportGameSchema = z
+  .object({
+    index: z.number().int().nonnegative(),
+    white: z.string(),
+    black: z.string(),
+    result: z.string(),
+    ending: endingSchema,
+    includeInStats: z.boolean(),
+    moveCount: z.number().int().nonnegative(),
+    blunders: z.number().int().nonnegative(),
+    aligned: z.boolean(),
+    timeControl: z.string().optional(),
+  })
+  .strict();
+
 const bandSummarySchema = z.discriminatedUnion('status', [
   z
     .object({
@@ -191,6 +206,7 @@ export const reportSchema = z
     alignmentMode: alignmentModeSchema,
     toleranceSec: z.number().finite().nonnegative(),
     banner: z.string().min(1).optional(),
+    games: z.array(reportGameSchema),
     timeline: timelineDataSchema,
   })
   .strict();
@@ -375,6 +391,7 @@ export type Refusal = z.infer<typeof refusalSchema>;
 export type TimelineGame = z.infer<typeof timelineGameSchema>;
 export type TimelineMove = z.infer<typeof timelineMoveSchema>;
 export type TimelineData = z.infer<typeof timelineDataSchema>;
+export type ReportGame = z.infer<typeof reportGameSchema>;
 export type Report = z.infer<typeof reportSchema>;
 export type ReportResult = z.infer<typeof reportResultSchema>;
 export type PasteGameSummary = z.infer<typeof pasteGameSummarySchema>;

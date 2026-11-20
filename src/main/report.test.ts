@@ -113,6 +113,10 @@ describe('buildReport', () => {
     assert.deepEqual(second, first);
     if (!first.ok) return;
     assert.match(first.verdict, /blunder/);
+    assert.equal(first.games.length, 1);
+    assert.equal(first.games[0]?.ending, 'checkmate');
+    assert.equal(first.games[0]?.includeInStats, true);
+    assert.equal(first.games[0]?.aligned, true);
     assert.equal(first.timeline.samples.length, 10);
     assert.equal(first.timeline.games.length, 1);
     assert.equal(first.timeline.moves.length, 1);
