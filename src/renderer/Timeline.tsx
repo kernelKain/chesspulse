@@ -19,19 +19,19 @@ import {
 } from '../shared/timeline';
 
 const WIDTH = 920;
-const HEIGHT = 340;
+const HEIGHT = 346;
 const LEFT = 56;
 const RIGHT = 20;
 const PLOT_W = WIDTH - LEFT - RIGHT;
 
-const ENDING_Y = 26;
-const THINK_TOP = 46;
-const THINK_BOTTOM = 72;
-const PULSE_TOP = 84;
-const PULSE_BOTTOM = 228;
-const CPL_TOP = 244;
-const CPL_BOTTOM = 298;
-const AXIS_Y = 314;
+const ENDING_Y = 24;
+const THINK_TOP = 44;
+const THINK_BOTTOM = 70;
+const PULSE_TOP = 96;
+const PULSE_BOTTOM = 234;
+const CPL_TOP = 250;
+const CPL_BOTTOM = 304;
+const AXIS_Y = 320;
 
 export function Timeline({ result }: { result: ReportResult | null }) {
   const view = buildTimelineView(result);
@@ -468,7 +468,7 @@ function RailGuides({
           </text>
         </g>
       ))}
-      <text className="rail-label" x={LEFT - 8} y={PULSE_TOP - 4} textAnchor="end">
+      <text className="rail-label" x={LEFT - 8} y={PULSE_TOP - 10} textAnchor="end">
         bpm
       </text>
       {showChessRails ? (

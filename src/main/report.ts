@@ -374,7 +374,11 @@ function gapClause(gaps: readonly { afterIndex: number; beforeIndex: number; dur
   }, undefined);
   if (!gap) return undefined;
   const minutes = Math.round(gap.durationUs / 60_000_000);
-  const waited = minutes >= 1 ? `${minutes} minutes` : `${Math.max(1, Math.round(gap.durationUs / 1_000_000))} seconds`;
+  const seconds = Math.max(1, Math.round(gap.durationUs / 1_000_000));
+  const waited =
+    minutes >= 1
+      ? `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`
+      : `${seconds} ${seconds === 1 ? 'second' : 'seconds'}`;
   return `Between games ${gap.afterIndex + 1} and ${gap.beforeIndex + 1} you waited ${waited}.`;
 }
 
