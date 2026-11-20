@@ -1,0 +1,11 @@
+[Event "Live Chess"]
+[Site "Chess.com"]
+[White "Ada"]
+[Black "Nim"]
+[Result "1-0"]
+[TimeControl "180+0"]
+[Termination "Ada won on time"]
+[EndDate "2026.11.20"]
+[EndTime "12:20:00"]
+
+1. e4 {[%clk 0:02:57]} e5 {[%clk 0:02:55]} 2. Nf3 {[%clk 0:02:54]} 1-0

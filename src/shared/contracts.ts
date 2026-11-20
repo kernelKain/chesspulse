@@ -112,6 +112,40 @@ export const refusalSchema = z
   })
   .strict();
 
+const bandSummarySchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      band: z.enum(['settled', 'elevated']),
+      moves: z.number().int().nonnegative(),
+      status: z.literal('insufficient'),
+    })
+    .strict(),
+  z
+    .object({
+      band: z.enum(['settled', 'elevated']),
+      moves: z.number().int().nonnegative(),
+      status: z.literal('ok'),
+      accuracy: z.number().finite(),
+    })
+    .strict(),
+]);
+
+/** A finished review. A refusal is a different object and never carries these fields. */
+export const reportSchema = z
+  .object({
+    ok: z.literal(true),
+    sessionId: z.string().min(1),
+    coveragePct: z.number().finite().min(0).max(100),
+    baselineBpm: z.number().finite(),
+    verdict: z.string().min(1),
+    settled: bandSummarySchema,
+    elevated: bandSummarySchema,
+    alignmentMode: alignmentModeSchema,
+    toleranceSec: z.number().finite().nonnegative(),
+    banner: z.string().min(1).optional(),
+  })
+  .strict();
+
 export const aiProviderSchema = z.enum([
   'openai',
   'anthropic',
@@ -201,3 +235,4 @@ export type SessionMeta = z.infer<typeof sessionMetaSchema>;
 export type PgnGame = z.infer<typeof pgnGameSchema>;
 export type AlignedGame = z.infer<typeof alignedGameSchema>;
 export type Refusal = z.infer<typeof refusalSchema>;
+export type Report = z.infer<typeof reportSchema>;

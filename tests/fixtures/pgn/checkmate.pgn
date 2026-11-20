@@ -1,0 +1,11 @@
+[Event "Live Chess"]
+[Site "Chess.com"]
+[White "Ada"]
+[Black "Nim"]
+[Result "1-0"]
+[TimeControl "180+2"]
+[Termination "Ada won by checkmate"]
+[EndDate "2026.11.20"]
+[EndTime "12:10:00"]
+
+1. e4 {[%clk 0:02:59]} e5 {[%clk 0:02:58]} 2. Qh5 {[%clk 0:02:58]} Nc6 {[%clk 0:02:56]} 3. Bc4 {[%clk 0:02:57]} Nf6 {[%clk 0:02:54]} 4. Qxf7# {[%clk 0:02:56]} 1-0
