@@ -1,40 +1,147 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { sampleBatchSchema, type PulseSample, type SessionMeta } from '../shared/contracts';
+import { CONFIDENCE_FLOOR } from '../shared/sensing';
+import { SensingStrip } from './SensingStrip';
 
-function consentNote(granted: boolean, cameraAllowed: boolean): string {
-  if (!granted) return 'The camera stays off until you consent.';
-  if (!cameraAllowed) {
-    return 'Consent is on. This page is not a local file, so the camera stays blocked.';
-  }
-  return 'The camera is allowed for this window. Sensing has not started.';
-}
+const TIME_CONTROLS = ['1+0', '3+2', '10+0'] as const;
+
+type Phase = 'idle' | 'sensing' | 'stopped';
 
 export function App() {
   const [granted, setGranted] = useState(false);
-  const [note, setNote] = useState(consentNote(false, false));
+  const [timeControl, setTimeControl] = useState<(typeof TIME_CONTROLS)[number]>('3+2');
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [samples, setSamples] = useState<PulseSample[]>([]);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [note, setNote] = useState('The camera stays off until you consent.');
+  const [error, setError] = useState<string | null>(null);
+  const bridge = window.chesspulse;
+
+  useEffect(() => {
+    if (!bridge) return undefined;
+    return bridge.onSamples((batch) => {
+      const parsed = sampleBatchSchema.safeParse(batch);
+      if (!parsed.success) return;
+      setSamples((current) => [...current, ...parsed.data]);
+    });
+  }, [bridge]);
+
+  const status = error ?? statusLine(phase, samples, note);
 
   async function onConsent(): Promise<void> {
-    const bridge = window.chesspulse;
+    if (!bridge) {
+      setNote('This page is open outside the ChessPulse window. The camera stays off.');
+      return;
+    }
+    if (phase === 'sensing') {
+      try {
+        const meta = await bridge.stopSession();
+        setPhase('stopped');
+        setNote(stoppedNote(meta));
+      } catch {
+        setError('The session could not be stopped.');
+        return;
+      }
+    }
+    try {
+      setError(null);
+      const next = await bridge.setConsent(!granted);
+      setGranted(next.granted);
+      if (!next.granted) setNote('The camera stays off until you consent.');
+      else if (!next.cameraAllowed) {
+        setNote('Consent is on. This page is not a local file, so the camera stays blocked.');
+      } else setNote('The camera is allowed for this window.');
+    } catch {
+      setNote('Consent could not be saved. The camera state is unchanged.');
+    }
+  }
+
+  async function onStart(): Promise<void> {
     if (!bridge) {
       setNote('This page is open outside the ChessPulse window. The camera stays off.');
       return;
     }
     try {
-      const next = await bridge.setConsent(!granted);
-      setGranted(next.granted);
-      setNote(consentNote(next.granted, next.cameraAllowed));
+      await bridge.startSession(timeControl);
+      setError(null);
+      setSamples([]);
+      setSelectedIndex(null);
+      setPhase('sensing');
+      setNote('Waiting for a face.');
     } catch {
-      setNote('Consent could not be saved. The camera state is unchanged.');
+      setError('The session did not start. The camera stays off.');
+    }
+  }
+
+  async function onStop(): Promise<void> {
+    if (!bridge || phase !== 'sensing') return;
+    try {
+      const meta = await bridge.stopSession();
+      setError(null);
+      setPhase('stopped');
+      setNote(stoppedNote(meta));
+    } catch {
+      setError('The session could not be stopped.');
     }
   }
 
   return (
     <main>
       <p className="label">ChessPulse</p>
-      <h1>Sensing has not started.</h1>
-      <p aria-live="polite">{note}</p>
-      <button type="button" aria-pressed={granted} onClick={() => void onConsent()}>
-        {granted ? 'Revoke camera consent' : 'Allow the camera'}
-      </button>
+      <h1>{phase === 'sensing' ? 'Sensing.' : phase === 'stopped' ? 'Sensing stopped.' : 'Sensing has not started.'}</h1>
+      {phase === 'sensing' ? <p className="indicator">Sensing</p> : null}
+      <p aria-live="polite">{status}</p>
+      <SensingStrip samples={samples} selectedIndex={selectedIndex} onSelect={setSelectedIndex} />
+      {phase === 'idle' ? (
+        <div className="choices" role="group" aria-label="Time control">
+          {TIME_CONTROLS.map((control) => (
+            <button
+              key={control}
+              type="button"
+              aria-pressed={control === timeControl}
+              onClick={() => setTimeControl(control)}
+            >
+              {control}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className="actions">
+        {phase === 'sensing' ? (
+          <button type="button" onClick={() => void onStop()}>
+            Stop sensing
+          </button>
+        ) : (
+          <button type="button" disabled={!granted} onClick={() => void onStart()}>
+            Start sensing
+          </button>
+        )}
+        <button type="button" aria-pressed={granted} onClick={() => void onConsent()}>
+          {granted ? 'Revoke camera consent' : 'Allow the camera'}
+        </button>
+      </div>
     </main>
   );
+}
+
+function statusLine(phase: Phase, samples: PulseSample[], note: string): string {
+  if (phase !== 'sensing') return note;
+  if (samples.length === 0) return 'Waiting for a face.';
+  const latest = samples[samples.length - 1];
+  if (!latest.stable || latest.confidence < CONFIDENCE_FLOOR) {
+    return samples.some((sample) => sample.stable && sample.confidence >= CONFIDENCE_FLOOR)
+      ? 'Low confidence.'
+      : 'Validating.';
+  }
+  return 'Sensing.';
+}
+
+function stoppedNote(meta: SessionMeta): string {
+  const baseline = meta.baselineBpm === undefined ? 'No baseline.' : `Baseline ${formatNumber(meta.baselineBpm)} bpm.`;
+  const coverage = meta.coverage === undefined ? 'No coverage.' : `Coverage ${formatNumber(meta.coverage.pct)}%.`;
+  return `${baseline} ${coverage}`;
+}
+
+function formatNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }

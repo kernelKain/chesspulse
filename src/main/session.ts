@@ -3,15 +3,17 @@
 // Removed: the header would have no baseline, and a gap would be treated as a normal pulse.
 import path from 'node:path';
 import { sessionStartRequestSchema, type PulseSample, type SessionAnchor, type SessionMeta } from '../shared/contracts.js';
+import {
+  BASELINE_WINDOW_US,
+  CONFIDENCE_FLOOR,
+  SAMPLE_HOLD_US,
+} from '../shared/sensing.js';
 import { appendSamples, createSession, listSessions, readMeta, readSamples, saveMeta } from './store.js';
 
-/** Samples at or above this score can support a baseline or coverage. The raw file keeps the rest. */
-export const CONFIDENCE_FLOOR = 50;
-/** The resting pulse is the median of usable samples in this window. */
-export const BASELINE_WINDOW_US = 60_000_000;
-/** A usable sample covers the wait until the next one, and never more than this. */
-export const MAX_SAMPLE_HOLD_US = 1_000_000;
+export { BASELINE_WINDOW_US, CONFIDENCE_FLOOR, SAMPLE_HOLD_US as MAX_SAMPLE_HOLD_US };
 export const MAX_SESSION_US = 90 * 60 * 1_000_000;
+
+const sampleSinks = new Map<string, (samples: readonly PulseSample[]) => void>();
 
 interface ActiveSession {
   id: string;
@@ -59,7 +61,7 @@ export function coverageFromSamples(
     const nextUs = index + 1 < ordered.length ? ordered[index + 1].tUs : stopUs;
     const gap = nextUs - sample.tUs;
     if (gap <= 0) continue;
-    usableUs += Math.min(gap, MAX_SAMPLE_HOLD_US);
+    usableUs += Math.min(gap, SAMPLE_HOLD_US);
   }
   if (usableUs > totalUs) usableUs = totalUs;
   const pct = totalUs === 0 ? 0 : (usableUs / totalUs) * 100;
@@ -90,6 +92,16 @@ export async function ingestSamples(root: string, samples: readonly PulseSample[
     throw new Error('A session cannot run longer than 90 minutes.');
   }
   await appendSamples(root, current.id, samples);
+  sampleSinks.get(path.resolve(root))?.(samples);
+}
+
+export function setSampleSink(
+  root: string,
+  sink: ((samples: readonly PulseSample[]) => void) | undefined,
+): void {
+  const key = path.resolve(root);
+  if (sink) sampleSinks.set(key, sink);
+  else sampleSinks.delete(key);
 }
 
 export async function stopSession(

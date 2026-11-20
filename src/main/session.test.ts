@@ -13,6 +13,7 @@ import {
   ingestSamples,
   MAX_SAMPLE_HOLD_US,
   recoverInterruptedSessions,
+  setSampleSink,
   startSession,
   stopSession,
 } from './session.js';
@@ -110,6 +111,25 @@ describe('session controller', () => {
     );
     const stopped = await stopSession(root, { monoUs: 1_000, epochMs: anchor.epochMs + 1 }, 'user');
     assert.equal((await readSamples(root, stopped.id)).length, 0);
+  });
+
+  it('publishes a stored batch and skips a rejected one', async () => {
+    const root = useRoot();
+    const seen: PulseSample[][] = [];
+    setSampleSink(root, (batch) => {
+      seen.push([...batch]);
+    });
+    try {
+      await startSession(root, anchor, '3+2');
+      await ingestSamples(root, [sample(0, 70)]);
+      assert.equal(seen.length, 1);
+      assert.equal(seen[0][0].bpm, 70);
+      const broken = [{ ...sample(1_000, 70), confidence: 'high' }] as unknown as PulseSample[];
+      await assert.rejects(() => ingestSamples(root, broken), /not a pulse sample/);
+      assert.equal(seen.length, 1);
+    } finally {
+      setSampleSink(root, undefined);
+    }
   });
 
   it('closes an interrupted session as a crash', async () => {

@@ -6,6 +6,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 const CONSENT_CHANNEL = 'cp:consent:set';
 const SESSION_START_CHANNEL = 'cp:session:start';
 const SESSION_STOP_CHANNEL = 'cp:session:stop';
+const SAMPLE_CHANNEL = 'cp:sample:batch';
 
 interface ConsentState {
   granted: boolean;
@@ -56,4 +57,34 @@ contextBridge.exposeInMainWorld('chesspulse', {
       return value as { id: string };
     });
   },
+  onSamples(listener: (samples: unknown) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      try {
+        listener(readBatch(value));
+      } catch {
+        // A bad batch is dropped. The stored trace is unchanged.
+      }
+    };
+    ipcRenderer.on(SAMPLE_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(SAMPLE_CHANNEL, handler);
+    };
+  },
 });
+
+function readBatch(value: unknown): Array<{ tUs: number; bpm: number; confidence: number; stable: boolean }> {
+  if (!Array.isArray(value)) throw new Error('The window returned an unexpected sample.');
+  return value.map((item) => {
+    if (typeof item !== 'object' || item === null) throw new Error('The window returned an unexpected sample.');
+    const record = item as { tUs?: unknown; bpm?: unknown; confidence?: unknown; stable?: unknown };
+    if (
+      typeof record.tUs !== 'number' ||
+      typeof record.bpm !== 'number' ||
+      typeof record.confidence !== 'number' ||
+      typeof record.stable !== 'boolean'
+    ) {
+      throw new Error('The window returned an unexpected sample.');
+    }
+    return { tUs: record.tUs, bpm: record.bpm, confidence: record.confidence, stable: record.stable };
+  });
+}

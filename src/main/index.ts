@@ -3,16 +3,30 @@
 // Removed: the renderer would have no desktop process to attach to.
 import path from 'node:path';
 import { app, BrowserWindow, ipcMain, session } from 'electron';
-import { sessionStartRequestSchema, sessionStartResultSchema, sessionStopRequestSchema } from '../shared/contracts.js';
+import {
+  sampleBatchSchema,
+  sessionStartRequestSchema,
+  sessionStartResultSchema,
+  sessionStopRequestSchema,
+} from '../shared/contracts.js';
 import { contentSecurityPolicy } from '../shared/security.js';
 import { allowsNavigation } from './navigation.js';
 import { currentConsent, registerConsentHandler } from './consent.js';
 import { grantsMediaPermission } from './permission.js';
-import { recoverInterruptedSessions, startSession, stopSession } from './session.js';
+import { recoverInterruptedSessions, setSampleSink, startSession, stopSession } from './session.js';
 import { defaultDataRoot } from './store.js';
 
 const SESSION_START_CHANNEL = 'cp:session:start';
 const SESSION_STOP_CHANNEL = 'cp:session:stop';
+const SAMPLE_CHANNEL = 'cp:sample:batch';
+
+function publishSamples(samples: readonly unknown[]): void {
+  const batch = sampleBatchSchema.parse(samples);
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    win.webContents.send(SAMPLE_CHANNEL, batch);
+  }
+}
 
 function currentAnchor(): { monoUs: number; epochMs: number } {
   return { epochMs: Date.now(), monoUs: Math.round(performance.now() * 1000) };
@@ -119,6 +133,7 @@ app.whenReady().then(async () => {
   installSessionGuards();
   registerConsentHandler();
   registerSessionHandlers();
+  setSampleSink(defaultDataRoot(), publishSamples);
   try {
     await recoverInterruptedSessions(defaultDataRoot());
   } catch (error) {
