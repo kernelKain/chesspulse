@@ -1,0 +1,1 @@
+My process is I will locally do code review by coderabbit vs code extension and then you make changes according to the review. Then commit and push and before merging PR coderabbit again do code review and I ask you to make changes aggain and commit them before I finnaly merge the PR. Then we move to next branch/phase.
