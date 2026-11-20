@@ -1,0 +1,10 @@
+i did not get code review on my PR whatto do abut it: Important
+
+ Trigger review
+This repository does not receive automatic reviews because it has fewer than 10 stars.
+
+ Run configuration
+ Autofix · Keep fixing CodeRabbit findings and required CI, and resolving merge conflicts
+Thanks for using CodeRabbit! It's free for OSS, and your support helps us grow. If you like it, consider giving us a shout-out.
+
+Share
