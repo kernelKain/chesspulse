@@ -1,0 +1,1 @@
+updated env file, make sure all values are correct and working
