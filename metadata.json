@@ -1,0 +1,13 @@
+{
+  "cli_version": "0.12.3-nightly.202610310614.54b6a5cac",
+  "checkpoint_id": "01M804CFZE6FFV9TPHHV677D5K",
+  "strategy": "manual-commit",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "prompt": "/0/prompt.txt"
+    }
+  ]
+}

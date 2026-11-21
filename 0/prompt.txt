@@ -1,0 +1,67 @@
+run app and help m etest it in minumum time
+
+---
+
+the api key is already present in theproject
+
+---
+
+test the app with dummy data first, use your geranted pgn , tets for 3+2 and show me things running.; Also the the ai url :CP_AI_BASE_URL=https://opencode.ai/zen/go/v1, should be only url for opencode go; aslo my camera looks blurry solve this issue.
+
+---
+
+again the camera turned all black
+
+---
+
+I directly added this PGN y copying:[Event "Live Chess"]
+[Site "Chess.com"]
+[Date "2026.11.20"]
+[Round "?"]
+[White "Oikawa9999"]
+[Black "Diego_374"]
+[Result "1-0"]
+[TimeControl "180+2"]
+[WhiteElo "283"]
+[BlackElo "208"]
+[Termination "Oikawa9999 won by checkmate"]
+[ECO "A40"]
+[EndTime "14:07:49 GMT+0000"]
+[Link "https://www.chess.com/game/live/187624045240?username=oikawa9999"]
+
+1. d4 {[%clk 0:03:01.9][%timestamp 1]} 1... g6 {[%clk 0:02:55.4][%timestamp 66]}
+2. d5 {[%clk 0:03:03][%timestamp 9]} 2... Bg7 {[%clk 0:02:57.3][%timestamp 1]}
+3. c3 {[%clk 0:03:03][%timestamp 20]} 3... Nf6 {[%clk 0:02:56.1][%timestamp 32]}
+4. Bg5 {[%clk 0:03:03][%timestamp 20]} 4... Nxd5 {[%clk 0:02:54.8][%timestamp
+33]} 5. Qxd5 {[%clk 0:03:01.9][%timestamp 31]} 5... O-O {[%clk
+0:02:52.5][%timestamp 43]} 6. Qe4 {[%clk 0:02:59.6][%timestamp 43]} 6... Nc6
+{[%clk 0:02:46.9][%timestamp 76]} 7. e3 {[%clk 0:02:55.8][%timestamp 58]} 7...
+Ne5 {[%clk 0:02:39.3][%timestamp 96]} 8. f4 {[%clk 0:02:53.8][%timestamp 40]}
+8... Ng4 {[%clk 0:02:35.7][%timestamp 56]} 9. h3 {[%clk 0:02:51.1][%timestamp
+47]} 9... Nf6 {[%clk 0:02:36][%timestamp 17]} 10. Bxf6 {[%clk
+0:02:51.3][%timestamp 18]} 10... Bxf6 {[%clk 0:02:36.5][%timestamp 15]} 11. Bc4
+{[%clk 0:02:49.7][%timestamp 36]} 11... Bg7 {[%clk 0:02:34.5][%timestamp 40]}
+12. Bb3 {[%clk 0:02:49.5][%timestamp 22]} 12... d6 {[%clk 0:02:35.1][%timestamp
+14]} 13. g4 {[%clk 0:02:49][%timestamp 25]} 13... Be6 {[%clk
+0:02:33.3][%timestamp 38]} 14. Bxe6 {[%clk 0:02:47.2][%timestamp 38]} 14... fxe6
+{[%clk 0:02:34.1][%timestamp 12]} 15. Qxe6+ {[%clk 0:02:48.2][%timestamp 10]}
+15... Rf7 {[%clk 0:02:33.3][%timestamp 28]} 16. Nf3 {[%clk 0:02:48.6][%timestamp
+16]} 16... Qf8 {[%clk 0:02:24.5][%timestamp 108]} 17. Ng5 {[%clk
+0:02:48.4][%timestamp 22]} 17... Rd8 {[%clk 0:02:03.8][%timestamp 227]} 18. Nxf7
+{[%clk 0:02:47.9][%timestamp 25]} 18... Qxf7 {[%clk 0:02:05.4][%timestamp 4]}
+19. Qxf7+ {[%clk 0:02:49][%timestamp 9]} 19... Kxf7 {[%clk 0:02:05.9][%timestamp
+15]} 20. Na3 {[%clk 0:02:49.9][%timestamp 11]} 20... d5 {[%clk
+0:02:01.8][%timestamp 61]} 21. O-O-O {[%clk 0:02:45.8][%timestamp 61]} 21... Rd6
+{[%clk 0:02:00.6][%timestamp 32]} 22. h4 {[%clk 0:02:45.5][%timestamp 23]} 22...
+Ra6 {[%clk 0:02:00.5][%timestamp 21]} 23. Nb5 {[%clk 0:02:40][%timestamp 75]}
+23... Rxa2 {[%clk 0:02:00][%timestamp 25]} 24. Nxc7 {[%clk 0:02:40.1][%timestamp
+19]} 24... e6 {[%clk 0:01:58.4][%timestamp 36]} 25. h5 {[%clk
+0:02:37][%timestamp 51]} 25... gxh5 {[%clk 0:01:58.2][%timestamp 22]} 26. Rxh5
+{[%clk 0:02:37][%timestamp 20]} 26... Kg6 {[%clk 0:01:51][%timestamp 92]} 27.
+Rg5+ {[%clk 0:02:35.5][%timestamp 35]} 27... Kh6 {[%clk 0:01:49.6][%timestamp
+34]} 28. Nxe6 {[%clk 0:02:34.1][%timestamp 34]} 28... b5 {[%clk
+0:01:37.5][%timestamp 141]} 29. Nxg7 {[%clk 0:02:30.7][%timestamp 54]} 29... a5
+{[%clk 0:01:36.9][%timestamp 26]} 30. Rdxd5 {[%clk 0:02:28.8][%timestamp 39]}
+30... b4 {[%clk 0:01:38.8][%timestamp 1]} 31. cxb4 {[%clk 0:02:25.5][%timestamp
+53]} 31... axb4 {[%clk 0:01:39.5][%timestamp 13]} 32. Rd6# {[%clk
+0:02:24.9][%timestamp 26]} 1-0;; but i got this error:EndDate and EndTime are not a complete UTC time., INVLAID error; so solve this issue as people will only add PGN by direclty copying from chess.com so you should underatnd that froamt

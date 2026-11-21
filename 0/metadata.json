@@ -1,0 +1,12 @@
+{
+  "cli_version": "0.12.3-nightly.202610310614.54b6a5cac",
+  "checkpoint_id": "01M804CFZE6FFV9TPHHV677D5K",
+  "session_id": "ses_e00123655ffeRuNpOXEaMjNT7Q",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-21T22:42:15.266430206Z",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "agent": "OpenCode",
+  "model": "k3.1-pro-highspeed",
+  "turn_id": "6c6486cec5bc"
+}
