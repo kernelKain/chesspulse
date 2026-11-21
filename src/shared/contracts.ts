@@ -238,6 +238,20 @@ export const sessionStopRequestSchema = z.object({}).strict();
 
 export const sampleBatchSchema = z.array(pulseSampleSchema);
 
+/** A preview frame: a small RGBA bitmap plus the brightness it was measured at. */
+export const previewFrameSchema = z
+  .object({
+    width: z.number().int().min(2).max(1920),
+    height: z.number().int().min(2).max(1080),
+    light: z.number().finite().min(0).max(1),
+    rgba: z.custom<Uint8Array>((value) => value instanceof Uint8Array, 'Expected RGBA bytes'),
+  })
+  .strict()
+  .refine((frame) => frame.rgba.byteLength === frame.width * frame.height * 4, {
+    message: 'The preview bytes do not match the frame size.',
+    path: ['rgba'],
+  });
+
 export const validationMessageSchema = z
   .object({
     code: z.number().int(),
@@ -398,3 +412,6 @@ export type PasteGameSummary = z.infer<typeof pasteGameSummarySchema>;
 export type PasteSlot = z.infer<typeof pasteSlotSchema>;
 export type PasteState = z.infer<typeof pasteStateSchema>;
 export type PasteValidation = z.infer<typeof pasteValidationSchema>;
+export type ValidationMessage = z.infer<typeof validationMessageSchema>;
+export type SdkError = z.infer<typeof sdkErrorSchema>;
+export type PreviewFrame = z.infer<typeof previewFrameSchema>;

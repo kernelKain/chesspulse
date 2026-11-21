@@ -14,7 +14,7 @@ const page = pathToFileURL(path.join(root, 'dist/index.html')).href;
 const { registerConsentHandler } = require(path.join(root, 'dist-electron/main/consent.js'));
 
 app.whenReady().then(async () => {
-  registerConsentHandler(page);
+  registerConsentHandler({ appFileUrl: page });
   const win = new BrowserWindow({
     show: false,
     webPreferences: {

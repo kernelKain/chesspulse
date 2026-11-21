@@ -13,17 +13,36 @@ export function currentConsent(): boolean {
   return consentGranted;
 }
 
-export function registerConsentHandler(appFileUrl: string): void {
+export interface ConsentHooks {
+  /** Called after consent is withdrawn, so the process holding the camera can let go. */
+  onRevoked?: () => void;
+}
+
+export interface ConsentOptions {
+  appFileUrl: string;
+  devOrigin?: string;
+}
+
+export function registerConsentHandler(options: ConsentOptions, hooks: ConsentHooks = {}): void {
   ipcMain.handle(CONSENT_CHANNEL, (event, payload: unknown) => {
     const parsed = consentRequestSchema.safeParse(payload);
     if (!parsed.success) throw new Error('Consent was not a yes or no.');
+    const wasGranted = consentGranted;
     consentGranted = parsed.data.granted;
+    if (wasGranted && !consentGranted) {
+      try {
+        hooks.onRevoked?.();
+      } catch {
+        // The flag is already off; the page cannot re-open the camera through this path.
+      }
+    }
     return consentStateSchema.parse({
       granted: consentGranted,
       cameraAllowed: grantsMediaPermission({
         permission: 'media',
         requestingUrl: event.senderFrame?.url,
-        appFileUrl,
+        appFileUrl: options.appFileUrl,
+        devOrigin: options.devOrigin,
         consentGranted,
         isMainFrame: true,
         mediaTypes: ['video'],

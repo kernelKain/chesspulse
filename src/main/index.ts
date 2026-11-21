@@ -1,34 +1,123 @@
-// What: the Electron main process. It opens one local window and nothing else.
-// Why: the camera, engine, and files will live here later, outside the page.
-// Removed: the renderer would have no desktop process to attach to.
+// What: the Electron main process. It opens one local window and owns the camera, never the page.
+// Why: the SmartSpectra key and native runtime stay here, so the page receives only numbers.
+// Removed: the renderer would have no desktop process to attach to, and no way to sense.
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, ipcMain, session } from 'electron';
 import {
+  previewFrameSchema,
   sampleBatchSchema,
+  sdkErrorSchema,
   sessionStartRequestSchema,
   sessionStartResultSchema,
   sessionStopRequestSchema,
+  validationMessageSchema,
+  type PreviewFrame,
+  type SdkError,
+  type SessionMeta,
+  type ValidationMessage,
 } from '../shared/contracts.js';
 import { contentSecurityPolicy } from '../shared/security.js';
 import { allowsNavigation } from './navigation.js';
+import { startCapture, type CaptureSession } from './capture.js';
 import { currentConsent, registerConsentHandler } from './consent.js';
+import { loadEnvFile, readSensingKey } from './env.js';
+import { installSafeConsole, log, logError } from './log.js';
 import { registerPasteHandler } from './paste.js';
 import { registerReportHandler } from './report-ipc.js';
 import { grantsMediaPermission } from './permission.js';
-import { recoverInterruptedSessions, setSampleSink, startSession, stopSession } from './session.js';
+import {
+  ingestSamples,
+  recoverInterruptedSessions,
+  setSampleSink,
+  startSession,
+  stopSession,
+} from './session.js';
 import { defaultDataRoot } from './store.js';
 
 const SESSION_START_CHANNEL = 'cp:session:start';
 const SESSION_STOP_CHANNEL = 'cp:session:stop';
 const SAMPLE_CHANNEL = 'cp:sample:batch';
+const VALIDATION_CHANNEL = 'cp:validation';
+const SDK_ERROR_CHANNEL = 'cp:sdk:error';
+const PREVIEW_CHANNEL = 'cp:preview';
 
-function publishSamples(samples: readonly unknown[]): void {
-  const batch = sampleBatchSchema.parse(samples);
+let capture: CaptureSession | null = null;
+/** One stop at a time. Every caller shares this promise, so the session is finalized exactly once. */
+let stoppingSession: Promise<SessionMeta> | null = null;
+
+function rendererDevOrigin(): string | undefined {
+  const devUrl = process.env.CHESSPULSE_RENDERER_URL;
+  if (!devUrl) return undefined;
+  try {
+    const url = new URL(devUrl);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function publishToWindows(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (win.isDestroyed()) continue;
-    win.webContents.send(SAMPLE_CHANNEL, batch);
+    win.webContents.send(channel, payload);
   }
+}
+
+function publishSamples(samples: readonly unknown[]): void {
+  publishToWindows(SAMPLE_CHANNEL, sampleBatchSchema.parse(samples));
+}
+
+let lastValidationCode: number | null = null;
+
+function publishValidation(message: ValidationMessage): void {
+  const parsed = validationMessageSchema.parse(message);
+  if (parsed.code !== lastValidationCode) {
+    lastValidationCode = parsed.code;
+    log(`[chesspulse] sensing hint ${parsed.code}: ${parsed.hint}`);
+  }
+  publishToWindows(VALIDATION_CHANNEL, parsed);
+}
+
+function publishPreview(frame: PreviewFrame): void {
+  publishToWindows(PREVIEW_CHANNEL, previewFrameSchema.parse(frame));
+}
+
+function publishSdkError(error: SdkError): void {
+  const parsed = sdkErrorSchema.parse(error);
+  // The page shows this; the terminal keeps the code so a failure can be diagnosed after the fact.
+  logError(`[chesspulse] sensing error ${parsed.code}: ${parsed.message} (retryable=${parsed.retryable})`);
+  publishToWindows(SDK_ERROR_CHANNEL, parsed);
+}
+
+/** The camera is released before the session closes, so the last batch still has a session to land in. */
+async function stopCapture(): Promise<void> {
+  const current = capture;
+  capture = null;
+  lastValidationCode = null;
+  if (!current) return;
+  try {
+    await current.stop();
+  } catch {
+    // Best effort. Samples already written stay valid; crash recovery closes the header.
+  }
+}
+
+/**
+ * Releases the camera, then closes the header. The page, consent withdrawal, the window closing
+ * and quitting all share one promise: nobody proceeds while the native teardown is still draining,
+ * and the session is never finalized twice.
+ */
+function stopEverything(reason: 'user' | 'sdkError'): Promise<SessionMeta> {
+  if (stoppingSession) return stoppingSession;
+  const run = (async () => {
+    await stopCapture();
+    return stopSession(defaultDataRoot(), currentAnchor(), reason);
+  })();
+  stoppingSession = run.finally(() => {
+    stoppingSession = null;
+  });
+  return stoppingSession;
 }
 
 function appFileUrl(): string {
@@ -44,13 +133,41 @@ function registerSessionHandlers(): void {
     if (!currentConsent()) throw new Error('The camera stays off until you consent.');
     const parsed = sessionStartRequestSchema.safeParse(payload);
     if (!parsed.success) throw new Error('Choose a time control before starting.');
-    const meta = await startSession(defaultDataRoot(), currentAnchor(), parsed.data.timeControl);
+    if (capture) throw new Error('A session is already running.');
+    // A previous stop may still be draining the camera; the SDK is process-global.
+    if (stoppingSession) await stoppingSession.catch(() => undefined);
+    const apiKey = readSensingKey(process.env);
+    if (!apiKey) throw new Error('The SmartSpectra key is missing. Add SMARTSPECTRA_API_KEY to .env.');
+    const anchor = currentAnchor();
+    lastValidationCode = null;
+    const meta = await startSession(defaultDataRoot(), anchor, parsed.data.timeControl);
+    // Consent can be withdrawn while the header is written. Checked again immediately before the
+    // camera opens, with no await in between, so a revocation cannot slip through.
+    if (!currentConsent()) {
+      await stopEverything('user').catch(() => undefined);
+      throw new Error('The camera stays off until you consent.');
+    }
+    try {
+      capture = startCapture({
+        apiKey,
+        anchor: meta.startAnchor,
+        events: {
+          onSamples: (samples) => ingestSamples(defaultDataRoot(), samples),
+          onValidation: publishValidation,
+          onError: publishSdkError,
+          onPreview: publishPreview,
+        },
+      });
+    } catch (error) {
+      await stopEverything('sdkError').catch(() => undefined);
+      throw error;
+    }
     return sessionStartResultSchema.parse({ sessionId: meta.id });
   });
   ipcMain.handle(SESSION_STOP_CHANNEL, async (_event, payload: unknown) => {
     const parsed = sessionStopRequestSchema.safeParse(payload ?? {});
     if (!parsed.success) throw new Error('Stop does not take any details.');
-    return stopSession(defaultDataRoot(), currentAnchor(), 'user');
+    return stopEverything('user');
   });
 }
 
@@ -82,6 +199,7 @@ function installSessionGuards(): void {
       permission,
       requestingUrl: details.requestingUrl ?? requestingOrigin,
       appFileUrl: appFileUrl(),
+      devOrigin: rendererDevOrigin(),
       consentGranted: currentConsent(),
       isMainFrame: details.isMainFrame,
       mediaType: details.mediaType,
@@ -95,6 +213,7 @@ function installSessionGuards(): void {
         permission,
         requestingUrl: details.requestingUrl,
         appFileUrl: appFileUrl(),
+        devOrigin: rendererDevOrigin(),
         consentGranted: currentConsent(),
         isMainFrame: details.isMainFrame,
         mediaTypes,
@@ -121,6 +240,9 @@ function createWindow(): void {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      // The player focuses another window to play chess. Throttled frames would starve the
+      // measurement, so the page must keep its timers and frame callbacks at full rate.
+      backgroundThrottling: false,
     },
   });
 
@@ -130,7 +252,7 @@ function createWindow(): void {
     event.preventDefault();
   });
   win.webContents.on('did-finish-load', () => {
-    console.log('[chesspulse] window-open');
+    log('[chesspulse] window-open');
   });
 
   if (target.startsWith('http://') || target.startsWith('https://')) {
@@ -140,9 +262,22 @@ function createWindow(): void {
   void win.loadFile(target);
 }
 
+installSafeConsole();
+
 app.whenReady().then(async () => {
+  const env = loadEnvFile(path.join(app.getAppPath(), '.env'), process.env);
+  if (env.found && env.loadedKeys.length > 0) {
+    log(`[chesspulse] loaded ${env.loadedKeys.length} setting(s) from .env`);
+  }
   installSessionGuards();
-  registerConsentHandler(appFileUrl());
+  registerConsentHandler(
+    { appFileUrl: appFileUrl(), devOrigin: rendererDevOrigin() },
+    {
+      onRevoked: () => {
+        void stopEverything('user').catch(() => undefined);
+      },
+    },
+  );
   registerSessionHandlers();
   registerPasteHandler();
   registerReportHandler();
@@ -150,10 +285,10 @@ app.whenReady().then(async () => {
   try {
     const recovery = await recoverInterruptedSessions(defaultDataRoot());
     for (const failure of recovery.failures) {
-      console.error(`${failure.id}: ${failure.message}`);
+      logError(`${failure.id}: ${failure.message}`);
     }
   } catch (error) {
-    console.error(error instanceof Error ? error.message : 'An open session could not be closed.');
+    logError(error instanceof Error ? error.message : 'An open session could not be closed.');
   }
   createWindow();
   app.on('activate', () => {
@@ -161,6 +296,20 @@ app.whenReady().then(async () => {
   });
 });
 
+let quitting = false;
+
+app.on('before-quit', (event) => {
+  if (quitting) return;
+  if (!capture && !stoppingSession) return;
+  event.preventDefault();
+  quitting = true;
+  void stopEverything('user')
+    .catch(() => undefined)
+    .finally(() => app.quit());
+});
+
 app.on('window-all-closed', () => {
+  // Closing the last window ends the session, on every platform. Quitting then waits for it.
+  void stopEverything('user').catch(() => undefined);
   if (process.platform !== 'darwin') app.quit();
 });

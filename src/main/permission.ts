@@ -6,6 +6,8 @@ export interface MediaPermissionInput {
   requestingUrl: string | undefined;
   /** The built page this window is allowed to show. Any other file URL stays denied. */
   appFileUrl: string | undefined;
+  /** The local dev page's origin, when `npm run dev` serves the window. */
+  devOrigin?: string;
   consentGranted: boolean;
   isMainFrame: boolean;
   mediaTypes?: readonly string[];
@@ -16,7 +18,7 @@ export function grantsMediaPermission(input: MediaPermissionInput): boolean {
   if (input.permission !== 'media') return false;
   if (!input.consentGranted || !input.isMainFrame) return false;
   if (!isVideoOnly(input.mediaTypes, input.mediaType)) return false;
-  return isAppDocument(input.requestingUrl, input.appFileUrl);
+  return isAppDocument(input.requestingUrl, input.appFileUrl, input.devOrigin);
 }
 
 function isVideoOnly(mediaTypes: readonly string[] | undefined, mediaType: string | undefined): boolean {
@@ -24,10 +26,21 @@ function isVideoOnly(mediaTypes: readonly string[] | undefined, mediaType: strin
   return mediaType === 'video';
 }
 
-function isAppDocument(requestingUrl: string | undefined, appFileUrl: string | undefined): boolean {
-  if (!requestingUrl || !appFileUrl) return false;
+function isAppDocument(
+  requestingUrl: string | undefined,
+  appFileUrl: string | undefined,
+  devOrigin: string | undefined,
+): boolean {
+  if (!requestingUrl) return false;
   try {
     const page = new URL(requestingUrl);
+    if (devOrigin) {
+      const dev = new URL(devOrigin);
+      if (dev.protocol === 'http:' || dev.protocol === 'https:') {
+        if (page.origin === dev.origin) return true;
+      }
+    }
+    if (!appFileUrl) return false;
     const app = new URL(appFileUrl);
     return page.protocol === 'file:' && app.protocol === 'file:' && page.pathname === app.pathname;
   } catch {

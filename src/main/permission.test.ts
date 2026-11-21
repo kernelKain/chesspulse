@@ -30,13 +30,35 @@ describe('grantsMediaPermission', () => {
     );
   });
 
-  it('denies the dev server and any remote page', () => {
+  it('denies the dev server when no dev origin is configured', () => {
     assert.equal(
       grantsMediaPermission(request({ requestingUrl: 'http://127.0.0.1:5173/' })),
       false,
     );
     assert.equal(
       grantsMediaPermission(request({ requestingUrl: 'https://example.com/' })),
+      false,
+    );
+  });
+
+  it('allows only the configured dev origin', () => {
+    const devOrigin = 'http://127.0.0.1:5173';
+    assert.equal(
+      grantsMediaPermission(
+        request({ requestingUrl: 'http://127.0.0.1:5173/', devOrigin }),
+      ),
+      true,
+    );
+    assert.equal(
+      grantsMediaPermission(
+        request({ requestingUrl: 'http://127.0.0.1:5174/', devOrigin }),
+      ),
+      false,
+    );
+    assert.equal(
+      grantsMediaPermission(
+        request({ requestingUrl: 'https://example.com/', devOrigin }),
+      ),
       false,
     );
   });

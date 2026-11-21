@@ -7,12 +7,34 @@ const CONSENT_CHANNEL = 'cp:consent:set';
 const SESSION_START_CHANNEL = 'cp:session:start';
 const SESSION_STOP_CHANNEL = 'cp:session:stop';
 const SAMPLE_CHANNEL = 'cp:sample:batch';
+const VALIDATION_CHANNEL = 'cp:validation';
+const SDK_ERROR_CHANNEL = 'cp:sdk:error';
+const PREVIEW_CHANNEL = 'cp:preview';
 const PASTE_VALIDATE_CHANNEL = 'cp:pgn:validate';
 const REPORT_BUILD_CHANNEL = 'cp:report:build';
 
 interface ConsentState {
   granted: boolean;
   cameraAllowed: boolean;
+}
+
+interface ValidationMessage {
+  code: number;
+  ts: number;
+  hint: string;
+}
+
+interface SdkError {
+  code: number;
+  message: string;
+  retryable: boolean;
+}
+
+interface PreviewFrame {
+  width: number;
+  height: number;
+  light: number;
+  rgba: Uint8Array;
 }
 
 function readConsentState(value: unknown): ConsentState {
@@ -72,6 +94,45 @@ contextBridge.exposeInMainWorld('chesspulse', {
       ipcRenderer.removeListener(SAMPLE_CHANNEL, handler);
     };
   },
+  onValidation(listener: (message: ValidationMessage) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      try {
+        listener(readValidation(value));
+      } catch {
+        // A bad hint is dropped. The strip keeps its own state.
+      }
+    };
+    ipcRenderer.on(VALIDATION_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(VALIDATION_CHANNEL, handler);
+    };
+  },
+  onSdkError(listener: (error: SdkError) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      try {
+        listener(readSdkError(value));
+      } catch {
+        // A bad error is dropped. The session controls still work.
+      }
+    };
+    ipcRenderer.on(SDK_ERROR_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(SDK_ERROR_CHANNEL, handler);
+    };
+  },
+  onPreview(listener: (frame: PreviewFrame) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      try {
+        listener(readPreview(value));
+      } catch {
+        // A bad frame is dropped. The next one is a fresh copy.
+      }
+    };
+    ipcRenderer.on(PREVIEW_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(PREVIEW_CHANNEL, handler);
+    };
+  },
   validatePgns(slots: unknown): Promise<unknown> {
     if (!Array.isArray(slots) || !slots.every((item) => typeof item === 'string')) {
       return Promise.reject(new Error('Paste entries must be text.'));
@@ -114,4 +175,47 @@ function readBatch(value: unknown): Array<{ tUs: number; bpm: number; confidence
     }
     return { tUs: record.tUs, bpm: record.bpm, confidence: record.confidence, stable: record.stable };
   });
+}
+
+function readValidation(value: unknown): ValidationMessage {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('The window returned an unexpected sensing hint.');
+  }
+  const record = value as { code?: unknown; ts?: unknown; hint?: unknown };
+  if (typeof record.code !== 'number' || typeof record.ts !== 'number' || typeof record.hint !== 'string') {
+    throw new Error('The window returned an unexpected sensing hint.');
+  }
+  return { code: record.code, ts: record.ts, hint: record.hint };
+}
+
+function readPreview(value: unknown): PreviewFrame {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('The window returned an unexpected camera frame.');
+  }
+  const record = value as { width?: unknown; height?: unknown; light?: unknown; rgba?: unknown };
+  if (
+    typeof record.width !== 'number' ||
+    typeof record.height !== 'number' ||
+    typeof record.light !== 'number' ||
+    !(record.rgba instanceof Uint8Array) ||
+    record.rgba.byteLength !== record.width * record.height * 4
+  ) {
+    throw new Error('The window returned an unexpected camera frame.');
+  }
+  return { width: record.width, height: record.height, light: record.light, rgba: record.rgba };
+}
+
+function readSdkError(value: unknown): SdkError {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('The window returned an unexpected sensing error.');
+  }
+  const record = value as { code?: unknown; message?: unknown; retryable?: unknown };
+  if (
+    typeof record.code !== 'number' ||
+    typeof record.message !== 'string' ||
+    typeof record.retryable !== 'boolean'
+  ) {
+    throw new Error('The window returned an unexpected sensing error.');
+  }
+  return { code: record.code, message: record.message, retryable: record.retryable };
 }

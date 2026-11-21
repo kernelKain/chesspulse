@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { downscaleRgbToRgba } from './preview.js';
 import {
   consentRequestSchema,
+  previewFrameSchema,
   pasteValidationSchema,
   pgnValidateRequestSchema,
   pulseSampleSchema,
@@ -81,5 +83,38 @@ describe('pasteValidationSchema', () => {
     };
     assert.equal(pasteValidationSchema.safeParse(empty).success, true);
     assert.equal(pasteValidationSchema.safeParse({ ...empty, demo: true }).success, false);
+  });
+});
+
+describe('previewFrameSchema', () => {
+  const frame = { width: 320, height: 180, light: 0.42, rgba: new Uint8Array(320 * 180 * 4) };
+
+  it('accepts a bounded preview frame', () => {
+    const parsed = previewFrameSchema.parse(frame);
+    assert.equal(parsed.width, 320);
+    assert.equal(parsed.light, 0.42);
+    assert.equal(parsed.rgba.byteLength, 320 * 180 * 4);
+  });
+
+  it('accepts real converter output', () => {
+    const source = new Uint8Array(4 * 2 * 3);
+    const converted = downscaleRgbToRgba(source, 4, 2, 12, 32);
+    assert.equal(previewFrameSchema.safeParse(converted).success, true);
+  });
+
+  it('rejects bytes that do not match the frame size', () => {
+    assert.equal(previewFrameSchema.safeParse({ ...frame, rgba: new Uint8Array(4) }).success, false);
+    assert.equal(
+      previewFrameSchema.safeParse({ ...frame, rgba: new Uint8Array(320 * 180 * 4 + 4) }).success,
+      false,
+    );
+  });
+
+  it('rejects a fractional size, a light outside 0-1, or non-binary pixels', () => {
+    assert.equal(previewFrameSchema.safeParse({ ...frame, width: 320.5 }).success, false);
+    assert.equal(previewFrameSchema.safeParse({ ...frame, width: 4000 }).success, false);
+    assert.equal(previewFrameSchema.safeParse({ ...frame, light: 1.5 }).success, false);
+    assert.equal(previewFrameSchema.safeParse({ ...frame, rgba: [1, 2, 3] }).success, false);
+    assert.equal(previewFrameSchema.safeParse({ width: 320, height: 180, light: 0.4 }).success, false);
   });
 });

@@ -6,9 +6,11 @@ import {
   type PulseSample,
   type ReportResult,
   type SessionMeta,
+  type ValidationMessage,
 } from '../shared/contracts';
 import { CONFIDENCE_FLOOR } from '../shared/sensing';
 import { BandBars } from './BandBars';
+import { CameraPreview } from './CameraPreview';
 import { GameList } from './GameList';
 import { PasteScreen } from './PasteScreen';
 import { SensingStrip } from './SensingStrip';
@@ -30,6 +32,8 @@ export function App() {
   const [reportError, setReportError] = useState<string | null>(null);
   const [samples, setSamples] = useState<PulseSample[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [validation, setValidation] = useState<ValidationMessage | null>(null);
+  const [sdkError, setSdkError] = useState<string | null>(null);
   const [note, setNote] = useState('The camera stays off until you consent.');
   const [error, setError] = useState<string | null>(null);
   const bridge = window.chesspulse;
@@ -51,6 +55,8 @@ export function App() {
     setReportError(null);
     setSamples([]);
     setSelectedIndex(null);
+    setValidation(null);
+    setSdkError(null);
   }
 
   useEffect(() => {
@@ -59,10 +65,42 @@ export function App() {
       const parsed = sampleBatchSchema.safeParse(batch);
       if (!parsed.success) return;
       setSamples((current) => [...current, ...parsed.data]);
+      setSdkError((current) => (current === null ? current : null));
     });
   }, [bridge]);
 
-  const status = error ?? statusLine(phase, samples, note);
+  useEffect(() => {
+    if (!bridge) return undefined;
+    return bridge.onValidation((message) => {
+      setValidation(message);
+      if (message.code === 0) setSdkError((current) => (current === null ? current : null));
+    });
+  }, [bridge]);
+
+  useEffect(() => {
+    if (!bridge) return undefined;
+    return bridge.onSdkError((info) => {
+      // Kept apart from operation errors, which no sensing event may clear.
+      setSdkError(info.message);
+      if (info.retryable) return;
+      void (async () => {
+        try {
+          const meta = await bridge.stopSession();
+          adoptSession(meta.id);
+          setPhase('stopped');
+          setNote(stoppedNote(meta));
+        } catch {
+          // The session may already be closed. The message above still stands.
+          setPhase('stopped');
+        } finally {
+          // adoptSession clears session-scoped state, so the reason is restored after the stop.
+          setSdkError(info.message);
+        }
+      })();
+    });
+  }, [bridge]);
+
+  const status = error ?? sdkError ?? statusLine(phase, samples, note, validation);
 
   async function onConsent(): Promise<void> {
     if (!bridge) {
@@ -90,9 +128,7 @@ export function App() {
       grantedNow.current = next.granted;
       setGranted(next.granted);
       if (!next.granted) setNote('The camera stays off until you consent.');
-      else if (!next.cameraAllowed) {
-        setNote('Consent is on. This page is not a local file, so the camera stays blocked.');
-      } else setNote('The camera is allowed for this window.');
+      else setNote('Consent is on. The camera opens when you start sensing.');
     } catch {
       setNote('Consent could not be saved. The camera state is unchanged.');
     }
@@ -121,9 +157,9 @@ export function App() {
       }
       setPhase('sensing');
       setNote('Waiting for a face.');
-    } catch {
+    } catch (caught: unknown) {
       if (!revokedDuringStart.current && grantedNow.current) {
-        setError('The session did not start. The camera stays off.');
+        setError(ipcErrorText(caught, 'The session did not start. The camera stays off.'));
       }
     } finally {
       startPending.current = false;
@@ -235,7 +271,10 @@ export function App() {
       <p className="label">ChessPulse</p>
       <h1>{phase === 'sensing' ? 'Sensing.' : phase === 'stopped' ? 'Sensing stopped.' : 'Sensing has not started.'}</h1>
       {phase === 'sensing' ? <p className="indicator">Sensing</p> : null}
-      <p aria-live="polite">{status}</p>
+      <p aria-live="polite" role={error || sdkError ? 'alert' : undefined}>
+        {status}
+      </p>
+      {granted ? <CameraPreview sensing={phase === 'sensing'} /> : null}
       <SensingStrip samples={samples} selectedIndex={selectedIndex} onSelect={setSelectedIndex} />
       {phase === 'idle' ? (
         <div className="choices" role="group" aria-label="Time control">
@@ -274,8 +313,14 @@ export function App() {
   );
 }
 
-function statusLine(phase: Phase, samples: PulseSample[], note: string): string {
+function statusLine(
+  phase: Phase,
+  samples: PulseSample[],
+  note: string,
+  validation: ValidationMessage | null,
+): string {
   if (phase !== 'sensing') return note;
+  if (validation && validation.code !== 0) return validation.hint;
   if (samples.length === 0) return 'Waiting for a face.';
   const latest = samples[samples.length - 1];
   if (!latest.stable || latest.confidence < CONFIDENCE_FLOOR) {
@@ -294,4 +339,13 @@ function stoppedNote(meta: SessionMeta): string {
 
 function formatNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+/** Electron wraps a rejected invoke in "Error invoking remote method …: Error: ", which is not for the player. */
+function ipcErrorText(caught: unknown, fallback: string): string {
+  if (!(caught instanceof Error)) return fallback;
+  const marker = 'Error: ';
+  const at = caught.message.lastIndexOf(marker);
+  const text = (at >= 0 ? caught.message.slice(at + marker.length) : caught.message).trim();
+  return text.length > 0 && !text.startsWith('Error invoking remote method') ? text : fallback;
 }
