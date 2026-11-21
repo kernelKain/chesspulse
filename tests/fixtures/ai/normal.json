@@ -1,0 +1,6 @@
+{
+  "name": "normal",
+  "stats": { "blunders": 8, "elevatedBlunders": 5, "settledAccuracy": 71, "elevatedAccuracy": 54, "baselineBpm": 70, "elevatedThresholdBpm": 80 },
+  "response": "There were 8 blunders, with 5 while elevated. Accuracy was 71% settled and 54% elevated. The elevated threshold was 80 bpm against a 70 bpm baseline.",
+  "expected": "accept"
+}

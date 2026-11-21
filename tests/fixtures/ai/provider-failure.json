@@ -1,0 +1,6 @@
+{
+  "name": "provider failure",
+  "input": "Computed summary: accuracy 71% settled.",
+  "sequence": ["500", "timeout"],
+  "expected": "two_calls_then_honest_error"
+}

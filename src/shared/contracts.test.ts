@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { downscaleRgbToRgba } from './preview.js';
 import {
+  coachGapRequestSchema,
+  coachMessageSchema,
+  insightResultSchema,
   consentRequestSchema,
   previewFrameSchema,
   pasteValidationSchema,
@@ -42,6 +45,36 @@ describe('refusalSchema', () => {
       remedy: 'Record a longer session.',
     });
     assert.equal(parsed.success, false);
+  });
+});
+
+describe('coach IPC contracts', () => {
+  it('accepts computed coach numbers and rejects unvalidated fields', () => {
+    const message = {
+      baselineBpm: 70,
+      recentBpm: 90,
+      deltaBpm: 20,
+      text: 'Pulse still +20 over baseline. Take a real break before the next game.',
+    };
+    assert.deepEqual(coachMessageSchema.parse(message), message);
+    assert.equal(coachMessageSchema.safeParse({ ...message, rawPulse: [90] }).success, false);
+    assert.equal(coachGapRequestSchema.safeParse({ betweenGames: true }).success, true);
+    assert.equal(coachGapRequestSchema.safeParse({ betweenGames: 'yes' }).success, false);
+    assert.equal(coachGapRequestSchema.safeParse({ betweenGames: true, liveGame: true }).success, false);
+  });
+});
+
+describe('insightResultSchema', () => {
+  it('separates untrusted narrative from disabled state and computed fields', () => {
+    assert.equal(
+      insightResultSchema.safeParse({ disabled: false, provider: 'openai', text: 'A grounded reading.' }).success,
+      true,
+    );
+    assert.equal(insightResultSchema.safeParse({ disabled: true, reason: 'No key.' }).success, true);
+    assert.equal(
+      insightResultSchema.safeParse({ disabled: false, provider: 'openai', text: 'Reading.', accuracy: 99 }).success,
+      false,
+    );
   });
 });
 

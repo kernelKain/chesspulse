@@ -66,6 +66,7 @@ button:disabled {
 
 button:focus-visible,
 textarea:focus-visible,
+select:focus-visible,
 .strip:focus-visible,
 .timeline-frame:focus-visible {
   outline: 2px solid var(--text);
@@ -839,6 +840,10 @@ textarea {
     order: 4;
   }
 
+  .report-layout .insight-panel {
+    order: 5;
+  }
+
   .timeline-wide {
     display: none;
   }
@@ -846,6 +851,68 @@ textarea {
   .timeline-mini-stack {
     display: flex;
   }
+}
+
+.insight-panel {
+  margin-top: 32px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.insight-panel h2 {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 560;
+}
+
+.inferred-label {
+  color: var(--warn);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  max-width: none;
+}
+
+.insight-controls {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.insight-controls label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.insight-controls select {
+  width: fit-content;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.insight-note,
+.insight-error,
+.insight-text {
+  margin-top: 16px;
+  max-width: 44rem;
+  overflow-wrap: anywhere;
+}
+
+.insight-error {
+  color: var(--warn);
+}
+
+.insight-text {
+  color: var(--text);
+  white-space: pre-wrap;
 }
 
 .refusal-panel {
@@ -961,6 +1028,32 @@ textarea {
   margin-top: 8px;
   color: var(--muted);
   font-size: 14px;
+}
+
+.coach-panel {
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.coach-message {
+  color: var(--text);
+  font-size: 20px;
+  max-width: 44rem;
+}
+
+.coach-quiet,
+.coach-numbers {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.coach-numbers {
+  margin-top: 8px;
+  font-family: ui-monospace, monospace;
 }
 
 .choices,

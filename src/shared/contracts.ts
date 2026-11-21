@@ -268,6 +268,23 @@ export const sdkErrorSchema = z
   })
   .strict();
 
+/** A locally computed coach line. It carries no raw trace and no inferred health state. */
+export const coachMessageSchema = z
+  .object({
+    baselineBpm: z.number().finite(),
+    recentBpm: z.number().finite(),
+    deltaBpm: z.number().finite().nonnegative(),
+    text: z.string().min(1),
+  })
+  .strict();
+
+/** The player alone marks this boundary; the app never infers that a live game has ended. */
+export const coachGapRequestSchema = z
+  .object({
+    betweenGames: z.boolean(),
+  })
+  .strict();
+
 const PASTE_BYTE_LIMIT = 2_000_000;
 
 export const reportBuildRequestSchema = z
@@ -285,7 +302,13 @@ export const insightRequestSchema = z
   .object({
     sessionId: z.string().min(1),
     provider: aiProviderSchema,
-    text: z.string(),
+    text: z.string().min(1).max(4000).refine((text) => new TextEncoder().encode(text).length <= 4000),
+  })
+  .strict();
+
+export const insightCancelRequestSchema = z
+  .object({
+    sessionId: z.string().min(1),
   })
   .strict();
 
@@ -295,6 +318,17 @@ export const insightDisabledSchema = z
     reason: z.string().min(1),
   })
   .strict();
+
+/** Model output is untrusted narrative, never a computed report field. */
+export const insightSchema = z
+  .object({
+    disabled: z.literal(false),
+    provider: aiProviderSchema,
+    text: z.string().min(1),
+  })
+  .strict();
+
+export const insightResultSchema = z.discriminatedUnion('disabled', [insightSchema, insightDisabledSchema]);
 
 /** Main-process consent. The page cannot open the camera by omitting this. */
 export const consentRequestSchema = z
@@ -414,4 +448,10 @@ export type PasteState = z.infer<typeof pasteStateSchema>;
 export type PasteValidation = z.infer<typeof pasteValidationSchema>;
 export type ValidationMessage = z.infer<typeof validationMessageSchema>;
 export type SdkError = z.infer<typeof sdkErrorSchema>;
+export type CoachMessage = z.infer<typeof coachMessageSchema>;
+export type AiProvider = z.infer<typeof aiProviderSchema>;
+export type InsightRequest = z.infer<typeof insightRequestSchema>;
+export type Insight = z.infer<typeof insightSchema>;
+export type InsightDisabled = z.infer<typeof insightDisabledSchema>;
+export type InsightResult = z.infer<typeof insightResultSchema>;
 export type PreviewFrame = z.infer<typeof previewFrameSchema>;

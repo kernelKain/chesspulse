@@ -1,0 +1,7 @@
+{
+  "name": "ambiguous",
+  "question": "why was I bad?",
+  "stats": { "coveragePct": 72, "accuracy": "insufficient" },
+  "response": "The coverage was 72%, but the accuracy bands do not contain enough moves to explain why you played badly.",
+  "expected": "accept"
+}
