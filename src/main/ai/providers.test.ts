@@ -44,6 +44,14 @@ describe('provider adapters', () => {
       assert.equal(JSON.stringify(body).includes('test-secret'), false);
       assert.equal(JSON.stringify(body).includes(INPUT), true);
       assert.equal(JSON.stringify(body).includes('untrusted data'), true);
+      assert.equal(request.init.redirect, 'error');
+      if (provider === 'custom') {
+        assert.equal(body.max_tokens, 500);
+        assert.equal(body.max_completion_tokens, undefined);
+      } else if (provider === 'openai' || provider === 'opencode') {
+        assert.equal(body.max_completion_tokens, 500);
+        assert.equal(body.max_tokens, undefined);
+      }
 
       if (provider === 'anthropic') {
         assert.equal(request.url, 'https://api.anthropic.com/v1/messages');

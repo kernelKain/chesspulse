@@ -1,10 +1,12 @@
 // What: rejects model-written numbers absent from structured, locally computed statistics.
 // Why: PGN text is untrusted and cannot be allowed to forge a computed-data marker.
 // Removed: injected PGN numbers, leading-dot decimals, and rounded large integers could pass as grounded.
-const NUMBER = /[-+]?(?:\d[\d,]*(?:\.\d*)?|\.\d[\d,]*)(?:[eE][-+]?\d+)?/g;
+const NUMBER = /(?<![\d.])[-+]?(?:\d[\d,]*(?:\.\d*)?|\.\d[\d,]*)(?:[eE][-+]?\d+)?/g;
 const VALID_COMMA_NUMBER = /^[-+]?(?:\d+(?:,\d{3})*(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/;
+const UNICODE_NEGATIVE_NUMBER = /[\u2212\uFE63\uFF0D]\s*\p{Nd}/u;
 
 export function groundInsight(stats: unknown, output: string): string {
+  assertSupportedNotation(output);
   for (const match of output.matchAll(NUMBER)) {
     const token = withoutSentencePunctuation(match[0]);
     if (token.includes(',') && !VALID_COMMA_NUMBER.test(token)) {
@@ -20,6 +22,15 @@ export function groundInsight(stats: unknown, output: string): string {
     }
   }
   return output;
+}
+
+function assertSupportedNotation(text: string): void {
+  const unicodeNegative = text.match(UNICODE_NEGATIVE_NUMBER);
+  const unicodeDigit = [...text].find((character) => /\p{Nd}/u.test(character) && !/[0-9]/.test(character));
+  const unsupported = unicodeNegative?.[0] ?? unicodeDigit;
+  if (unsupported) {
+    throw new Error(`The AI response used unsupported numeric notation: ${unsupported}. Nothing in the report changed.`);
+  }
 }
 
 function withoutSentencePunctuation(token: string): string {

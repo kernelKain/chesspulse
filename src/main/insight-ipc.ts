@@ -30,7 +30,7 @@ export function registerInsightHandler(dataRoot: () => string = defaultDataRoot,
       const artifacts = await withReportExclusion(async () => ({
         report: await readReport(dataRoot(), parsed.data.sessionId),
         pgns: await readGames(dataRoot(), parsed.data.sessionId),
-      }));
+      }), controller.signal);
       const result = insightResultSchema.parse(
         await requestInsight(parsed.data, artifacts.report, artifacts.pgns, env, { signal: controller.signal }),
       );

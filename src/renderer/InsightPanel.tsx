@@ -28,12 +28,16 @@ export function InsightPanel({
   const [provider, setProvider] = useState<AiProvider>('openai');
   const [question, setQuestion] = useState('What should I understand from this session?');
   const writeButton = useRef<HTMLButtonElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
   const restoreFocus = useRef(false);
   const loading = state.status === 'loading';
 
   useEffect(() => {
     if (loading || !restoreFocus.current) return;
     restoreFocus.current = false;
+    const active = document.activeElement;
+    // Cancel's removal releases focus to the document. A different target means the user moved on.
+    if (active !== document.body && active !== document.documentElement && active !== writeButton.current) return;
     writeButton.current?.focus();
   }, [loading]);
 
@@ -81,9 +85,10 @@ export function InsightPanel({
         </button>
         {loading ? (
           <button
+            ref={cancelButton}
             type="button"
             onClick={() => {
-              restoreFocus.current = true;
+              restoreFocus.current = document.activeElement === cancelButton.current;
               onCancel();
             }}
           >

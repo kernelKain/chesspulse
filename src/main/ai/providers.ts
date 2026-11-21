@@ -99,7 +99,8 @@ function providerRequest(config: AiConfiguration, prompt: string, signal?: Abort
     headers.Authorization = `Bearer ${config.key}`;
     body = {
       model: config.model,
-      max_completion_tokens: 500,
+      // Ollama's OpenAI-compatible custom endpoint documents max_tokens, not the newer native field.
+      ...(config.provider === 'custom' ? { max_tokens: 500 } : { max_completion_tokens: 500 }),
       stream: false,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
@@ -107,7 +108,7 @@ function providerRequest(config: AiConfiguration, prompt: string, signal?: Abort
       ],
     };
   }
-  return { url, init: { method: 'POST', headers, body: JSON.stringify(body), signal } };
+  return { url, init: { method: 'POST', headers, body: JSON.stringify(body), signal, redirect: 'error' } };
 }
 
 const openAiResponse = z.object({

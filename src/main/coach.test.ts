@@ -50,6 +50,17 @@ describe('BetweenGamesCoach', () => {
     assert.equal(unstable.ingest([sample(121_000_000, 95, 80, false)]), null);
   });
 
+  it('isolates the between-games guard from the elevated threshold', () => {
+    const coach = new BetweenGamesCoach(START_US);
+    coach.ingest(restingMinute());
+    assert.equal(coach.ingest([sample(121_000_000, 90)]), null);
+    assert.equal(coach.ingest([sample(122_000_000, 90)]), null);
+    const message = coach.setBetweenGames(true);
+    assert.equal(message?.baselineBpm, 70);
+    assert.equal(message?.recentBpm, 90);
+    assert.equal(message?.deltaBpm, 20);
+  });
+
   it('fires once per gap and clears the latch for the next gap only', () => {
     const coach = new BetweenGamesCoach(START_US);
     coach.ingest(restingMinute());

@@ -47,6 +47,18 @@ describe('groundInsight', () => {
     assert.equal(groundInsight({ baseline: 70 }, output), output);
   });
 
+  it('separates range endpoints from unary minus without accepting a negative as positive', () => {
+    const output = 'The range 70-80 stayed bounded.';
+    assert.equal(groundInsight({ low: 70, high: 80 }, output), output);
+    assert.throws(() => groundInsight({ baseline: 70 }, 'Baseline -70.'), /-70/);
+  });
+
+  it('rejects Unicode-negative and full-width numeric notation instead of ignoring it', () => {
+    assert.equal(groundInsight({ baseline: 70 }, 'Baseline 70.'), 'Baseline 70.');
+    assert.throws(() => groundInsight({ baseline: 70 }, 'Baseline −70.'), /unsupported numeric notation/i);
+    assert.throws(() => groundInsight({ value: 99 }, 'Value ９９.'), /unsupported numeric notation/i);
+  });
+
   it('rejects misplaced and repeated commas instead of reinterpreting the number', () => {
     assert.throws(() => groundInsight({ value: 71 }, 'Value 7,1.'), /malformed number.*7,1/);
     assert.throws(() => groundInsight({ value: 1200 }, 'Value 1,,200.'), /malformed number.*1,,200/);
