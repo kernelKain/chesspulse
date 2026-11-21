@@ -9,8 +9,11 @@ import { z } from 'zod';
 import {
   SCHEMA_VERSION,
   pulseSampleSchema,
+  reportBuildRequestSchema,
+  reportSchema,
   sessionMetaSchema,
   type PulseSample,
+  type Report,
   type SessionMeta,
 } from '../shared/contracts.js';
 
@@ -178,6 +181,44 @@ export async function saveReport(root: string, sessionId: string, text: string):
     await stat(path.join(dir, 'meta.json'));
     await writeAtomic(path.join(dir, 'report.json'), text);
   });
+}
+
+export async function readReport(root: string, sessionId: string): Promise<Report> {
+  const file = path.join(sessionDir(root, sessionId), 'report.json');
+  let value: unknown;
+  try {
+    value = JSON.parse(await readFile(file, 'utf8'));
+  } catch (error) {
+    if (isEnoent(error)) throw new Error('Build a report before requesting an AI reading.');
+    throw new Error('The stored report is not valid.');
+  }
+  const parsed = reportSchema.safeParse(value);
+  if (!parsed.success || parsed.data.sessionId !== sessionId) throw new Error('The stored report is not valid.');
+  return parsed.data;
+}
+
+export async function saveGames(root: string, sessionId: string, pgns: readonly string[]): Promise<void> {
+  const parsed = reportBuildRequestSchema.safeParse({ sessionId, pgns });
+  if (!parsed.success) throw new Error('The PGN batch is not valid.');
+  await exclusive(root, async () => {
+    const dir = sessionDir(root, sessionId);
+    await stat(path.join(dir, 'meta.json'));
+    await writeAtomic(path.join(dir, 'games.json'), jsonText(parsed.data.pgns));
+  });
+}
+
+export async function readGames(root: string, sessionId: string): Promise<string[]> {
+  const file = path.join(sessionDir(root, sessionId), 'games.json');
+  let value: unknown;
+  try {
+    value = JSON.parse(await readFile(file, 'utf8'));
+  } catch (error) {
+    if (isEnoent(error)) throw new Error('The original PGNs are missing. Build the report again before requesting AI.');
+    throw new Error('The stored PGNs are not valid.');
+  }
+  const parsed = reportBuildRequestSchema.safeParse({ sessionId, pgns: value });
+  if (!parsed.success) throw new Error('The stored PGNs are not valid.');
+  return parsed.data.pgns;
 }
 
 export async function deleteReport(root: string, sessionId: string): Promise<void> {

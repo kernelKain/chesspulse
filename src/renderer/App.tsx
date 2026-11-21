@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   coachMessageSchema,
+  insightResultSchema,
   reportResultSchema,
   sampleBatchSchema,
+  type AiProvider,
   type CoachMessage,
   type PasteValidation,
   type PulseSample,
@@ -15,6 +17,7 @@ import { BandBars } from './BandBars';
 import { CameraPreview } from './CameraPreview';
 import { CoachLine } from './CoachLine';
 import { GameList } from './GameList';
+import { InsightPanel, type InsightViewState } from './InsightPanel';
 import { PasteScreen } from './PasteScreen';
 import { SensingStrip } from './SensingStrip';
 import { Timeline } from './Timeline';
@@ -40,6 +43,7 @@ export function App() {
   const [betweenGames, setBetweenGames] = useState(false);
   const [gapPending, setGapPending] = useState(false);
   const [coachMessage, setCoachMessage] = useState<CoachMessage | null>(null);
+  const [insightState, setInsightState] = useState<InsightViewState>({ status: 'idle' });
   const [note, setNote] = useState('The camera stays off until you consent.');
   const [error, setError] = useState<string | null>(null);
   const bridge = window.chesspulse;
@@ -47,9 +51,16 @@ export function App() {
   const startPending = useRef(false);
   const revokedDuringStart = useRef(false);
   const reportRequestSeq = useRef(0);
+  const insightRequestSeq = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
 
+  function resetInsight(): void {
+    insightRequestSeq.current += 1;
+    setInsightState({ status: 'idle' });
+  }
+
   function adoptSession(nextId: string): void {
+    resetInsight();
     setBetweenGames(false);
     setGapPending(false);
     setCoachMessage(null);
@@ -213,7 +224,44 @@ export function App() {
     }
   }
 
+  async function onInsightRequest(provider: AiProvider, text: string): Promise<void> {
+    if (!bridge || !sessionId) return;
+    const seq = ++insightRequestSeq.current;
+    setInsightState({ status: 'loading' });
+    try {
+      const raw = await bridge.requestInsight({ sessionId, provider, text });
+      if (seq !== insightRequestSeq.current) return;
+      const parsed = insightResultSchema.safeParse(raw);
+      if (!parsed.success) {
+        setInsightState({ status: 'error', message: 'The reading returned an unexpected shape. The report is unchanged.' });
+      } else if (parsed.data.disabled) {
+        setInsightState({ status: 'disabled', reason: parsed.data.reason });
+      } else {
+        setInsightState({ status: 'ready', text: parsed.data.text });
+      }
+    } catch (caught: unknown) {
+      if (seq !== insightRequestSeq.current) return;
+      setInsightState({
+        status: 'error',
+        message: ipcErrorText(caught, 'The provider did not respond. Nothing in this report depends on it.'),
+      });
+    }
+  }
+
+  async function onInsightCancel(): Promise<void> {
+    if (!bridge || !sessionId) return;
+    insightRequestSeq.current += 1;
+    setInsightState({ status: 'idle' });
+    try {
+      await bridge.cancelInsight(sessionId);
+    } catch {
+      // The timeout still bounds the call; its result is ignored after the sequence change.
+    }
+  }
+
   async function onPasteContinue(pgns: string[], _validation: PasteValidation): Promise<void> {
+    if (bridge && sessionId) void bridge.cancelInsight(sessionId).catch(() => undefined);
+    resetInsight();
     const seq = ++reportRequestSeq.current;
     setPasteSlots(pgns);
     setReportError(null);
@@ -281,6 +329,11 @@ export function App() {
             <Timeline key={`ok-${reportResult.sessionId}`} result={reportResult} />
             <BandBars report={reportResult} />
             <GameList report={reportResult} />
+            <InsightPanel
+              state={insightState}
+              onRequest={(provider, text) => void onInsightRequest(provider, text)}
+              onCancel={() => void onInsightCancel()}
+            />
           </div>
         ) : (
           <>

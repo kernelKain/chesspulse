@@ -97,6 +97,23 @@ describe('requestInsight', () => {
     );
   });
 
+  it('cancels before a provider call when the reading is already aborted', async () => {
+    let calls = 0;
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+      requestInsight(REQUEST, REPORT, [PGN], ENV, {
+        signal: controller.signal,
+        fetch: async () => {
+          calls += 1;
+          return completion();
+        },
+      }),
+      /cancelled/,
+    );
+    assert.equal(calls, 0);
+  });
+
   it('retries one 500 and grounds the successful response', async () => {
     let calls = 0;
     const result = await requestInsight(REQUEST, REPORT, [PGN], ENV, {

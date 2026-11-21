@@ -15,6 +15,7 @@ import { AiProviderError, callProvider } from './providers.js';
 interface InsightOptions {
   fetch?: typeof fetch;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export async function requestInsight(
@@ -51,17 +52,24 @@ export async function requestInsight(
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const controller = new AbortController();
+    const cancel = () => controller.abort();
+    if (options.signal?.aborted) controller.abort();
+    options.signal?.addEventListener('abort', cancel, { once: true });
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let output: string;
     try {
+      if (options.signal?.aborted) throw new Error('cancelled');
       // The timer covers headers and response.text() inside callProvider.
       output = await callProvider(configured.config, prompt, fetchImpl, controller.signal);
     } catch (error) {
-      const failure = providerFailure(error);
+      const failure = options.signal?.aborted
+        ? new AiProviderError('The AI reading was cancelled. Nothing in this report depends on it.', false)
+        : providerFailure(error);
       if (!failure.retryable || attempt === 1) throw failure;
       continue;
     } finally {
       clearTimeout(timer);
+      options.signal?.removeEventListener('abort', cancel);
     }
     // Grounding is not a provider failure: never retry or disguise it as a network error.
     return {

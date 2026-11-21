@@ -3,6 +3,8 @@
 // Removed: a screen could not tell the desktop process that consent or the session changed.
 import type {
   CoachMessage,
+  InsightRequest,
+  InsightResult,
   PasteValidation,
   PreviewFrame,
   PulseSample,
@@ -27,6 +29,8 @@ export interface ChessPulseBridge {
   onPreview(listener: (frame: PreviewFrame) => void): () => void;
   setBetweenGames(active: boolean): Promise<{ betweenGames: boolean }>;
   onCoachMessage(listener: (message: CoachMessage) => void): () => void;
+  requestInsight(request: InsightRequest): Promise<InsightResult>;
+  cancelInsight(sessionId: string): Promise<{ cancelled: boolean }>;
   validatePgns(slots: string[]): Promise<PasteValidation>;
   buildReport(sessionId: string, pgns: string[]): Promise<ReportResult>;
 }

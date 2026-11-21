@@ -26,6 +26,7 @@ import { BetweenGamesCoach } from './coach.js';
 import { currentConsent, registerConsentHandler } from './consent.js';
 import { loadEnvFile, readSensingKey } from './env.js';
 import { installSafeConsole, log, logError } from './log.js';
+import { registerInsightHandler } from './insight-ipc.js';
 import { registerPasteHandler } from './paste.js';
 import { registerReportHandler } from './report-ipc.js';
 import { grantsMediaPermission } from './permission.js';
@@ -301,6 +302,7 @@ app.whenReady().then(async () => {
   registerSessionHandlers();
   registerPasteHandler();
   registerReportHandler();
+  registerInsightHandler();
   setSampleSink(defaultDataRoot(), publishSamples);
   try {
     const recovery = await recoverInterruptedSessions(defaultDataRoot());

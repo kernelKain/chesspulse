@@ -10,7 +10,7 @@ import { parsePgnBatch, thinkTimeSec } from './analysis/pgn.js';
 import { positionsFromMoves } from './analysis/positions.js';
 import { createEngine, type PositionEval } from './engine.js';
 import { baselineFromSamples, coverageFromSamples, isUsableSample } from './session.js';
-import { defaultDataRoot, deleteReport, readMeta, readSamples, saveReport } from './store.js';
+import { defaultDataRoot, deleteReport, readMeta, readSamples, saveGames, saveReport } from './store.js';
 import {
   reportSchema,
   type PulseSample,
@@ -131,6 +131,7 @@ export async function buildReport(
         moves: scoredMoves.timelineMoves,
       },
     });
+    await saveGames(root, sessionId, pgns);
     await saveReport(root, sessionId, JSON.stringify(report, null, 2) + '\n');
     return report;
   } finally {

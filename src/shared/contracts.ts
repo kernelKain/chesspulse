@@ -306,6 +306,12 @@ export const insightRequestSchema = z
   })
   .strict();
 
+export const insightCancelRequestSchema = z
+  .object({
+    sessionId: z.string().min(1),
+  })
+  .strict();
+
 export const insightDisabledSchema = z
   .object({
     disabled: z.literal(true),
@@ -444,6 +450,7 @@ export type ValidationMessage = z.infer<typeof validationMessageSchema>;
 export type SdkError = z.infer<typeof sdkErrorSchema>;
 export type CoachMessage = z.infer<typeof coachMessageSchema>;
 export type AiProvider = z.infer<typeof aiProviderSchema>;
+export type InsightRequest = z.infer<typeof insightRequestSchema>;
 export type Insight = z.infer<typeof insightSchema>;
 export type InsightDisabled = z.infer<typeof insightDisabledSchema>;
 export type InsightResult = z.infer<typeof insightResultSchema>;

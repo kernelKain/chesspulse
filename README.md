@@ -33,7 +33,9 @@ The SmartSpectra key and any model key belong in `.env` only. `.env.example` lis
 
 The camera stays off until you press **Allow the camera**. Revoking consent releases the camera and stops an open session. The main process opens the camera through the SmartSpectra SDK and does all measuring there; the page receives a small preview bitmap and the measured numbers, never the key. Nothing is recorded.
 
-A session is a folder of numbers: `meta.json` and `samples.ndjson`. No image or video file is written. The folder is under `$XDG_DATA_HOME/chesspulse` or `~/.local/share/chesspulse`. Deleting that folder deletes the session. Nothing in the app is uploaded, and there is no account.
+A session folder contains `meta.json`, `samples.ndjson`, and—after a review—`games.json` with the original PGNs and `report.json` with computed results. No image or video file is written. The folder is under `$XDG_DATA_HOME/chesspulse` or `~/.local/share/chesspulse`. Deleting that folder deletes the session. Sensing and local report building upload nothing, and there is no account.
+
+If you configure an AI provider and choose **Write reading**, that provider receives your question, the original PGNs, and computed summary numbers. It never receives video or the raw pulse trace. The response is shown as untrusted `INFERRED` text and does not change the report. Without an AI key, the panel explains that it is disabled and makes no request.
 
 ## Current limits
 
@@ -45,4 +47,4 @@ The capture path has not yet been verified against a real seated session reporti
 
 After a game ends, press **Game ended**. If the trailing-minute median of usable pulse samples is at least 10 bpm above your baseline, one coach line shows the measured figures and suggests a break. Press **Next game started** before playing again; this removes the line. A real threshold crossing has not yet been captured.
 
-Pasted games, local Stockfish scoring, the report, and the between-games coach are in this build. The optional AI reading panels are not.
+Pasted games, local Stockfish scoring, the report, the between-games coach, and the optional AI reading panel are in this build. The panel's provider access and real response quality have not yet been verified.

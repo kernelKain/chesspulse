@@ -4,15 +4,19 @@ import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
-import type { PulseSample } from '../shared/contracts.js';
+import type { PulseSample, Report } from '../shared/contracts.js';
 import {
   appendSamples,
   createSession,
   createSessionId,
   findMediaFiles,
   listSessions,
+  readGames,
   readMeta,
+  readReport,
   readSamples,
+  saveGames,
+  saveReport,
 } from './store.js';
 
 function tempRoot(): string {
@@ -136,6 +140,31 @@ describe('session store', () => {
     await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, 'samples.ndjson'), '');
     assert.deepEqual(await listSessions(root), []);
+  });
+
+  it('reads only the stored validated report and original PGN text', async () => {
+    const root = useRoot();
+    const meta = await createSession(root, { startedAtEpochMs: anchor.epochMs, startAnchor: anchor });
+    const report: Report = {
+      ok: true,
+      sessionId: meta.id,
+      coveragePct: 80,
+      baselineBpm: 70,
+      verdict: 'Accuracy 71% settled.',
+      settled: { band: 'settled', moves: 5, status: 'ok', accuracy: 71 },
+      elevated: { band: 'elevated', moves: 0, status: 'insufficient' },
+      alignmentMode: 'endtime',
+      toleranceSec: 1,
+      games: [],
+      timeline: { startUs: 0, stopUs: 1000, baselineBpm: 70, elevatedThresholdBpm: 80, samples: [], games: [], moves: [] },
+    };
+    await saveReport(root, meta.id, JSON.stringify(report));
+    await saveGames(root, meta.id, ['[Event "Test"]\n1. e4 e5']);
+    assert.deepEqual(await readReport(root, meta.id), report);
+    assert.deepEqual(await readGames(root, meta.id), ['[Event "Test"]\n1. e4 e5']);
+
+    await writeFile(path.join(root, 'sessions', meta.id, 'report.json'), '{"ok":false}');
+    await assert.rejects(() => readReport(root, meta.id), /report is not valid/);
   });
 
   it('rejects a session id that leaves the store', async () => {
