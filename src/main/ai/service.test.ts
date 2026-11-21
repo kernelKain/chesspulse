@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
@@ -8,9 +9,15 @@ import { requestInsight } from './service.js';
 const ENV = { CP_AI_KEY: 'test-secret', CP_AI_MODEL: 'test-model' };
 const REQUEST = { sessionId: 's1', provider: 'openai', text: 'Review this session.' };
 const PGN = '[White "Untrusted"]\n1. e4 e5';
+
+function digest(pgns: readonly string[]): string {
+  return createHash('sha256').update(JSON.stringify(pgns), 'utf8').digest('hex');
+}
+
 const REPORT: Report = {
   ok: true,
   sessionId: 's1',
+  gamesDigest: digest([PGN]),
   coveragePct: 80,
   baselineBpm: 70,
   verdict: 'Accuracy 71% settled.',
@@ -56,6 +63,40 @@ describe('requestInsight', () => {
     };
     await assert.rejects(requestInsight(REQUEST, null, [PGN], ENV, { fetch: fetchStub }), /No computed session data/);
     await assert.rejects(requestInsight({ ...REQUEST, text: 'x'.repeat(4001) }, REPORT, [PGN], ENV, { fetch: fetchStub }), /AI reading needs/);
+    assert.equal(calls, 0);
+  });
+
+  it('rejects PGNs that do not match the report digest before calling a provider', async () => {
+    let calls = 0;
+    const report = { ...REPORT, gamesDigest: digest([PGN]) };
+
+    await assert.rejects(
+      requestInsight(REQUEST, report, ['[Event "Different"]\n1. d4 d5'], ENV, {
+        fetch: async () => {
+          calls += 1;
+          return completion();
+        },
+      }),
+      /Build the report again/,
+    );
+    assert.equal(calls, 0);
+  });
+
+  it('treats a report without a games digest as stale and makes no provider call', async () => {
+    let calls = 0;
+    const legacyReport = Object.fromEntries(
+      Object.entries(REPORT).filter(([key]) => key !== 'gamesDigest'),
+    ) as Report;
+
+    await assert.rejects(
+      requestInsight(REQUEST, legacyReport, [PGN], ENV, {
+        fetch: async () => {
+          calls += 1;
+          return completion();
+        },
+      }),
+      /Build the report again/,
+    );
     assert.equal(calls, 0);
   });
 

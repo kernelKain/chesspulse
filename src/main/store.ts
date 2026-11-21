@@ -1,7 +1,7 @@
 // What: writes one session as a header plus append-only pulse samples.
 // Why: the trace has to survive a restart, and a crash must not leave a half-written header.
 // Removed: the report could not be rebuilt, and a sample could be stored as a video file.
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { open, mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { homedir } from 'node:os';
@@ -175,6 +175,61 @@ export async function readMeta(root: string, sessionId: string): Promise<Session
   return parsed.data;
 }
 
+export interface AtomicFileHandle {
+  writeFile(body: string): Promise<void>;
+  sync(): Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface AtomicFileSystem {
+  open(filePath: string, flags: string, mode?: number): Promise<AtomicFileHandle>;
+  rename(from: string, to: string): Promise<void>;
+  rm(filePath: string, options: { force: boolean }): Promise<void>;
+}
+
+const defaultAtomicFileSystem: AtomicFileSystem = { open, rename, rm };
+
+// What: stages and saves the report and its exact PGN batch under one store exclusion.
+// Why: both temp files must be durable before either artifact is replaced.
+// Removed: independent saves could start a report replacement before the new PGN temp file existed.
+export async function saveReportArtifacts(
+  root: string,
+  sessionId: string,
+  text: string,
+  pgns: readonly string[],
+  fs: AtomicFileSystem = defaultAtomicFileSystem,
+): Promise<void> {
+  const parsed = reportBuildRequestSchema.safeParse({ sessionId, pgns });
+  if (!parsed.success) throw new Error('The PGN batch is not valid.');
+  await exclusive(root, async () => {
+    const dir = sessionDir(root, sessionId);
+    await stat(path.join(dir, 'meta.json'));
+    const gamesFile = path.join(dir, 'games.json');
+    const reportFile = path.join(dir, 'report.json');
+    const pending = new Set<string>();
+    try {
+      const gamesTmp = await stageAtomic(gamesFile, jsonText(parsed.data.pgns), fs);
+      pending.add(gamesTmp);
+      const reportTmp = await stageAtomic(reportFile, text, fs);
+      pending.add(reportTmp);
+      await commitAtomic(gamesTmp, gamesFile, fs);
+      pending.delete(gamesTmp);
+      await commitAtomic(reportTmp, reportFile, fs);
+      pending.delete(reportTmp);
+    } catch (error) {
+      await Promise.all([...pending].map((tmp) => removeAtomicTemp(tmp, fs)));
+      throw error;
+    }
+  });
+}
+
+// What: hashes the exact ordered PGN batch as a JSON array.
+// Why: report and PGN files are separate writes, so readers need proof that they belong together.
+// Removed: a crash or hand edit could silently pair one report with different games.
+export function digestGames(pgns: readonly string[]): string {
+  return createHash('sha256').update(JSON.stringify(pgns), 'utf8').digest('hex');
+}
+
 export async function saveReport(root: string, sessionId: string, text: string): Promise<void> {
   await exclusive(root, async () => {
     const dir = sessionDir(root, sessionId);
@@ -193,7 +248,9 @@ export async function readReport(root: string, sessionId: string): Promise<Repor
     throw new Error('The stored report is not valid.');
   }
   const parsed = reportSchema.safeParse(value);
-  if (!parsed.success || parsed.data.sessionId !== sessionId) throw new Error('The stored report is not valid.');
+  if (!parsed.success || parsed.data.sessionId !== sessionId) {
+    throw new Error('The stored report is not valid or is stale. Build the report again before requesting AI.');
+  }
   return parsed.data;
 }
 
@@ -367,23 +424,68 @@ function sessionDir(root: string, sessionId: string): string {
   return dir;
 }
 
-async function writeAtomic(filePath: string, body: string): Promise<void> {
-  const tmp = `${filePath}.${process.pid}.tmp`;
-  const handle = await open(tmp, 'w', 0o600);
+async function writeAtomic(
+  filePath: string,
+  body: string,
+  fs: AtomicFileSystem = defaultAtomicFileSystem,
+): Promise<void> {
+  let tmp: string | undefined;
   try {
-    await handle.writeFile(body);
-    await handle.sync();
-    await handle.close();
+    tmp = await stageAtomic(filePath, body, fs);
+    await commitAtomic(tmp, filePath, fs);
   } catch (error) {
-    await handle.close();
-    await rm(tmp, { force: true });
+    if (tmp) await removeAtomicTemp(tmp, fs);
     throw error;
   }
+}
+
+async function stageAtomic(filePath: string, body: string, fs: AtomicFileSystem): Promise<string> {
+  const tmp = `${filePath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  const handle = await fs.open(tmp, 'w', 0o600);
   try {
-    await rename(tmp, filePath);
+    await closeAfter(handle, async () => {
+      await handle.writeFile(body);
+      await handle.sync();
+    });
   } catch (error) {
-    await rm(tmp, { force: true });
+    await removeAtomicTemp(tmp, fs);
     throw error;
+  }
+  return tmp;
+}
+
+async function commitAtomic(tmp: string, filePath: string, fs: AtomicFileSystem): Promise<void> {
+  await fs.rename(tmp, filePath);
+  const directory = await fs.open(path.dirname(filePath), 'r');
+  await closeAfter(directory, () => directory.sync());
+}
+
+async function closeAfter(handle: AtomicFileHandle, operation: () => Promise<void>): Promise<void> {
+  let failed = false;
+  let failure: unknown;
+  try {
+    await operation();
+  } catch (error) {
+    failed = true;
+    failure = error;
+  }
+  try {
+    await handle.close();
+  } catch (error) {
+    if (!failed) {
+      failed = true;
+      failure = error;
+    }
+  }
+  if (failed) throw failure;
+}
+
+// Cleanup is best-effort so a secondary rm failure never hides the causal storage error.
+async function removeAtomicTemp(tmp: string, fs: AtomicFileSystem): Promise<void> {
+  try {
+    await fs.rm(tmp, { force: true });
+  } catch {
+    // The original write, sync, close, or rename error is more useful to the caller.
   }
 }
 

@@ -14,6 +14,7 @@ const PASTE_VALIDATE_CHANNEL = 'cp:pgn:validate';
 const REPORT_BUILD_CHANNEL = 'cp:report:build';
 const COACH_GAP_CHANNEL = 'cp:coach:gap';
 const COACH_MESSAGE_CHANNEL = 'cp:coach:message';
+const SESSION_ENDED_CHANNEL = 'cp:session:ended';
 const INSIGHT_REQUEST_CHANNEL = 'cp:insight:request';
 const INSIGHT_CANCEL_CHANNEL = 'cp:insight:cancel';
 
@@ -46,6 +47,12 @@ interface CoachMessage {
   recentBpm: number;
   deltaBpm: number;
   text: string;
+}
+
+interface SessionEnded {
+  sessionId: string;
+  reason: 'storage' | 'limit';
+  message: string;
 }
 
 function readConsentState(value: unknown): ConsentState {
@@ -173,6 +180,19 @@ contextBridge.exposeInMainWorld('chesspulse', {
       ipcRenderer.removeListener(COACH_MESSAGE_CHANNEL, handler);
     };
   },
+  onSessionEnded(listener: (event: SessionEnded) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      try {
+        listener(readSessionEnded(value));
+      } catch {
+        // A malformed terminal event is dropped; the session controls remain usable.
+      }
+    };
+    ipcRenderer.on(SESSION_ENDED_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(SESSION_ENDED_CHANNEL, handler);
+    };
+  },
   requestInsight(request: unknown): Promise<unknown> {
     if (typeof request !== 'object' || request === null) {
       return Promise.reject(new Error('The AI reading needs a session, provider, and question.'));
@@ -294,6 +314,21 @@ function readCoachMessage(value: unknown): CoachMessage {
     deltaBpm: record.deltaBpm,
     text: record.text,
   };
+}
+
+function readSessionEnded(value: unknown): SessionEnded {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('The window returned an unexpected session end.');
+  }
+  const record = value as { sessionId?: unknown; reason?: unknown; message?: unknown };
+  if (
+    typeof record.sessionId !== 'string' ||
+    (record.reason !== 'storage' && record.reason !== 'limit') ||
+    typeof record.message !== 'string'
+  ) {
+    throw new Error('The window returned an unexpected session end.');
+  }
+  return { sessionId: record.sessionId, reason: record.reason, message: record.message };
 }
 
 function readSdkError(value: unknown): SdkError {

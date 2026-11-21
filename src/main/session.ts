@@ -23,6 +23,18 @@ export const MAX_SESSION_US = 90 * 60 * 1_000_000;
 
 const sampleSinks = new Map<string, (samples: readonly PulseSample[]) => void>();
 
+export type SessionStopReason = Exclude<NonNullable<SessionMeta['stopReason']>, 'crash'>;
+
+export interface SessionLimitScheduler {
+  set(callback: () => void, delayMs: number): unknown;
+  clear(handle: unknown): void;
+}
+
+export interface SessionHooks {
+  limitScheduler?: SessionLimitScheduler;
+  onLimit?: () => void;
+}
+
 interface ActiveSession {
   id?: string;
   anchor: SessionAnchor;
@@ -32,8 +44,10 @@ interface ActiveSession {
   stopped: Promise<SessionMeta>;
   resolveStopped: (meta: SessionMeta) => void;
   rejectStopped: (error: unknown) => void;
-  stopRequest?: { anchor: SessionAnchor; reason: 'user' | 'sdkError' };
+  stopRequest?: { anchor: SessionAnchor; reason: SessionStopReason };
   finishStop?: Promise<SessionMeta>;
+  limitScheduler: SessionLimitScheduler;
+  limitTimer?: unknown;
 }
 
 const active = new Map<string, ActiveSession>();
@@ -83,16 +97,28 @@ export function coverageFromSamples(
   return { usableUs, totalUs, pct, confidenceFloor: floor };
 }
 
+const defaultLimitScheduler: SessionLimitScheduler = {
+  set(callback, delayMs) {
+    const timer = setTimeout(callback, delayMs);
+    timer.unref();
+    return timer;
+  },
+  clear(handle) {
+    clearTimeout(handle as NodeJS.Timeout);
+  },
+};
+
 export async function startSession(
   root: string,
   anchor: SessionAnchor,
   timeControl: string,
+  hooks: SessionHooks = {},
 ): Promise<SessionMeta> {
   const parsed = sessionStartRequestSchema.safeParse({ timeControl });
   if (!parsed.success) throw new Error('Choose a time control before starting.');
   const key = path.resolve(root);
   if (active.has(key)) throw new Error('A session is already running.');
-  const reservation = reserve(anchor, parsed.data.timeControl);
+  const reservation = reserve(anchor, parsed.data.timeControl, hooks.limitScheduler ?? defaultLimitScheduler);
   active.set(key, reservation);
   let stoppedEarly = false;
   try {
@@ -109,6 +135,7 @@ export async function startSession(
     }
     reservation.id = meta.id;
     reservation.state = 'running';
+    armLimitTimer(key, reservation, hooks.onLimit);
     return meta;
   } catch (error) {
     if (!stoppedEarly && active.get(key) === reservation) active.delete(key);
@@ -120,10 +147,6 @@ export async function startSession(
 export async function ingestSamples(root: string, samples: readonly PulseSample[]): Promise<void> {
   const current = requireActive(root);
   const batch = snapshotSamples(samples);
-  const limit = current.anchor.monoUs + MAX_SESSION_US;
-  if (batch.some((sample) => sample.tUs > limit)) {
-    throw new Error('A session cannot run longer than 90 minutes.');
-  }
   await assertSamplesAppendable(root, current.id);
   const run = current.ingest.then(() => commitSamples(root, current.id, batch));
   current.ingest = run.then(
@@ -145,7 +168,7 @@ export function setSampleSink(
 export async function stopSession(
   root: string,
   stopAnchor: SessionAnchor,
-  reason: 'user' | 'sdkError',
+  reason: SessionStopReason,
 ): Promise<SessionMeta> {
   const key = path.resolve(root);
   const current = active.get(key);
@@ -168,7 +191,7 @@ function beginStop(
   current: ActiveSession,
   sessionId: string,
   stopAnchor: SessionAnchor,
-  reason: 'user' | 'sdkError',
+  reason: SessionStopReason,
 ): Promise<SessionMeta> {
   if (current.finishStop) return current.finishStop;
   const run = (async () => {
@@ -176,9 +199,11 @@ function beginStop(
       await current.ingest;
       const meta = await readMeta(root, sessionId);
       const saved = await finalize(root, meta, stopAnchor, reason);
+      clearLimitTimer(current);
       if (active.get(key) === current) active.delete(key);
       return saved;
     } catch (error) {
+      clearLimitTimer(current);
       current.finishStop = undefined;
       throw error;
     }
@@ -246,7 +271,11 @@ export function activeTimeControl(root: string): string | undefined {
   return active.get(path.resolve(root))?.timeControl;
 }
 
-function reserve(anchor: SessionAnchor, timeControl: string): ActiveSession {
+function reserve(
+  anchor: SessionAnchor,
+  timeControl: string,
+  limitScheduler: SessionLimitScheduler,
+): ActiveSession {
   let resolveStopped: (meta: SessionMeta) => void = () => undefined;
   let rejectStopped: (error: unknown) => void = () => undefined;
   const stopped = new Promise<SessionMeta>((resolve, reject) => {
@@ -262,7 +291,26 @@ function reserve(anchor: SessionAnchor, timeControl: string): ActiveSession {
     stopped,
     resolveStopped,
     rejectStopped,
+    limitScheduler,
   };
+}
+
+function armLimitTimer(key: string, current: ActiveSession, onLimit: (() => void) | undefined): void {
+  current.limitTimer = current.limitScheduler.set(() => {
+    current.limitTimer = undefined;
+    if (active.get(key) !== current || current.state !== 'running') return;
+    try {
+      onLimit?.();
+    } catch {
+      // The next explicit stop still closes the session; a timer callback must not crash main.
+    }
+  }, MAX_SESSION_US / 1000);
+}
+
+function clearLimitTimer(current: ActiveSession): void {
+  if (current.limitTimer === undefined) return;
+  current.limitScheduler.clear(current.limitTimer);
+  current.limitTimer = undefined;
 }
 
 async function commitSamples(root: string, sessionId: string, samples: readonly PulseSample[]): Promise<void> {

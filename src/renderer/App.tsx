@@ -4,6 +4,7 @@ import {
   insightResultSchema,
   reportResultSchema,
   sampleBatchSchema,
+  sessionEndedSchema,
   type AiProvider,
   type CoachMessage,
   type PasteValidation,
@@ -125,6 +126,18 @@ export function App() {
           setSdkError(info.message);
         }
       })();
+    });
+  }, [bridge]);
+
+  useEffect(() => {
+    if (!bridge) return undefined;
+    return bridge.onSessionEnded((event) => {
+      const parsed = sessionEndedSchema.safeParse(event);
+      if (!parsed.success) return;
+      adoptSession(parsed.data.sessionId);
+      setPhase('stopped');
+      setNote(parsed.data.message);
+      setError(null);
     });
   }, [bridge]);
 

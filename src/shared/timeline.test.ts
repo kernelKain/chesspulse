@@ -27,6 +27,7 @@ function baseReport(overrides: Partial<Report> = {}): Report {
   return {
     ok: true,
     sessionId: '01TESTSESSION0000000000000',
+    gamesDigest: 'a'.repeat(64),
     coveragePct: 92,
     baselineBpm: 70,
     verdict: '1 blunder, 1 of them while your pulse was elevated.',

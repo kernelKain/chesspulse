@@ -24,7 +24,8 @@ export const sessionAnchorSchema = z
   })
   .strict();
 
-export const stopReasonSchema = z.enum(['user', 'sdkError', 'crash']);
+export const stopReasonSchema = z.enum(['user', 'sdkError', 'storage', 'limit', 'crash']);
+export const sessionEndReasonSchema = z.enum(['storage', 'limit']);
 
 export const sessionMetaSchema = z
   .object({
@@ -198,6 +199,7 @@ export const reportSchema = z
   .object({
     ok: z.literal(true),
     sessionId: z.string().min(1),
+    gamesDigest: z.string().regex(/^[0-9a-f]{64}$/),
     coveragePct: z.number().finite().min(0).max(100),
     baselineBpm: z.number().finite(),
     verdict: z.string().min(1),
@@ -265,6 +267,15 @@ export const sdkErrorSchema = z
     code: z.number().int(),
     message: z.string(),
     retryable: z.boolean(),
+  })
+  .strict();
+
+/** An automatic stop that the page must show; manual and crash stops use the session header. */
+export const sessionEndedSchema = z
+  .object({
+    sessionId: z.string().min(1),
+    reason: sessionEndReasonSchema,
+    message: z.string().min(1),
   })
   .strict();
 
@@ -448,6 +459,8 @@ export type PasteState = z.infer<typeof pasteStateSchema>;
 export type PasteValidation = z.infer<typeof pasteValidationSchema>;
 export type ValidationMessage = z.infer<typeof validationMessageSchema>;
 export type SdkError = z.infer<typeof sdkErrorSchema>;
+export type SessionEndReason = z.infer<typeof sessionEndReasonSchema>;
+export type SessionEnded = z.infer<typeof sessionEndedSchema>;
 export type CoachMessage = z.infer<typeof coachMessageSchema>;
 export type AiProvider = z.infer<typeof aiProviderSchema>;
 export type InsightRequest = z.infer<typeof insightRequestSchema>;

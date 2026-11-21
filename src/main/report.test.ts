@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import type { PulseSample } from '../shared/contracts.js';
 import { SAMPLE_HOLD_US } from '../shared/sensing.js';
 import { bandAt, buildReport, COVERAGE_GATE_PCT, elevatedClaim, formatResult } from './report.js';
+import { requestInsight } from './ai/service.js';
 import { ingestSamples, startSession, stopSession } from './session.js';
+import { digestGames, readGames, readReport } from './store.js';
 
 const roots: string[] = [];
 after(() => {
@@ -49,6 +52,15 @@ function pgnAt(endEpochMs: number): string {
 
 1. e4 {[%clk 0:00:50]} 1-0
 `;
+}
+
+function evaluator() {
+  return {
+    async evaluate(fen: string) {
+      return { fen, depth: 8, evalFailed: false, scoreCp: 12, bestmove: 'e7e5' };
+    },
+    async close() {},
+  };
 }
 
 describe('bandAt', () => {
@@ -96,6 +108,49 @@ describe('buildReport', () => {
     assert.match(formatResult(result), /40%/);
   });
 
+  it('keeps the previous report and PGNs byte-identical after a PGN failure', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 10 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 10_000_000);
+    const pgn = pgnAt(EPOCH + 10_000);
+    assert.equal((await buildReport(root, id, [pgn], evaluator())).ok, true);
+    const reportFile = path.join(root, 'sessions', id, 'report.json');
+    const gamesFile = path.join(root, 'sessions', id, 'games.json');
+    const reportBefore = await readFile(reportFile, 'utf8');
+    const gamesBefore = await readFile(gamesFile, 'utf8');
+
+    await assert.rejects(
+      buildReport(root, id, ['[Event "Broken"]\n\n1. e4 {[%clk bad]} 1-0\n'], evaluator()),
+      /clock time/,
+    );
+
+    assert.equal(await readFile(reportFile, 'utf8'), reportBefore);
+    assert.equal(await readFile(gamesFile, 'utf8'), gamesBefore);
+  });
+
+  it('keeps the previous report and PGNs byte-identical after a coverage refusal', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 10 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 10_000_000);
+    const pgn = pgnAt(EPOCH + 10_000);
+    assert.equal((await buildReport(root, id, [pgn], evaluator())).ok, true);
+    const reportFile = path.join(root, 'sessions', id, 'report.json');
+    const gamesFile = path.join(root, 'sessions', id, 'games.json');
+    const reportBefore = await readFile(reportFile, 'utf8');
+    const gamesBefore = await readFile(gamesFile, 'utf8');
+    await writeFile(
+      path.join(root, 'sessions', id, 'samples.ndjson'),
+      samples.slice(0, 4).map((entry) => JSON.stringify(entry)).join('\n') + '\n',
+    );
+
+    const result = await buildReport(root, id, [pgn], evaluator());
+
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.reason, 'low_coverage');
+    assert.equal(await readFile(reportFile, 'utf8'), reportBefore);
+    assert.equal(await readFile(gamesFile, 'utf8'), gamesBefore);
+  });
+
   it('prints the same verdict twice when coverage is enough', async () => {
     const root = useRoot();
     const samples = Array.from({ length: 10 }, (_unused, index) => sample(index * 1_000_000));
@@ -121,11 +176,65 @@ describe('buildReport', () => {
     assert.equal(first.timeline.games.length, 1);
     assert.equal(first.timeline.moves.length, 1);
     assert.equal(first.timeline.elevatedThresholdBpm, 80);
+    assert.equal('gamesDigest' in first, true);
+    if (!('gamesDigest' in first)) return;
+    assert.equal(
+      first.gamesDigest,
+      createHash('sha256').update(JSON.stringify([pgn]), 'utf8').digest('hex'),
+    );
     const saved = JSON.parse(await readFile(path.join(root, 'sessions', id, 'report.json'), 'utf8')) as unknown;
     assert.deepEqual(saved, first);
     assert.equal(formatResult(first), `${first.verdict}\n`);
     assert.equal(first.banner, undefined);
     const withBanner = formatResult({ ...first, banner: 'No EndTime in this paste.' });
     assert.equal(withBanner, `${first.verdict}\nNo EndTime in this paste.\n`);
+  });
+
+  it('replaces both artifacts with matching digests after a different PGN rebuild', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 10 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 10_000_000);
+    const firstPgn = pgnAt(EPOCH + 10_000);
+    const secondPgn = firstPgn.replace('[White "Ada"]', '[White "Grace"]');
+    assert.equal((await buildReport(root, id, [firstPgn], evaluator())).ok, true);
+
+    const rebuilt = await buildReport(root, id, [secondPgn], evaluator());
+
+    assert.equal(rebuilt.ok, true);
+    if (!rebuilt.ok) return;
+    assert.deepEqual(await readGames(root, id), [secondPgn]);
+    const storedReport = await readReport(root, id);
+    assert.equal(storedReport.gamesDigest, digestGames(await readGames(root, id)));
+    assert.equal(storedReport.games[0]?.white, 'Grace');
+  });
+
+  it('rejects a hand-edited stored PGN batch before any provider call', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 10 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 10_000_000);
+    const pgn = pgnAt(EPOCH + 10_000);
+    assert.equal((await buildReport(root, id, [pgn], evaluator())).ok, true);
+    const editedPgn = pgn.replace('[White "Ada"]', '[White "Edited"]');
+    await writeFile(path.join(root, 'sessions', id, 'games.json'), JSON.stringify([editedPgn]));
+    const storedReport = await readReport(root, id);
+    const storedGames = await readGames(root, id);
+    let calls = 0;
+
+    await assert.rejects(
+      requestInsight(
+        { sessionId: id, provider: 'openai', text: 'Review this session.' },
+        storedReport,
+        storedGames,
+        { CP_AI_KEY: 'test-secret', CP_AI_MODEL: 'test-model' },
+        {
+          fetch: async () => {
+            calls += 1;
+            return new Response('{}', { status: 500 });
+          },
+        },
+      ),
+      /Build the report again/,
+    );
+    assert.equal(calls, 0);
   });
 });

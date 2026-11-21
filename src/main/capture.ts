@@ -15,6 +15,7 @@ import type {
   PreviewFrame,
   SdkError,
   SessionAnchor,
+  SessionEndReason,
   ValidationMessage,
 } from '../shared/contracts.js';
 import { newPulseSamples, sdkErrorMessage, validationMessage } from './capture-samples.js';
@@ -46,18 +47,40 @@ export interface CaptureEvents {
   onValidation(message: ValidationMessage): void;
   onError(error: SdkError): void;
   onPreview(frame: PreviewFrame): void;
+  onEnded(reason: SessionEndReason): void;
+}
+
+export interface CaptureSdkEventMap {
+  metrics: [buffer: Buffer];
+  validationStatus: [code: number, timestampUs: number, hint: string];
+  videoOutput: [buffer: Buffer, width: number, height: number, stride: number];
+  error: [code: number, message: string, retryable: boolean];
+  processingStatus: [status: number];
+}
+
+export interface CaptureSdk {
+  on<K extends keyof CaptureSdkEventMap>(
+    event: K,
+    listener: (...args: CaptureSdkEventMap[K]) => void,
+  ): unknown;
+  useCamera(selection: unknown): void;
+  start(): void;
+  stopAsync(): Promise<void>;
+  destroy(): Promise<void>;
 }
 
 export interface CaptureSession {
-  stop(): Promise<void>;
+  stop(): Promise<SessionEndReason | undefined>;
 }
 
 export function startCapture(input: {
   apiKey: string;
   anchor: SessionAnchor;
   events: CaptureEvents;
+  sdk?: CaptureSdk;
+  flushMs?: number;
 }): CaptureSession {
-  const sdk = new SmartSpectraSDK({
+  const sdk = input.sdk ?? (new SmartSpectraSDK({
     apiKey: input.apiKey,
     // The whole cardio bundle, deliberately. Requesting PULSE_RATE alone produced no metrics at
     // all across full sessions, while the bundle produced a pulse series on this same machine.
@@ -65,13 +88,15 @@ export function startCapture(input: {
     // Session summaries would leave the machine; ChessPulse is local-only.
     enableTelemetry: false,
     logLevel: SmartSpectraLogLevel.kWarning,
-  });
+  }) as unknown as CaptureSdk);
   let pending: PulseSample[] = [];
   let lastTUs = input.anchor.monoUs;
   let timer: NodeJS.Timeout | undefined;
   let closed = false;
-  let stopping: Promise<void> | undefined;
+  let stopping: Promise<SessionEndReason | undefined> | undefined;
   let terminalReported = false;
+  let endedReported = false;
+  let storageFailed = false;
   const writes = new Set<Promise<void>>();
   let lastPreviewAt = 0;
   let previewErrorReported = false;
@@ -88,6 +113,7 @@ export function startCapture(input: {
     try {
       run = input.events.onSamples(batch);
     } catch {
+      reportEnded('storage');
       void Promise.resolve().then(() => shutdown());
       return;
     }
@@ -102,6 +128,7 @@ export function startCapture(input: {
       () => {
         // A refused batch means the session is gone; release the camera with it.
         writes.delete(write);
+        reportEnded('storage');
         void shutdown();
       },
     );
@@ -113,7 +140,18 @@ export function startCapture(input: {
     input.events.onError(error);
   }
 
-  function shutdown(): Promise<void> {
+  function reportEnded(reason: SessionEndReason): void {
+    if (reason === 'storage') storageFailed = true;
+    if (endedReported) return;
+    endedReported = true;
+    try {
+      input.events.onEnded(reason);
+    } catch {
+      // The camera still shuts down; the session header records the stop independently.
+    }
+  }
+
+  function shutdown(): Promise<SessionEndReason | undefined> {
     if (stopping) return stopping;
     closed = true;
     stopping = Promise.resolve().then(async () => {
@@ -139,6 +177,7 @@ export function startCapture(input: {
           // A wedged write is abandoned; the samples already in the file stay valid.
         }
       }
+      return storageFailed ? 'storage' : undefined;
     });
     return stopping;
   }
@@ -164,7 +203,7 @@ export function startCapture(input: {
     if (fresh.length === 0) return;
     lastTUs = fresh[fresh.length - 1].tUs;
     pending.push(...fresh);
-    if (timer === undefined) timer = setTimeout(flush, FLUSH_MS);
+    if (timer === undefined) timer = setTimeout(flush, input.flushMs ?? FLUSH_MS);
   });
 
   sdk.on('validationStatus', (code, timestampUs, hint) => {

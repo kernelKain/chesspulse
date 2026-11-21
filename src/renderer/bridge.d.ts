@@ -10,6 +10,7 @@ import type {
   PulseSample,
   ReportResult,
   SdkError,
+  SessionEnded,
   SessionMeta,
   ValidationMessage,
 } from '../shared/contracts';
@@ -29,6 +30,7 @@ export interface ChessPulseBridge {
   onPreview(listener: (frame: PreviewFrame) => void): () => void;
   setBetweenGames(active: boolean): Promise<{ betweenGames: boolean }>;
   onCoachMessage(listener: (message: CoachMessage) => void): () => void;
+  onSessionEnded(listener: (event: SessionEnded) => void): () => void;
   requestInsight(request: InsightRequest): Promise<InsightResult>;
   cancelInsight(sessionId: string): Promise<{ cancelled: boolean }>;
   validatePgns(slots: string[]): Promise<PasteValidation>;

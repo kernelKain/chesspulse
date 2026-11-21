@@ -10,7 +10,7 @@ import { parsePgnBatch, thinkTimeSec } from './analysis/pgn.js';
 import { positionsFromMoves } from './analysis/positions.js';
 import { createEngine, type PositionEval } from './engine.js';
 import { baselineFromSamples, coverageFromSamples, isUsableSample } from './session.js';
-import { defaultDataRoot, deleteReport, readMeta, readSamples, saveGames, saveReport } from './store.js';
+import { defaultDataRoot, digestGames, readMeta, readSamples, saveReportArtifacts } from './store.js';
 import {
   reportSchema,
   type PulseSample,
@@ -37,7 +37,6 @@ export async function buildReport(
   engine?: Evaluator,
 ): Promise<Report | Refusal> {
   const meta = await readMeta(root, sessionId);
-  await deleteReport(root, sessionId);
   const samples = await readSamples(root, sessionId);
   const refusal = gate(meta, samples, pgns);
   if (refusal) return refusal;
@@ -90,6 +89,7 @@ export async function buildReport(
     const report = reportSchema.parse({
       ok: true,
       sessionId,
+      gamesDigest: digestGames(pgns),
       coveragePct: coverage.pct,
       baselineBpm: baseline,
       verdict,
@@ -131,8 +131,7 @@ export async function buildReport(
         moves: scoredMoves.timelineMoves,
       },
     });
-    await saveGames(root, sessionId, pgns);
-    await saveReport(root, sessionId, JSON.stringify(report, null, 2) + '\n');
+    await saveReportArtifacts(root, sessionId, JSON.stringify(report, null, 2) + '\n', pgns);
     return report;
   } finally {
     if (owned) await scorer.close();

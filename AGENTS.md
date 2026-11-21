@@ -57,7 +57,8 @@ device.
 
 - Default **A1**: implement one named step at a time, run local checks, stop. Git, external
   setup, installs and deployment each need separate authorisation.
-- Commit mode **ASK**: no commit without an explicit instruction that names the step.
+- Commit mode **ASK**: no commit without an explicit instruction that names the step. Phase 5
+  instead commits once per completed workstream (W1–W6); that instruction names the workstream.
 - Never, on your own initiative: commit, push, merge, deploy, install system packages, create
   accounts, change billing, or run a billed API experiment.
 - Never force-push, rewrite history, or discard work you did not create.

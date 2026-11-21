@@ -16,6 +16,7 @@ import {
   validationMessageSchema,
   type PreviewFrame,
   type SdkError,
+  type SessionEndReason,
   type SessionMeta,
   type ValidationMessage,
 } from '../shared/contracts.js';
@@ -36,7 +37,10 @@ import {
   setSampleSink,
   startSession,
   stopSession,
+  type SessionStopReason,
 } from './session.js';
+import { createSessionStopper } from './session-stop.js';
+import { createShutdownHooks } from './shutdown.js';
 import { defaultDataRoot } from './store.js';
 
 const SESSION_START_CHANNEL = 'cp:session:start';
@@ -47,6 +51,7 @@ const SDK_ERROR_CHANNEL = 'cp:sdk:error';
 const PREVIEW_CHANNEL = 'cp:preview';
 const COACH_GAP_CHANNEL = 'cp:coach:gap';
 const COACH_MESSAGE_CHANNEL = 'cp:coach:message';
+const SESSION_ENDED_CHANNEL = 'cp:session:ended';
 
 let capture: CaptureSession | null = null;
 let coach: BetweenGamesCoach | null = null;
@@ -102,35 +107,45 @@ function publishSdkError(error: SdkError): void {
 }
 
 /** The camera is released before the session closes, so the last batch still has a session to land in. */
-async function stopCapture(): Promise<void> {
+async function stopCapture(): Promise<SessionEndReason | undefined> {
   const current = capture;
   capture = null;
   coach = null;
   lastValidationCode = null;
-  if (!current) return;
+  if (!current) return undefined;
   try {
-    await current.stop();
+    return await current.stop();
   } catch {
     // Best effort. Samples already written stay valid; crash recovery closes the header.
+    return undefined;
   }
 }
+
+const sessionStopper = createSessionStopper({
+  stopCapture,
+  stopSession: (reason) => stopSession(defaultDataRoot(), currentAnchor(), reason),
+  publish: (event) => publishToWindows(SESSION_ENDED_CHANNEL, event),
+});
 
 /**
  * Releases the camera, then closes the header. The page, consent withdrawal, the window closing
  * and quitting all share one promise: nobody proceeds while the native teardown is still draining,
  * and the session is never finalized twice.
  */
-function stopEverything(reason: 'user' | 'sdkError'): Promise<SessionMeta> {
+function stopEverything(reason: SessionStopReason): Promise<SessionMeta> {
   if (stoppingSession) return stoppingSession;
-  const run = (async () => {
-    await stopCapture();
-    return stopSession(defaultDataRoot(), currentAnchor(), reason);
-  })();
+  const run = sessionStopper.stop(reason);
   stoppingSession = run.finally(() => {
     stoppingSession = null;
   });
   return stoppingSession;
 }
+
+const shutdownHooks = createShutdownHooks({
+  stop: () => stopEverything('user'),
+  hasActive: () => capture !== null || stoppingSession !== null,
+  quit: () => app.quit(),
+});
 
 function appFileUrl(): string {
   return pathToFileURL(path.join(__dirname, '../../dist/index.html')).href;
@@ -152,7 +167,11 @@ function registerSessionHandlers(): void {
     if (!apiKey) throw new Error('The SmartSpectra key is missing. Add SMARTSPECTRA_API_KEY to .env.');
     const anchor = currentAnchor();
     lastValidationCode = null;
-    const meta = await startSession(defaultDataRoot(), anchor, parsed.data.timeControl);
+    const meta = await startSession(defaultDataRoot(), anchor, parsed.data.timeControl, {
+      onLimit: () => {
+        void stopEverything('limit').catch(() => undefined);
+      },
+    });
     coach = new BetweenGamesCoach(meta.startAnchor.monoUs);
     // Consent can be withdrawn while the header is written. Checked again immediately before the
     // camera opens, with no await in between, so a revocation cannot slip through.
@@ -169,6 +188,9 @@ function registerSessionHandlers(): void {
           onValidation: publishValidation,
           onError: publishSdkError,
           onPreview: publishPreview,
+          onEnded: (reason) => {
+            if (reason === 'storage') void stopEverything('storage').catch(() => undefined);
+          },
         },
       });
     } catch (error) {
@@ -294,9 +316,7 @@ app.whenReady().then(async () => {
   registerConsentHandler(
     { appFileUrl: appFileUrl(), devOrigin: rendererDevOrigin() },
     {
-      onRevoked: () => {
-        void stopEverything('user').catch(() => undefined);
-      },
+      onRevoked: shutdownHooks.onConsentRevoked,
     },
   );
   registerSessionHandlers();
@@ -318,20 +338,12 @@ app.whenReady().then(async () => {
   });
 });
 
-let quitting = false;
-
 app.on('before-quit', (event) => {
-  if (quitting) return;
-  if (!capture && !stoppingSession) return;
-  event.preventDefault();
-  quitting = true;
-  void stopEverything('user')
-    .catch(() => undefined)
-    .finally(() => app.quit());
+  shutdownHooks.onBeforeQuit(event);
 });
 
 app.on('window-all-closed', () => {
   // Closing the last window ends the session, on every platform. Quitting then waits for it.
-  void stopEverything('user').catch(() => undefined);
+  shutdownHooks.onWindowAllClosed();
   if (process.platform !== 'darwin') app.quit();
 });
