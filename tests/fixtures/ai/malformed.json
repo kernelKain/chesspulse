@@ -1,0 +1,6 @@
+{
+  "name": "malformed prose with a stray object marker",
+  "stats": { "settledAccuracy": 71 },
+  "response": "The settled accuracy was 71%. This is prose, not structured output. {}",
+  "expected": "accept"
+}

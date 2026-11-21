@@ -4,6 +4,7 @@ import { downscaleRgbToRgba } from './preview.js';
 import {
   coachGapRequestSchema,
   coachMessageSchema,
+  insightResultSchema,
   consentRequestSchema,
   previewFrameSchema,
   pasteValidationSchema,
@@ -60,6 +61,20 @@ describe('coach IPC contracts', () => {
     assert.equal(coachGapRequestSchema.safeParse({ betweenGames: true }).success, true);
     assert.equal(coachGapRequestSchema.safeParse({ betweenGames: 'yes' }).success, false);
     assert.equal(coachGapRequestSchema.safeParse({ betweenGames: true, liveGame: true }).success, false);
+  });
+});
+
+describe('insightResultSchema', () => {
+  it('separates untrusted narrative from disabled state and computed fields', () => {
+    assert.equal(
+      insightResultSchema.safeParse({ disabled: false, provider: 'openai', text: 'A grounded reading.' }).success,
+      true,
+    );
+    assert.equal(insightResultSchema.safeParse({ disabled: true, reason: 'No key.' }).success, true);
+    assert.equal(
+      insightResultSchema.safeParse({ disabled: false, provider: 'openai', text: 'Reading.', accuracy: 99 }).success,
+      false,
+    );
   });
 });
 
