@@ -60,6 +60,42 @@ describe('provider adapters', () => {
     });
   }
 
+  it('cancels an error body without replacing the mapped status error', async () => {
+    let cancelled = false;
+    const response = new Response(new ReadableStream({
+      cancel() {
+        cancelled = true;
+        return Promise.reject(new Error('cancellation failed'));
+      },
+    }), { status: 401 });
+    await assert.rejects(callProvider(configuration('openai'), INPUT, async () => response), /rejected the key/);
+    assert.equal(cancelled, true);
+  });
+
+  it('cancels a successful response stream as soon as it exceeds 100000 bytes', async () => {
+    let reads = 0;
+    let cancels = 0;
+    const chunk = new TextEncoder().encode('é'.repeat(30_000));
+    const response = {
+      ok: true,
+      body: {
+        getReader: () => ({
+          read: async () => {
+            reads += 1;
+            return { done: false, value: chunk };
+          },
+          cancel: async () => {
+            cancels += 1;
+          },
+        }),
+      },
+      text: async () => 'x'.repeat(100_001),
+    } as Response;
+    await assert.rejects(callProvider(configuration('openai'), INPUT, async () => response), /unreadable response/);
+    assert.equal(reads, 2);
+    assert.equal(cancels, 1);
+  });
+
   it('rejects a malformed provider payload without exposing its contents', async () => {
     const fetchStub: typeof fetch = async () => new Response('{"unexpected":true}', { status: 200 });
     await assert.rejects(callProvider(configuration('openai'), INPUT, fetchStub), (error: unknown) => {

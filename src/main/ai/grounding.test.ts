@@ -42,6 +42,11 @@ describe('groundInsight', () => {
     assert.throws(() => groundInsight({ limit: 1000 }, 'Limit 1e4.'), /1e4/);
   });
 
+  it('treats a trailing sentence comma as punctuation, not as part of the number', () => {
+    const output = 'Baseline 70, then the game continued.';
+    assert.equal(groundInsight({ baseline: 70 }, output), output);
+  });
+
   it('rejects misplaced and repeated commas instead of reinterpreting the number', () => {
     assert.throws(() => groundInsight({ value: 71 }, 'Value 7,1.'), /malformed number.*7,1/);
     assert.throws(() => groundInsight({ value: 1200 }, 'Value 1,,200.'), /malformed number.*1,,200/);

@@ -178,10 +178,14 @@ describe('requestInsight', () => {
           calls += 1;
           return {
             ok: true,
-            text: () => new Promise<string>((_resolve, reject) => {
-              init?.signal?.addEventListener('abort', () => reject(new DOMException('Timed out', 'AbortError')));
-            }),
-          } as Response;
+            body: {
+              getReader: () => ({
+                read: () => new Promise<never>((_resolve, reject) => {
+                  init?.signal?.addEventListener('abort', () => reject(new DOMException('Timed out', 'AbortError')));
+                }),
+              }),
+            },
+          } as unknown as Response;
         },
       }),
       /timed out/,

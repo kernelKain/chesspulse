@@ -31,9 +31,15 @@ export async function callProvider(
 ): Promise<string> {
   const request = providerRequest(config, prompt, signal);
   const response = await fetchImpl(request.url, request.init);
-  if (!response.ok) throw statusError(response.status);
-  const body = await response.text();
-  if (body.length > 100_000) throw new AiProviderError('The AI provider returned an unreadable response.', false);
+  if (!response.ok) {
+    try {
+      await response.body?.cancel();
+    } catch {
+      // Body cleanup must not hide the provider's mapped status failure.
+    }
+    throw statusError(response.status);
+  }
+  const body = await readBoundedBody(response);
   let value: unknown;
   try {
     value = JSON.parse(body);
@@ -41,6 +47,29 @@ export async function callProvider(
     throw new AiProviderError('The AI provider returned an unreadable response.', false);
   }
   return parseProviderText(config.provider, value);
+}
+
+async function readBoundedBody(response: Response): Promise<string> {
+  if (response.body === null) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = '';
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    bytes += chunk.value.byteLength;
+    if (bytes > 100_000) {
+      try {
+        await reader.cancel();
+      } catch {
+        // The size refusal is the useful error even if stream cleanup fails.
+      }
+      throw new AiProviderError('The AI provider returned an unreadable response.', false);
+    }
+    text += decoder.decode(chunk.value, { stream: true });
+  }
+  return text + decoder.decode();
 }
 
 function providerRequest(config: AiConfiguration, prompt: string, signal?: AbortSignal): { url: string; init: RequestInit } {

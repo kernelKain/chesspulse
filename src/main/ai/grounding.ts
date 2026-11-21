@@ -6,19 +6,24 @@ const VALID_COMMA_NUMBER = /^[-+]?(?:\d+(?:,\d{3})*(?:\.\d*)?|\.\d+)(?:[eE][-+]?
 
 export function groundInsight(stats: unknown, output: string): string {
   for (const match of output.matchAll(NUMBER)) {
-    if (match[0].includes(',') && !VALID_COMMA_NUMBER.test(match[0])) {
+    const token = withoutSentencePunctuation(match[0]);
+    if (token.includes(',') && !VALID_COMMA_NUMBER.test(token)) {
       throw new Error(`The AI response contained a malformed number: ${match[0]}. Nothing in the report changed.`);
     }
   }
   const serialized = JSON.stringify(stats, (_key, value) => (typeof value === 'bigint' ? value.toString() : value)) ?? '';
-  const allowed = new Set([...serialized.matchAll(NUMBER)].map((match) => canonicalDecimal(match[0])));
+  const allowed = new Set([...serialized.matchAll(NUMBER)].map((match) => canonicalDecimal(withoutSentencePunctuation(match[0]))));
   for (const match of output.matchAll(NUMBER)) {
-    const token = match[0];
+    const token = withoutSentencePunctuation(match[0]);
     if (!allowed.has(canonicalDecimal(token))) {
       throw new Error(`The AI response introduced a number that is not in the session data: ${token}. Nothing in the report changed.`);
     }
   }
   return output;
+}
+
+function withoutSentencePunctuation(token: string): string {
+  return token.replace(/[.,]+$/, '');
 }
 
 /** Canonical sign/significant-digits/exponent comparison avoids IEEE-754 rounding. */

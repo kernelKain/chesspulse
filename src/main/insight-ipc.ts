@@ -10,6 +10,7 @@ import {
 } from '../shared/contracts.js';
 import { requestInsight } from './ai/service.js';
 import { log, logError } from './log.js';
+import { withReportExclusion } from './report-lock.js';
 import { defaultDataRoot, readGames, readReport } from './store.js';
 
 export const INSIGHT_REQUEST_CHANNEL = 'cp:insight:request';
@@ -26,10 +27,12 @@ export function registerInsightHandler(dataRoot: () => string = defaultDataRoot,
     const controller = new AbortController();
     active.set(parsed.data.sessionId, controller);
     try {
-      const report = await readReport(dataRoot(), parsed.data.sessionId);
-      const pgns = await readGames(dataRoot(), parsed.data.sessionId);
+      const artifacts = await withReportExclusion(async () => ({
+        report: await readReport(dataRoot(), parsed.data.sessionId),
+        pgns: await readGames(dataRoot(), parsed.data.sessionId),
+      }));
       const result = insightResultSchema.parse(
-        await requestInsight(parsed.data, report, pgns, env, { signal: controller.signal }),
+        await requestInsight(parsed.data, artifacts.report, artifacts.pgns, env, { signal: controller.signal }),
       );
       log(`[chesspulse] AI reading ${requestId} ${result.disabled ? 'disabled' : 'ready'}`);
       return result;
