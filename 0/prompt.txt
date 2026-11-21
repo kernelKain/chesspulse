@@ -1,0 +1,49 @@
+is entire enabled for this chat, if not then do it this seesion must be recorded and must be visible in entire
+
+---
+
+okay what is next that then we need to do now?
+
+---
+
+do it
+
+---
+
+what next we need to do now, read docs and answer.
+
+---
+
+do it
+
+---
+
+okay what next we need to do
+
+---
+
+okay do it.
+
+---
+
+update docs W1 all steps will be commited all together same for W2, W3 till W6.
+
+---
+
+continue to next step.
+
+---
+
+continue to next step
+
+---
+
+continue to next step
+
+---
+
+change commit mesage for w1,w2, ... make them more descriptiove but in 1 line, update docs
+
+---
+
+commit w1

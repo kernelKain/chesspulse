@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "call_1b5ab2a5a4de44e8a81a5063",
+  "agent_id": "ses_dff95d4d5ffemMdmyt34oz2vw8",
+  "subagent_type": "reviewer",
+  "task_description": "Review S32 shutdown proof",
+  "token_usage": {
+    "input_tokens": 70346,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 796544,
+    "output_tokens": 5396,
+    "api_call_count": 19
+  },
+  "started_at": "2026-11-22T04:51:27.592+05:30",
+  "completed_at": "2026-11-22T04:54:21.438326674+05:30"
+}

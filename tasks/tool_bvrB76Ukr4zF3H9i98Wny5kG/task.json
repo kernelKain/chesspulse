@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "tool_bvrB76Ukr4zF3H9i98Wny5kG",
+  "agent_id": "ses_dffb7086affek8943CRfFs4gc8",
+  "subagent_type": "reviewer",
+  "task_description": "Review S29 data safety",
+  "token_usage": {
+    "input_tokens": 87363,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 844544,
+    "output_tokens": 3489,
+    "api_call_count": 16
+  },
+  "started_at": "2026-11-22T04:15:11.699+05:30",
+  "completed_at": "2026-11-22T04:18:09.367412543+05:30"
+}
