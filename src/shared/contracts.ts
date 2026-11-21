@@ -268,6 +268,23 @@ export const sdkErrorSchema = z
   })
   .strict();
 
+/** A locally computed coach line. It carries no raw trace and no inferred health state. */
+export const coachMessageSchema = z
+  .object({
+    baselineBpm: z.number().finite(),
+    recentBpm: z.number().finite(),
+    deltaBpm: z.number().finite().nonnegative(),
+    text: z.string().min(1),
+  })
+  .strict();
+
+/** The player alone marks this boundary; the app never infers that a live game has ended. */
+export const coachGapRequestSchema = z
+  .object({
+    betweenGames: z.boolean(),
+  })
+  .strict();
+
 const PASTE_BYTE_LIMIT = 2_000_000;
 
 export const reportBuildRequestSchema = z
@@ -414,4 +431,5 @@ export type PasteState = z.infer<typeof pasteStateSchema>;
 export type PasteValidation = z.infer<typeof pasteValidationSchema>;
 export type ValidationMessage = z.infer<typeof validationMessageSchema>;
 export type SdkError = z.infer<typeof sdkErrorSchema>;
+export type CoachMessage = z.infer<typeof coachMessageSchema>;
 export type PreviewFrame = z.infer<typeof previewFrameSchema>;

@@ -963,6 +963,32 @@ textarea {
   font-size: 14px;
 }
 
+.coach-panel {
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.coach-message {
+  color: var(--text);
+  font-size: 20px;
+  max-width: 44rem;
+}
+
+.coach-quiet,
+.coach-numbers {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.coach-numbers {
+  margin-top: 8px;
+  font-family: ui-monospace, monospace;
+}
+
 .choices,
 .actions {
   display: flex;

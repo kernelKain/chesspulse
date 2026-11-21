@@ -5,6 +5,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, ipcMain, session } from 'electron';
 import {
+  coachGapRequestSchema,
+  coachMessageSchema,
   previewFrameSchema,
   sampleBatchSchema,
   sdkErrorSchema,
@@ -20,6 +22,7 @@ import {
 import { contentSecurityPolicy } from '../shared/security.js';
 import { allowsNavigation } from './navigation.js';
 import { startCapture, type CaptureSession } from './capture.js';
+import { BetweenGamesCoach } from './coach.js';
 import { currentConsent, registerConsentHandler } from './consent.js';
 import { loadEnvFile, readSensingKey } from './env.js';
 import { installSafeConsole, log, logError } from './log.js';
@@ -41,8 +44,11 @@ const SAMPLE_CHANNEL = 'cp:sample:batch';
 const VALIDATION_CHANNEL = 'cp:validation';
 const SDK_ERROR_CHANNEL = 'cp:sdk:error';
 const PREVIEW_CHANNEL = 'cp:preview';
+const COACH_GAP_CHANNEL = 'cp:coach:gap';
+const COACH_MESSAGE_CHANNEL = 'cp:coach:message';
 
 let capture: CaptureSession | null = null;
+let coach: BetweenGamesCoach | null = null;
 /** One stop at a time. Every caller shares this promise, so the session is finalized exactly once. */
 let stoppingSession: Promise<SessionMeta> | null = null;
 
@@ -65,7 +71,11 @@ function publishToWindows(channel: string, payload: unknown): void {
 }
 
 function publishSamples(samples: readonly unknown[]): void {
-  publishToWindows(SAMPLE_CHANNEL, sampleBatchSchema.parse(samples));
+  const parsed = sampleBatchSchema.parse(samples);
+  publishToWindows(SAMPLE_CHANNEL, parsed);
+  // Only batches already committed to the session file can trigger the coach.
+  const message = coach?.ingest(parsed);
+  if (message) publishToWindows(COACH_MESSAGE_CHANNEL, coachMessageSchema.parse(message));
 }
 
 let lastValidationCode: number | null = null;
@@ -94,6 +104,7 @@ function publishSdkError(error: SdkError): void {
 async function stopCapture(): Promise<void> {
   const current = capture;
   capture = null;
+  coach = null;
   lastValidationCode = null;
   if (!current) return;
   try {
@@ -141,6 +152,7 @@ function registerSessionHandlers(): void {
     const anchor = currentAnchor();
     lastValidationCode = null;
     const meta = await startSession(defaultDataRoot(), anchor, parsed.data.timeControl);
+    coach = new BetweenGamesCoach(meta.startAnchor.monoUs);
     // Consent can be withdrawn while the header is written. Checked again immediately before the
     // camera opens, with no await in between, so a revocation cannot slip through.
     if (!currentConsent()) {
@@ -168,6 +180,14 @@ function registerSessionHandlers(): void {
     const parsed = sessionStopRequestSchema.safeParse(payload ?? {});
     if (!parsed.success) throw new Error('Stop does not take any details.');
     return stopEverything('user');
+  });
+  ipcMain.handle(COACH_GAP_CHANNEL, (_event, payload: unknown) => {
+    const parsed = coachGapRequestSchema.safeParse(payload);
+    if (!parsed.success) throw new Error('Mark the game boundary as either between games or playing.');
+    if (!coach) throw new Error('Start sensing before marking a game boundary.');
+    const message = coach.setBetweenGames(parsed.data.betweenGames);
+    if (message) publishToWindows(COACH_MESSAGE_CHANNEL, coachMessageSchema.parse(message));
+    return parsed.data;
   });
 }
 

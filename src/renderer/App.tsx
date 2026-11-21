@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  coachMessageSchema,
   reportResultSchema,
   sampleBatchSchema,
+  type CoachMessage,
   type PasteValidation,
   type PulseSample,
   type ReportResult,
@@ -11,6 +13,7 @@ import {
 import { CONFIDENCE_FLOOR } from '../shared/sensing';
 import { BandBars } from './BandBars';
 import { CameraPreview } from './CameraPreview';
+import { CoachLine } from './CoachLine';
 import { GameList } from './GameList';
 import { PasteScreen } from './PasteScreen';
 import { SensingStrip } from './SensingStrip';
@@ -34,6 +37,9 @@ export function App() {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [validation, setValidation] = useState<ValidationMessage | null>(null);
   const [sdkError, setSdkError] = useState<string | null>(null);
+  const [betweenGames, setBetweenGames] = useState(false);
+  const [gapPending, setGapPending] = useState(false);
+  const [coachMessage, setCoachMessage] = useState<CoachMessage | null>(null);
   const [note, setNote] = useState('The camera stays off until you consent.');
   const [error, setError] = useState<string | null>(null);
   const bridge = window.chesspulse;
@@ -44,6 +50,9 @@ export function App() {
   const sessionIdRef = useRef<string | null>(null);
 
   function adoptSession(nextId: string): void {
+    setBetweenGames(false);
+    setGapPending(false);
+    setCoachMessage(null);
     if (sessionIdRef.current === nextId) return;
     sessionIdRef.current = nextId;
     reportRequestSeq.current += 1;
@@ -66,6 +75,14 @@ export function App() {
       if (!parsed.success) return;
       setSamples((current) => [...current, ...parsed.data]);
       setSdkError((current) => (current === null ? current : null));
+    });
+  }, [bridge]);
+
+  useEffect(() => {
+    if (!bridge) return undefined;
+    return bridge.onCoachMessage((message) => {
+      const parsed = coachMessageSchema.safeParse(message);
+      if (parsed.success) setCoachMessage(parsed.data);
     });
   }, [bridge]);
 
@@ -179,6 +196,23 @@ export function App() {
     }
   }
 
+  async function onGapToggle(): Promise<void> {
+    if (!bridge || phase !== 'sensing' || gapPending) return;
+    setGapPending(true);
+    setError(null);
+    // A line from the previous gap must never appear during the next game. Clear before the call
+    // so an immediate coach event for the new gap cannot be erased by its own response.
+    setCoachMessage(null);
+    try {
+      const result = await bridge.setBetweenGames(!betweenGames);
+      setBetweenGames(result.betweenGames);
+    } catch (caught: unknown) {
+      setError(ipcErrorText(caught, 'The game boundary could not be saved.'));
+    } finally {
+      setGapPending(false);
+    }
+  }
+
   async function onPasteContinue(pgns: string[], _validation: PasteValidation): Promise<void> {
     const seq = ++reportRequestSeq.current;
     setPasteSlots(pgns);
@@ -276,6 +310,7 @@ export function App() {
       </p>
       {granted ? <CameraPreview sensing={phase === 'sensing'} /> : null}
       <SensingStrip samples={samples} selectedIndex={selectedIndex} onSelect={setSelectedIndex} />
+      {phase === 'sensing' && betweenGames ? <CoachLine message={coachMessage} /> : null}
       {phase === 'idle' ? (
         <div className="choices" role="group" aria-label="Time control">
           {TIME_CONTROLS.map((control) => (
@@ -297,9 +332,14 @@ export function App() {
           </button>
         ) : null}
         {phase === 'sensing' ? (
-          <button type="button" onClick={() => void onStop()}>
-            Stop sensing
-          </button>
+          <>
+            <button type="button" disabled={gapPending} onClick={() => void onGapToggle()}>
+              {betweenGames ? 'Next game started' : 'Game ended'}
+            </button>
+            <button type="button" onClick={() => void onStop()}>
+              Stop sensing
+            </button>
+          </>
         ) : (
           <button type="button" disabled={!granted} onClick={() => void onStart()}>
             Start sensing

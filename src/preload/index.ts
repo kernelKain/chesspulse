@@ -12,6 +12,8 @@ const SDK_ERROR_CHANNEL = 'cp:sdk:error';
 const PREVIEW_CHANNEL = 'cp:preview';
 const PASTE_VALIDATE_CHANNEL = 'cp:pgn:validate';
 const REPORT_BUILD_CHANNEL = 'cp:report:build';
+const COACH_GAP_CHANNEL = 'cp:coach:gap';
+const COACH_MESSAGE_CHANNEL = 'cp:coach:message';
 
 interface ConsentState {
   granted: boolean;
@@ -35,6 +37,13 @@ interface PreviewFrame {
   height: number;
   light: number;
   rgba: Uint8Array;
+}
+
+interface CoachMessage {
+  baselineBpm: number;
+  recentBpm: number;
+  deltaBpm: number;
+  text: string;
 }
 
 function readConsentState(value: unknown): ConsentState {
@@ -133,6 +142,35 @@ contextBridge.exposeInMainWorld('chesspulse', {
       ipcRenderer.removeListener(PREVIEW_CHANNEL, handler);
     };
   },
+  setBetweenGames(active: unknown): Promise<{ betweenGames: boolean }> {
+    if (typeof active !== 'boolean') {
+      return Promise.reject(new Error('The game boundary must be between games or playing.'));
+    }
+    return ipcRenderer.invoke(COACH_GAP_CHANNEL, { betweenGames: active }).then((value: unknown) => {
+      if (
+        typeof value !== 'object' ||
+        value === null ||
+        !('betweenGames' in value) ||
+        typeof value.betweenGames !== 'boolean'
+      ) {
+        throw new Error('The window returned an unexpected game boundary.');
+      }
+      return { betweenGames: value.betweenGames };
+    });
+  },
+  onCoachMessage(listener: (message: CoachMessage) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      try {
+        listener(readCoachMessage(value));
+      } catch {
+        // A malformed message is dropped; no number from it reaches the page.
+      }
+    };
+    ipcRenderer.on(COACH_MESSAGE_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(COACH_MESSAGE_CHANNEL, handler);
+    };
+  },
   validatePgns(slots: unknown): Promise<unknown> {
     if (!Array.isArray(slots) || !slots.every((item) => typeof item === 'string')) {
       return Promise.reject(new Error('Paste entries must be text.'));
@@ -203,6 +241,27 @@ function readPreview(value: unknown): PreviewFrame {
     throw new Error('The window returned an unexpected camera frame.');
   }
   return { width: record.width, height: record.height, light: record.light, rgba: record.rgba };
+}
+
+function readCoachMessage(value: unknown): CoachMessage {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('The window returned an unexpected coach line.');
+  }
+  const record = value as { baselineBpm?: unknown; recentBpm?: unknown; deltaBpm?: unknown; text?: unknown };
+  if (
+    typeof record.baselineBpm !== 'number' ||
+    typeof record.recentBpm !== 'number' ||
+    typeof record.deltaBpm !== 'number' ||
+    typeof record.text !== 'string'
+  ) {
+    throw new Error('The window returned an unexpected coach line.');
+  }
+  return {
+    baselineBpm: record.baselineBpm,
+    recentBpm: record.recentBpm,
+    deltaBpm: record.deltaBpm,
+    text: record.text,
+  };
 }
 
 function readSdkError(value: unknown): SdkError {

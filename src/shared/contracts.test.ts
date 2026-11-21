@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { downscaleRgbToRgba } from './preview.js';
 import {
+  coachGapRequestSchema,
+  coachMessageSchema,
   consentRequestSchema,
   previewFrameSchema,
   pasteValidationSchema,
@@ -42,6 +44,22 @@ describe('refusalSchema', () => {
       remedy: 'Record a longer session.',
     });
     assert.equal(parsed.success, false);
+  });
+});
+
+describe('coach IPC contracts', () => {
+  it('accepts computed coach numbers and rejects unvalidated fields', () => {
+    const message = {
+      baselineBpm: 70,
+      recentBpm: 90,
+      deltaBpm: 20,
+      text: 'Pulse still +20 over baseline. Take a real break before the next game.',
+    };
+    assert.deepEqual(coachMessageSchema.parse(message), message);
+    assert.equal(coachMessageSchema.safeParse({ ...message, rawPulse: [90] }).success, false);
+    assert.equal(coachGapRequestSchema.safeParse({ betweenGames: true }).success, true);
+    assert.equal(coachGapRequestSchema.safeParse({ betweenGames: 'yes' }).success, false);
+    assert.equal(coachGapRequestSchema.safeParse({ betweenGames: true, liveGame: true }).success, false);
   });
 });
 

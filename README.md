@@ -43,4 +43,6 @@ Framing matters more than anything else. The player must be the only face in fra
 
 The capture path has not yet been verified against a real seated session reporting usable coverage. Without a camera or a valid key, starting a session stops with the specific reason (no camera, rejected key, no credit, network failure). Pulse, not breathing, is the only metric requested.
 
-Pasted games, local Stockfish scoring, and the report are in this build. The between-games coach line and the optional AI reading panels are not.
+After a game ends, press **Game ended**. If the trailing-minute median of usable pulse samples is at least 10 bpm above your baseline, one coach line shows the measured figures and suggests a break. Press **Next game started** before playing again; this removes the line. A real threshold crossing has not yet been captured.
+
+Pasted games, local Stockfish scoring, the report, and the between-games coach are in this build. The optional AI reading panels are not.

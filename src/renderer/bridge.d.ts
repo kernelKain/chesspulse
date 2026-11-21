@@ -2,6 +2,7 @@
 // Why: the renderer has no Node, and the main process checks every argument again.
 // Removed: a screen could not tell the desktop process that consent or the session changed.
 import type {
+  CoachMessage,
   PasteValidation,
   PreviewFrame,
   PulseSample,
@@ -24,6 +25,8 @@ export interface ChessPulseBridge {
   onValidation(listener: (message: ValidationMessage) => void): () => void;
   onSdkError(listener: (error: SdkError) => void): () => void;
   onPreview(listener: (frame: PreviewFrame) => void): () => void;
+  setBetweenGames(active: boolean): Promise<{ betweenGames: boolean }>;
+  onCoachMessage(listener: (message: CoachMessage) => void): () => void;
   validatePgns(slots: string[]): Promise<PasteValidation>;
   buildReport(sessionId: string, pgns: string[]): Promise<ReportResult>;
 }
