@@ -51,14 +51,13 @@ import {
   type KeyStatus,
   type PreviewStatus,
 } from '../shared/setup';
-import { BandBars } from './BandBars';
 import logoUrl from './assets/logo.svg?url';
 import { COPY } from './copy';
 import { CameraOpenIndicator } from './CameraOpenIndicator';
 import { CameraPreview } from './CameraPreview';
 import { CoachLine } from './CoachLine';
 import { Explainer } from './Explainer';
-import { GameList } from './GameList';
+import { MoveQuality } from './MoveQuality';
 import { InsightPanel, type InsightViewState } from './InsightPanel';
 import { openKeyboardHelp } from './KeyboardHelp';
 import { MarkPicker } from './MarkPicker';
@@ -73,7 +72,7 @@ import { SensingControls } from './SensingControls';
 import { SensingStrip } from './SensingStrip';
 import { SessionList } from './SessionList';
 import { SetupScreen } from './SetupScreen';
-import { Timeline } from './Timeline';
+import { Timeline, type TimelineFocus } from './Timeline';
 import { ReportSummary } from './ReportSummary';
 
 const TIME_CONTROLS = ['1+0', '3+2', '10+0'] as const;
@@ -98,6 +97,8 @@ export function App() {
   const [validation, setValidation] = useState<ValidationMessage | null>(null);
   const [coachMessage, setCoachMessage] = useState<CoachMessage | null>(null);
   const [insightState, setInsightState] = useState<InsightViewState>({ status: 'idle' });
+  // "Open on timeline" in Move Quality: the moment to select, with a counter so a repeat still applies.
+  const [timelineFocus, setTimelineFocus] = useState<TimelineFocus | null>(null);
   const [setupKey, setSetupKey] = useState<{ status: KeyStatus; detail: string }>({
     status: 'loading',
     detail: COPY.setup.checkingKey,
@@ -1069,12 +1070,20 @@ export function App() {
     });
     const bodies = result?.ok
       ? {
-          pulse: <Timeline key={`pulse-${result.sessionId}`} result={result} />,
+          pulse: <Timeline key={`pulse-${result.sessionId}`} result={result} focus={timelineFocus} />,
           engine: (
-            <>
-              <BandBars report={result} />
-              <GameList report={result} />
-            </>
+            <MoveQuality
+              key={`quality-${result.sessionId}`}
+              report={result}
+              onOpenMoment={(tUs) =>
+                setTimelineFocus((previous) => ({
+                  sessionId: result.sessionId,
+                  tUs,
+                  seq: (previous?.seq ?? 0) + 1,
+                }))
+              }
+              onRebuild={() => dispatch({ type: 'openGames' })}
+            />
           ),
           reading: (
             <InsightPanel

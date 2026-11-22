@@ -254,9 +254,9 @@ export const COPY = {
     editGames: 'Edit pasted PGNs',
   },
   bands: {
-    label: 'Accuracy by pulse band',
-    title: 'Accuracy by band',
-    note: 'Minimum 5 scored moves per band',
+    label: 'Accuracy by pulse range',
+    title: 'Accuracy by pulse range',
+    note: 'Minimum five scored moves per range',
     settled: 'Settled',
     elevated: 'Elevated',
     below: (threshold: string) => `< ${threshold} bpm`,
@@ -328,6 +328,74 @@ export const COPY = {
   refusal: {
     metrics: (measured: number, threshold: number) =>
       `Coverage was ${measured}%; a review needs ${threshold}%.`,
+  },
+  quality: {
+    tabsLabel: 'Move Quality views',
+    overall: 'Overall',
+    game: (number: number) => `Game ${number}`,
+    sessionFacts: 'Session facts',
+    supports: 'What this supports',
+    scored: 'Scored moves',
+    notScored: 'Not scored',
+    blunders: 'Blunders',
+    duringElevated: 'During elevated pulse',
+    gamesIncluded: 'Games included',
+    gamesExcluded: 'Games excluded',
+    comparisonTitle: 'Game comparison',
+    comparisonHint: 'Open a game to see its moves.',
+    rowAccuracy: (value: number | 'insufficient' | null) =>
+      value === null ? 'Accuracy not stored' : value === 'insufficient' ? 'Accuracy: too few moves' : `Accuracy ${value}%`,
+    rowBlunders: (count: number) => `${count} ${count === 1 ? 'blunder' : 'blunders'}`,
+    rowExcluded: 'Excluded from accuracy',
+    openGame: 'Open game',
+    players: (white: string, black: string) =>
+      white || black ? `${white || 'Unknown'} vs ${black || 'Unknown'}` : 'Players unnamed',
+    comparison: {
+      same: 'Accuracy was the same in both pulse ranges.',
+      settled_higher: (difference: number) =>
+        `Settled accuracy was ${difference} percentage ${difference === 1 ? 'point' : 'points'} higher.`,
+      elevated_higher: (difference: number) =>
+        `Elevated accuracy was ${difference} percentage ${difference === 1 ? 'point' : 'points'} higher.`,
+      insufficient: 'There were not enough scored moves in both pulse ranges for a comparison.',
+    },
+    blunderSplit: (blunders: number, elevated: number) =>
+      blunders === 0
+        ? 'No move met the blunder rule.'
+        : `${elevated} of ${blunders} ${blunders === 1 ? 'blunder was' : 'blunders were'} during elevated pulse.`,
+    gameSummary: 'Game summary',
+    result: 'Result',
+    ending: 'Ending',
+    sidePlayed: 'Side played',
+    sides: { white: 'White', black: 'Black', both: 'Both sides counted' },
+    sideUnknown: 'Not recorded',
+    timeControl: 'Time control',
+    noTimeControl: 'Not in the PGN',
+    sessionSpan: 'Session span',
+    span: (start: string, end: string) => `${start} to ${end}`,
+    notPlaced: 'Not placed on the timeline',
+    gameAccuracy: 'Accuracy',
+    overallAccuracy: 'Overall accuracy',
+    settledAccuracy: 'Settled accuracy',
+    elevatedAccuracy: 'Elevated accuracy',
+    accuracyValue: (value: number) => `${value}%`,
+    tooFew: 'Too few moves',
+    moves: (count: number) => `${count} scored ${count === 1 ? 'move' : 'moves'}`,
+    averageThink: 'Average think time',
+    seconds: (value: number) => `${value.toFixed(1)} s`,
+    noClock: 'No clock data',
+    lossesTitle: 'Largest locally scored changes',
+    lossesNone: 'No scored move lost centipawns in this game.',
+    loss: (cpl: number) => `${cpl} cp lost`,
+    blunderTag: 'Blunder',
+    openOnTimeline: 'Open on timeline',
+    openOnTimelineLabel: (label: string) => `Open ${label} on the timeline`,
+    excludedTitle: 'Not counted toward accuracy',
+    excludedBody: (ending: string) =>
+      `This game was ${ending}, so it is left out of accuracy and blunder counts. It still appears on the timeline.`,
+    rebuildTitle: 'Rebuild for game-by-game details',
+    rebuildBody:
+      'This saved report predates per-game summaries. Its overall result is still available. Rebuild it from the saved PGNs to add the new game details.',
+    rebuildAction: 'Rebuild report',
   },
   gamesList: {
     label: 'Session games',

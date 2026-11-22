@@ -53,6 +53,8 @@
     "src/renderer/ReviewProgress.test.ts",
     "src/renderer/ReportSummary.tsx",
     "src/renderer/ReportSummary.test.tsx",
+    "src/renderer/MoveQuality.tsx",
+    "src/renderer/MoveQuality.dom.test.tsx",
     "src/shared/onboarding.ts"
   ]
 }

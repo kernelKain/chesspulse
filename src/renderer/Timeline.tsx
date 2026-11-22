@@ -3,7 +3,7 @@
 //      and labels each rail in words; the inspector explains the encodings and names every value of
 //      the selected reading. The user could not read the old chart or its one-line readout.
 // Removed: a player could not see pulse and moves aligned, or tell what a point on the chart meant.
-import { useId, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { ReportResult } from '../shared/contracts';
 import { COPY } from './copy';
 import {
@@ -15,6 +15,7 @@ import {
   formatElapsed,
   momentDetails,
   moveTableRows,
+  nearestSampleIndex,
   sampleStatusText,
   sampleTableRows,
   separatePair,
@@ -46,12 +47,48 @@ const AXIS_Y = 514;
 
 type Rect = { xOf: (tUs: number) => number; yOfBpm: (bpm: number) => number };
 
-export function Timeline({ result }: { result: ReportResult | null }) {
+/**
+ * A request from another section to show one moment. `seq` grows with each request, so asking for
+ * the same move twice still selects it again.
+ */
+export interface TimelineFocus {
+  readonly sessionId: string;
+  readonly tUs: number;
+  readonly seq: number;
+}
+
+export function Timeline({ result, focus = null }: { result: ReportResult | null; focus?: TimelineFocus | null }) {
   const view = buildTimelineView(result);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [mode, setMode] = useState<'chart' | 'table'>('chart');
   const hatchId = useId();
   const keysHintId = useId();
+  const frameRef = useRef<HTMLDivElement>(null);
+  // A request made before this chart mounted (an earlier visit to the Review) is not replayed.
+  const appliedSeq = useRef(focus?.seq ?? 0);
+  const pendingFocus = useRef(false);
+  const sessionId = result?.ok ? result.sessionId : null;
+
+  useEffect(() => {
+    if (!focus || focus.seq === appliedSeq.current) return;
+    appliedSeq.current = focus.seq;
+    if (focus.sessionId !== sessionId) return;
+    const index = nearestSampleIndex(view.samples, focus.tUs);
+    if (index === null) return;
+    pendingFocus.current = true;
+    setMode('chart');
+    setSelectedIndex(index);
+  }, [focus, sessionId, view.samples]);
+
+  // Moves focus once per request, after the chart is drawn: in table mode the frame only exists
+  // after the switch renders. Later renders leave focus where the player put it.
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!pendingFocus.current || !frame) return;
+    pendingFocus.current = false;
+    frame.focus();
+    frame.scrollIntoView?.({ block: 'center' });
+  });
 
   const activeIndex =
     view.samples.length === 0 || selectedIndex === null
@@ -136,6 +173,7 @@ export function Timeline({ result }: { result: ReportResult | null }) {
           <div className={miniViews.length > 0 ? 'timeline-wide timeline-layout' : 'timeline-layout'}>
             <div className="timeline-main">
               <div
+                ref={frameRef}
                 className="timeline-frame"
                 tabIndex={0}
                 role="group"
@@ -144,7 +182,8 @@ export function Timeline({ result }: { result: ReportResult | null }) {
                 aria-describedby={keysHintId}
                 onKeyDown={onKeyDown}
                 onFocus={() => {
-                  if (selectedIndex === null && view.samples.length > 0) setSelectedIndex(0);
+                  // Functional update: a focus that follows "Open on timeline" keeps the chosen reading.
+                  if (view.samples.length > 0) setSelectedIndex((current) => current ?? 0);
                 }}
               >
                 <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="presentation">

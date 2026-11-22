@@ -668,3 +668,24 @@ export function moveLabel(moveIndex: number, san: string): string {
   const number = Math.floor(moveIndex / 2) + 1;
   return moveIndex % 2 === 0 ? `${number}. ${san}` : `${number}… ${san}`;
 }
+
+/**
+ * What: the index of the reading closest in time to `tUs`, the earlier one on a tie.
+ * Why: Move Quality opens a move on the timeline, and the timeline selects readings, not moves.
+ * Removed: "Open on timeline" would have nothing to select. `samples` must be time-ordered, as
+ *          `buildTimelineView` returns them.
+ */
+export function nearestSampleIndex(samples: readonly PulseSample[], tUs: number): number | null {
+  if (samples.length === 0) return null;
+  let low = 0;
+  let high = samples.length - 1;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if ((samples[mid]?.tUs ?? 0) < tUs) low = mid + 1;
+    else high = mid;
+  }
+  if (low === 0) return 0;
+  const before = samples[low - 1]?.tUs ?? 0;
+  const after = samples[low]?.tUs ?? 0;
+  return tUs - before <= after - tUs ? low - 1 : low;
+}
