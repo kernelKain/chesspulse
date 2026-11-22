@@ -30,7 +30,7 @@ export function isReportBuilding(sessionId: string): boolean {
 
 export function registerReportHandler(dataRoot: () => string = defaultDataRoot): void {
   registerInvokeChannel('reportBuild', async (event, payload) => {
-    const { sessionId, pgns, gameEndMarks } = payload;
+    const { sessionId, pgns, gameEndMarks, playerName } = payload;
     if (activeBuilds.has(sessionId)) throw new AppError('session_busy');
     const build: ActiveBuild = { controller: new AbortController(), committing: false };
     activeBuilds.set(sessionId, build);
@@ -48,7 +48,7 @@ export function registerReportHandler(dataRoot: () => string = defaultDataRoot):
               const message = reportProgressSchema.safeParse({ sessionId, ...progress });
               if (message.success) event.sender.send(EVENT_CHANNELS.reportProgress, message.data);
             },
-          }, gameEndMarks),
+          }, gameEndMarks, playerName),
         build.controller.signal,
       );
       return reportResultSchema.parse(result);

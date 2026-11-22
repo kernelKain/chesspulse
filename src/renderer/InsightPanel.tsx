@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AiProvider } from '../shared/contracts';
 import { COPY } from './copy';
 
 export type InsightViewState =
@@ -9,24 +8,16 @@ export type InsightViewState =
   | { status: 'error'; message: string }
   | { status: 'ready'; text: string };
 
-const PROVIDERS: { value: AiProvider; label: string }[] = [
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'google', label: 'Google' },
-  { value: 'opencode', label: 'OpenCode' },
-  { value: 'custom', label: 'Custom OpenAI-compatible' },
-];
-
 export function InsightPanel({
   state,
   onRequest,
   onCancel,
 }: {
   state: InsightViewState;
-  onRequest: (provider: AiProvider, text: string) => void;
+  /** The provider comes from .env in the main process; the panel only sends the question. */
+  onRequest: (text: string) => void;
   onCancel: () => void;
 }) {
-  const [provider, setProvider] = useState<AiProvider>('openai');
   const [question, setQuestion] = useState<string>(COPY.insight.prompt);
   const writeButton = useRef<HTMLButtonElement>(null);
   const cancelButton = useRef<HTMLButtonElement>(null);
@@ -61,14 +52,6 @@ export function InsightPanel({
 
       <div className="insight-controls">
         <label>
-          {COPY.insight.provider}
-          <select value={provider} disabled={loading} onChange={(event) => setProvider(event.target.value as AiProvider)}>
-            {PROVIDERS.map((item) => (
-              <option key={item.value} value={item.value}>{item.label}</option>
-            ))}
-          </select>
-        </label>
-        <label>
           {COPY.insight.question}
           <textarea
             rows={3}
@@ -81,7 +64,7 @@ export function InsightPanel({
       </div>
 
       <div className="actions">
-        <button ref={writeButton} type="button" disabled={loading || !question.trim()} onClick={() => onRequest(provider, question.trim())} className="btn btn-secondary">
+        <button ref={writeButton} type="button" disabled={loading || !question.trim()} onClick={() => onRequest(question.trim())} className="btn btn-secondary">
           {COPY.insight.write}
         </button>
         {loading ? (

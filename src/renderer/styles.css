@@ -25,11 +25,18 @@ body {
   margin: 0;
 }
 
+/* Centred shell. Content inside stays left-aligned; only the column is centred in the window. */
 main {
   min-height: 100vh;
   box-sizing: border-box;
   max-width: 960px;
+  margin-inline: auto;
   padding: 48px;
+}
+
+/* The Review has a chart and its inspector side by side, so it gets a wider column. */
+main.main-report {
+  max-width: 1240px;
 }
 
 .label {
@@ -219,17 +226,45 @@ select:focus-visible,
 .stage-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-4);
+  gap: var(--sp-2) var(--sp-5);
+  margin-bottom: var(--sp-5);
+}
+
+.stage-title {
+  flex: 1 1 24rem;
+  min-width: 0;
 }
 
 .stage-head h2 {
   margin: 0;
   color: var(--text);
-  font-size: var(--fs-md);
-  font-weight: 560;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.stage-description {
+  margin-top: var(--sp-1);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  max-width: 44rem;
+}
+
+.stage-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: var(--sp-2) var(--sp-4);
+  padding-top: var(--sp-2);
+}
+
+.stage-aside {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
 }
 
 .stage-state {
@@ -520,6 +555,77 @@ textarea {
   resize: vertical;
 }
 
+/* "Which player are you?" on Paste. The choice decides whose moves are compared with the pulse. */
+.player-question {
+  margin: var(--sp-5) 0 0;
+  padding: var(--sp-4);
+  border: var(--border-w) solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--surface);
+}
+
+.player-question legend {
+  padding: 0 var(--sp-1);
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 560;
+}
+
+.player-help,
+.player-required {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-sm);
+}
+
+.player-required {
+  color: var(--warn);
+}
+
+.player-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.player-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: var(--border-w) solid var(--line);
+  border-radius: var(--r-control);
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.player-option:has(input:checked) {
+  border-color: var(--text);
+}
+
+.player-option input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.player-option-both {
+  color: var(--muted);
+}
+
+.player-note {
+  margin-top: var(--sp-5);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  max-width: none;
+}
+
+.player-note.tone-warn {
+  color: var(--warn);
+}
+
 .slot-error {
   margin-top: 8px;
   color: var(--warn);
@@ -571,7 +677,7 @@ textarea {
 .timeline-frame {
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--bg);
   padding: 12px;
 }
 
@@ -647,21 +753,6 @@ textarea {
   font-size: 14px;
 }
 
-.ending-stem {
-  stroke: var(--line);
-  stroke-width: 1;
-}
-
-.ending-mark text {
-  fill: var(--text);
-  font-size: 12px;
-}
-
-.ending-word {
-  fill: var(--muted);
-  font-size: 11px;
-}
-
 .think-dot {
   fill: var(--muted);
   fill-opacity: 0.65;
@@ -720,10 +811,10 @@ textarea {
   fill-opacity: 0.65;
 }
 
+/* Not-counted readings stay visible, but quiet: a faint dot, not a ring that competes with the line. */
 .pulse-weak {
-  fill: var(--bg);
-  stroke: var(--muted);
-  stroke-width: 1;
+  fill: var(--muted);
+  fill-opacity: 0.45;
 }
 
 .timeline-cursor line {
@@ -771,41 +862,181 @@ textarea {
   gap: 6px;
 }
 
-.verdict-section {
-  margin-top: 8px;
-  margin-bottom: 24px;
+/* Review header (B1): eyebrow, headline, labelled facts, then the computed verdict. Centred as a
+   block; each fact is a label-over-value cell. */
+.report-summary {
+  margin: var(--sp-2) auto var(--sp-6);
+  text-align: center;
 }
 
-.verdict-meta {
-  margin: 0 0 12px;
-  color: var(--muted);
-  font-family: ui-monospace, monospace;
-  font-size: 13px;
+main.main-report > .label {
   max-width: none;
+  text-align: center;
 }
 
-.verdict-line {
-  margin: 0;
-  color: var(--text);
-  font-size: 26px;
-  font-weight: 500;
-  line-height: 1.35;
-  max-width: 44rem;
+.report-eyebrow {
+  margin: 0 auto;
+  color: var(--pulse);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
-.verdict-note {
-  margin: 10px 0 0;
-  color: var(--warn);
-  font-size: 14px;
-  max-width: 44rem;
-}
-
-.verdict-note + .verdict-note {
-  margin-top: 4px;
-}
-
-.verdict-engine {
+.report-context {
+  margin: var(--sp-1) auto 0;
   color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.report-headline {
+  margin: var(--sp-4) auto 0;
+  max-width: 44rem;
+  color: var(--text);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+/* Medium window: two balanced rows. The rail has eight facts, or nine with a marked break. */
+.metric-rail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-2);
+  margin: var(--sp-5) auto 0;
+  max-width: 60rem;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--sp-3);
+  border: var(--border-w) solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--surface);
+  text-align: left;
+}
+
+.metric-rail[data-count='9'] {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+/* Wide window: every fact on one line under the headline. */
+@media (min-width: 1240px) {
+  .metric-rail {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    max-width: none;
+  }
+
+  .metric-rail[data-count='9'] {
+    grid-template-columns: repeat(9, minmax(0, 1fr));
+  }
+}
+
+.metric dt {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* A two-line label pushes its value down; auto keeps every value on one baseline. */
+.metric dd {
+  margin: auto 0 0;
+  padding-top: var(--sp-1);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 1.125rem;
+  font-weight: 560;
+  overflow-wrap: anywhere;
+}
+
+.summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+/* Only a narrow window hides facts, so only a narrow window offers to show them. Two classes, so
+   the shared .btn display rule later in this file cannot override it. */
+.summary-actions .summary-more {
+  display: none;
+}
+
+.metric-help {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: var(--sp-2) var(--sp-5);
+  margin: var(--sp-3) auto 0;
+  padding: var(--sp-4);
+  border: var(--border-w) solid var(--line);
+  border-radius: var(--r-panel);
+  text-align: left;
+}
+
+.metric-help dt {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 560;
+}
+
+.metric-help dd {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.report-verdict {
+  margin: var(--sp-5) auto 0;
+  max-width: 46rem;
+}
+
+.report-verdict p {
+  margin: 0 auto;
+  max-width: none;
+  color: var(--text);
+  font-size: var(--fs-base);
+  line-height: 1.55;
+}
+
+.report-notes {
+  margin: var(--sp-4) auto 0;
+  max-width: 46rem;
+}
+
+.report-notes p {
+  margin: 0 auto;
+  max-width: none;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+
+.report-notes p.note-warn {
+  color: var(--warn);
+}
+
+@media (max-width: 719px) {
+  .report-headline {
+    font-size: var(--fs-lg);
+  }
+
+  .metric-rail,
+  .metric-rail[data-count='9'] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric-rail[data-expanded='false'] .metric[data-primary='false'] {
+    display: none;
+  }
+
+  .summary-actions .summary-more {
+    display: inline-flex;
+  }
 }
 
 .band-bars {
@@ -1092,17 +1323,11 @@ textarea {
 }
 
 @media (max-width: 699px) {
-  .verdict-line {
-    font-size: 20px;
-  }
 
   .band-grid {
     grid-template-columns: 1fr;
   }
 
-  .report-layout .verdict-section {
-    order: 1;
-  }
 
   .report-layout .band-bars {
     order: 2;
@@ -1214,12 +1439,6 @@ textarea {
   color: var(--warn);
   font-family: ui-monospace, monospace;
   font-size: 14px;
-}
-
-@media (max-width: 1099px) {
-  .ending-word {
-    display: none;
-  }
 }
 
 .indicator {
@@ -1982,62 +2201,175 @@ kbd {
   font-size: var(--fs-xs);
 }
 
-.timeline-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2) var(--sp-4);
-  margin: 0 0 var(--sp-3);
+.cpl-mate {
+  fill: var(--text);
+}
+
+/* Pulse & Play Timeline (B2): chart and inspector side by side, inspector below in a medium window. */
+.timeline-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+@media (min-width: 1100px) {
+  .timeline-layout {
+    grid-template-columns: minmax(0, 1fr) 19rem;
+  }
+}
+
+.timeline-main {
+  min-width: 0;
+}
+
+.timeline-frame {
+  padding: var(--sp-3) var(--sp-2);
+}
+
+.timeline-hint {
   color: var(--muted);
+  font-size: var(--fs-sm);
+  max-width: none;
+}
+
+.elevated-zone {
+  opacity: 0.9;
+}
+
+.game-chip {
+  fill: var(--bg);
+  fill-opacity: 0.55;
+}
+
+.game-band-label {
+  font-size: 12px;
+}
+
+.rail-label-strong {
+  fill: var(--text);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 560;
+}
+
+.rail-scale {
+  fill: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.timeline-inspector {
+  min-width: 0;
+}
+
+.inspector-scroll {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+/* Wide window: the sidebar takes the chart's height and scrolls inside it, so no empty space
+   opens under the chart. The scroll box is absolutely placed, so it does not set the row height. */
+@media (min-width: 1100px) {
+  .timeline-inspector {
+    position: relative;
+    align-self: stretch;
+  }
+
+  .inspector-scroll {
+    position: absolute;
+    inset: 0;
+    align-content: start;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+}
+
+.inspector-scroll:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.inspector-moment,
+.inspector-key {
+  padding: var(--sp-4);
+  border: var(--border-w) solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--bg);
+}
+
+.timeline-inspector h3 {
+  margin: 0 0 var(--sp-2);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.inspector-idle,
+.inspector-position {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.inspector-position {
+  margin-bottom: var(--sp-2);
+  font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
 
-.timeline-legend span {
-  display: inline-flex;
-  align-items: center;
+.moment-facts,
+.inspector-key dl {
+  display: grid;
   gap: var(--sp-2);
+  margin: 0;
 }
 
-.timeline-legend i {
-  display: inline-block;
-  width: 14px;
-  height: 10px;
-  font-style: normal;
-  line-height: 10px;
+/* Two facts per row, so the selected moment fits beside the chart without scrolling. */
+.moment-facts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2) var(--sp-3);
 }
 
-.legend-line {
-  border-top: 2px solid var(--pulse);
+.moment-facts .fact dt,
+.key-row dt {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
-.legend-cpl {
-  background: var(--text);
-  width: 3px;
-  height: 12px;
-}
-
-.legend-think {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text);
-}
-
-.legend-hatch {
-  border: var(--border-w) solid var(--elevated);
-  background: repeating-linear-gradient(
-    45deg,
-    var(--elevated) 0,
-    var(--elevated) 1px,
-    transparent 1px,
-    transparent 4px
-  );
-}
-
-.legend-ending {
+.moment-facts .fact dd,
+.key-row dd {
+  margin: 2px 0 0;
   color: var(--text);
-  text-align: center;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
-.cpl-mate {
-  fill: var(--text);
+.key-row dd {
+  color: var(--muted);
+}
+
+.moment-facts .fact-strong {
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
+  font-weight: 560;
+}
+
+/* Long sentences take the whole row instead of wrapping into a narrow column. */
+.moment-facts .fact-wide {
+  grid-column: 1 / -1;
+}
+
+/* The word carries the meaning; ember is the second encoding, never the only one. */
+.moment-facts .fact.range-elevated dd {
+  color: var(--elevated);
+}
+
+.moment-facts .fact.range-not_counted dd,
+.moment-facts .fact.rule-blunder dd {
+  color: var(--warn);
 }

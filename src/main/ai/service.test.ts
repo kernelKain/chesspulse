@@ -4,10 +4,10 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { REPORT_SCHEMA_VERSION, type Report } from '../../shared/contracts.js';
-import { requestInsight } from './service.js';
+import { computedSummary, requestInsight } from './service.js';
 
 const ENV = { CP_AI_KEY: 'test-secret', CP_AI_MODEL: 'test-model' };
-const REQUEST = { sessionId: 's1', provider: 'openai', text: 'Review this session.' };
+const REQUEST = { sessionId: 's1', text: 'Review this session.' };
 const PGN = '[White "Untrusted"]\n1. e4 e5';
 
 function digest(pgns: readonly string[]): string {
@@ -49,6 +49,109 @@ const OUTPUT = 'The settled accuracy was 71%.';
 function completion(text = OUTPUT): Response {
   return new Response(JSON.stringify({ choices: [{ message: { content: text } }] }), { status: 200 });
 }
+
+describe('grounded session totals', () => {
+  const moves = [
+    { gameIndex: 0, moveIndex: 0, san: 'e4', tUs: 1, cpl: 300, thinkSec: 1, blunder: true, mate: false, scored: true, band: 'settled' as const },
+    { gameIndex: 0, moveIndex: 2, san: 'Nf3', tUs: 2, cpl: 10, thinkSec: 1, blunder: false, mate: false, scored: true, band: 'elevated' as const },
+    { gameIndex: 1, moveIndex: 1, san: 'e5', tUs: 3, cpl: 400, thinkSec: 1, blunder: true, mate: false, scored: true, band: 'elevated' as const },
+    { gameIndex: 1, moveIndex: 3, san: 'Nc6', tUs: 4, cpl: null, thinkSec: 1, blunder: false, mate: false, scored: false, band: null },
+  ];
+  const game = (index: number, blunders: number) => ({
+    index, white: 'Ada', black: 'Nim', result: '1-0', ending: 'resignation' as const,
+    includeInStats: true, moveCount: 30, blunders, aligned: true,
+  });
+  // A report saved before totals existed: the verdict states a total the per-game rows do not.
+  const legacy: Report = {
+    ...REPORT,
+    verdict: '2 blunders, 1 of them while your pulse was elevated.',
+    games: [game(8, 1), game(9, 1)],
+    timeline: { ...REPORT.timeline, moves },
+  };
+
+  it('counts totals for an older report from its stored moves', () => {
+    const summary = computedSummary(legacy) as { totals: unknown; games: { gameNumber: number }[] };
+    assert.deepEqual(summary.totals, { gamesIncluded: 2, scored: 3, unscored: 1, blunders: 2, elevatedBlunders: 1 });
+    assert.deepEqual(summary.games.map((entry) => entry.gameNumber), [9, 10]);
+  });
+
+  it('prefers stored totals and names the longest break by public game numbers', () => {
+    const summary = computedSummary({
+      ...legacy,
+      totals: { gamesIncluded: 2, scored: 60, unscored: 0, blunders: 14, elevatedBlunders: 0 },
+      longestGap: { afterIndex: 8, beforeIndex: 9, durationSec: 60 },
+    }) as { totals: { blunders: number }; longestGap: unknown };
+    assert.equal(summary.totals.blunders, 14);
+    assert.deepEqual(summary.longestGap, { afterGameNumber: 9, beforeGameNumber: 10, durationSec: 60 });
+  });
+
+  it('accepts a reading that repeats the verdict total and a public game number', async () => {
+    const text = 'There were 2 blunders, 1 during elevated pulse. Game 10 is worth reviewing.';
+    const result = await requestInsight(REQUEST, legacy, [PGN], ENV, { fetch: async () => completion(text) });
+    assert.deepEqual(result, { disabled: false, provider: 'openai', text });
+  });
+
+  it('still withholds a number that is not computed anywhere', async () => {
+    await assert.rejects(
+      requestInsight(REQUEST, legacy, [PGN], ENV, { fetch: async () => completion('There were 37 blunders.') }),
+      /introduced a number.*37/,
+    );
+  });
+});
+
+describe('provider comes from .env only', () => {
+  it('refuses a request that tries to name its own provider', async () => {
+    let calls = 0;
+    await assert.rejects(
+      requestInsight({ ...REQUEST, provider: 'anthropic' }, REPORT, [PGN], ENV, {
+        fetch: async () => {
+          calls += 1;
+          return completion();
+        },
+      }),
+      /a session and a question/,
+    );
+    assert.equal(calls, 0);
+  });
+
+  it('uses CP_AI_PROVIDER and sends the OpenCode session header', async () => {
+    let request: { url: string; headers: Record<string, string> } | undefined;
+    const result = await requestInsight(
+      REQUEST,
+      REPORT,
+      [PGN],
+      { ...ENV, CP_AI_PROVIDER: 'opencode', CP_AI_BASE_URL: 'https://opencode.ai/inference/go/v1' },
+      {
+        conversationId: '3f2b8c4e-0000-4000-8000-000000000000',
+        fetch: async (url, init) => {
+          request = { url: String(url), headers: init?.headers as Record<string, string> };
+          return completion();
+        },
+      },
+    );
+    assert.equal(result.disabled === false && result.provider, 'opencode');
+    assert.equal(request?.url, 'https://opencode.ai/inference/go/v1/chat/completions');
+    assert.equal(request?.headers['x-opencode-session'], '3f2b8c4e-0000-4000-8000-000000000000');
+    assert.match(request?.headers['user-agent'] ?? '', /^chesspulse\//);
+  });
+
+  it('names a MissingSessionID refusal instead of calling it an unusable response', async () => {
+    await assert.rejects(
+      requestInsight(REQUEST, REPORT, [PGN], { ...ENV, CP_AI_PROVIDER: 'opencode' }, {
+        fetch: async () =>
+          new Response(JSON.stringify({ type: 'error', error: { type: 'MissingSessionID', message: 'x' } }), {
+            status: 400,
+            headers: { 'content-type': 'application/json' },
+          }),
+      }),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, 'ai_request_rejected');
+        assert.equal((error as { diagnostic?: string }).diagnostic, 'status=400 type=MissingSessionID');
+        return true;
+      },
+    );
+  });
+});
 
 describe('requestInsight', () => {
   it('returns an honest disabled state without a key or network call', async () => {

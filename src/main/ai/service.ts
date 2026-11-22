@@ -8,6 +8,7 @@ import {
   type InsightResult,
   type Report,
 } from '../../shared/contracts.js';
+import { reportTotals } from '../../shared/summary.js';
 import { digestGames } from '../store.js';
 import { readAiConfig } from './config.js';
 import { groundInsight } from './grounding.js';
@@ -17,6 +18,8 @@ interface InsightOptions {
   fetch?: typeof fetch;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Opaque and stable for one report's questions; never the session folder name. */
+  conversationId?: string;
 }
 
 export async function requestInsight(
@@ -27,7 +30,7 @@ export async function requestInsight(
   options: InsightOptions = {},
 ): Promise<InsightResult> {
   const parsed = insightRequestSchema.safeParse(request);
-  if (!parsed.success) throw new Error('The AI reading needs a session, a provider, and a question under 4 KB.');
+  if (!parsed.success) throw new Error('The AI reading needs a session and a question under 4 KB.');
   const games = reportBuildRequestSchema.safeParse({ sessionId: parsed.data.sessionId, pgns });
   if (!games.success) throw new Error('The AI reading needs up to 20 PGNs under 2 MB.');
   if (report === null) throw new Error('No computed session data was supplied. The AI reading stays off.');
@@ -39,7 +42,8 @@ export async function requestInsight(
   ) {
     throw new Error('The stored report and PGNs are stale or mismatched. Build the report again before requesting AI.');
   }
-  const configured = readAiConfig(env, parsed.data.provider);
+  // .env is the only source of the provider; the page cannot choose or override it.
+  const configured = readAiConfig(env);
   if (configured.disabled) return { disabled: true, reason: configured.reason };
 
   const summary = computedSummary(stored.data);
@@ -66,7 +70,9 @@ export async function requestInsight(
     try {
       if (options.signal?.aborted) throw new Error('cancelled');
       // The timer covers headers and response.text() inside callProvider.
-      output = await callProvider(configured.config, prompt, fetchImpl, controller.signal);
+      output = await callProvider(configured.config, prompt, fetchImpl, controller.signal, {
+        ...(options.conversationId ? { conversationId: options.conversationId } : {}),
+      });
     } catch (error) {
       const failure = options.signal?.aborted
         ? new AiProviderError('The AI reading was cancelled. Nothing in this report depends on it.', false, 'ai_cancelled')
@@ -80,14 +86,20 @@ export async function requestInsight(
     // Grounding is not a provider failure: never retry or disguise it as a network error.
     return {
       disabled: false,
-      provider: parsed.data.provider,
+      provider: configured.config.provider,
       text: groundInsight(summary, output),
     };
   }
   throw new AiProviderError('The AI provider did not respond. Nothing in this report depends on it.', true, 'ai_unavailable');
 }
 
-function computedSummary(report: Report): unknown {
+/**
+ * What: the numbers the model may cite, all computed locally and none taken from PGN text.
+ * Why: the verdict states session totals ("14 blunders"); a live reading that repeated one was
+ *      withheld because only per-game counts were listed. Totals and public game numbers fix that.
+ * Removed: a correct reading that quoted the verdict's own total would be refused as ungrounded.
+ */
+export function computedSummary(report: Report): unknown {
   return {
     coveragePct: report.coveragePct,
     baselineBpm: report.baselineBpm,
@@ -96,15 +108,28 @@ function computedSummary(report: Report): unknown {
     elevated: report.elevated,
     alignmentMode: report.alignmentMode,
     toleranceSec: report.toleranceSec,
+    totals: reportTotals(report),
+    ...(report.longestGap
+      ? {
+          longestGap: {
+            afterGameNumber: report.longestGap.afterIndex + 1,
+            beforeGameNumber: report.longestGap.beforeIndex + 1,
+            durationSec: report.longestGap.durationSec,
+          },
+        }
+      : {}),
     games: report.games.map((game) => ({
+      gameNumber: game.index + 1,
       index: game.index,
       moveCount: game.moveCount,
       blunders: game.blunders,
       includeInStats: game.includeInStats,
       aligned: game.aligned,
+      ...(game.summary ? { summary: game.summary } : {}),
     })),
   };
 }
+
 
 function providerFailure(error: unknown): AiProviderError {
   if (error instanceof AiProviderError) return error;

@@ -51,8 +51,8 @@
     "src/renderer/RefusalPanel.test.ts",
     "src/renderer/ReviewProgress.tsx",
     "src/renderer/ReviewProgress.test.ts",
-    "src/renderer/VerdictLine.tsx",
-    "src/renderer/VerdictLine.test.ts",
+    "src/renderer/ReportSummary.tsx",
+    "src/renderer/ReportSummary.test.tsx",
     "src/shared/onboarding.ts"
   ]
 }

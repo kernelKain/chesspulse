@@ -7,7 +7,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { PasteGameSummary } from '../shared/contracts.js';
 import { COPY } from './copy.js';
-import { GameSummaryRow } from './PasteScreen.js';
+import { GameSummaryRow, PlayerQuestion } from './PasteScreen.js';
 
 const played: PasteGameSummary = {
   white: 'Ada',
@@ -59,6 +59,40 @@ describe('Paste game card', () => {
     assert.match(html, /Aborted/);
   });
 
+  it('asks which player you are when two names are in every game', () => {
+    const html = renderToStaticMarkup(
+      createElement(PlayerQuestion, { candidates: ['Ada', 'Nim'], selected: null, groupName: 'p', onChoose: () => undefined }),
+    );
+    assert.match(html, /<fieldset class="player-question"/);
+    assert.ok(html.includes(`<legend>${COPY.games.player.legend}</legend>`));
+    assert.equal((html.match(/type="radio"/g) ?? []).length, 3, 'two players plus "both"');
+    assert.ok(html.includes(COPY.games.player.both));
+    assert.ok(html.includes(COPY.games.player.required));
+  });
+  it('marks the chosen player and drops the reminder', () => {
+    const html = renderToStaticMarkup(
+      createElement(PlayerQuestion, {
+        candidates: ['Ada', 'Nim'],
+        selected: { kind: 'player', name: 'nim' },
+        groupName: 'p',
+        onChoose: () => undefined,
+      }),
+    );
+    assert.match(html, /checked="" value="Nim"/);
+    assert.equal((html.match(/checked=""/g) ?? []).length, 1);
+    assert.equal(html.includes(COPY.games.player.required), false);
+  });
+  it('states who is counted without asking when only one name is shared', () => {
+    const single = renderToStaticMarkup(
+      createElement(PlayerQuestion, { candidates: ['Ada'], selected: null, groupName: 'p', onChoose: () => undefined }),
+    );
+    assert.ok(single.includes(COPY.games.player.single('Ada')));
+    assert.equal(single.includes('type="radio"'), false);
+    const none = renderToStaticMarkup(
+      createElement(PlayerQuestion, { candidates: [], selected: null, groupName: 'p', onChoose: () => undefined }),
+    );
+    assert.ok(none.includes(COPY.games.player.none));
+  });
   it('calls out partial clocks even though some moves have them', () => {
     const html = render({ ...played, partialClocks: true });
     assert.match(html, /Partial clocks/);

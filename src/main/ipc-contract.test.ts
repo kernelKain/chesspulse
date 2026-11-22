@@ -31,7 +31,7 @@ const VALID: Record<InvokeChannelKey, unknown> = {
   reportBuild: { sessionId: 'session', pgns: [] },
   sessionMarks: { sessionId: 'session' },
   reportCancel: { sessionId: 'session' },
-  insightRequest: { sessionId: 'session', provider: 'openai', text: 'What stood out?' },
+  insightRequest: { sessionId: 'session', text: 'What stood out?' },
   insightCancel: { sessionId: 'session' },
   diagnosticsCopy: {},
   sessionDelete: { sessionId: 'session' },

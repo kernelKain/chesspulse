@@ -12,7 +12,6 @@ import {
   sessionMarksResultSchema,
   sessionStartedSchema,
   setupStatusSchema,
-  type AiProvider,
   type CoachMessage,
   type PasteValidation,
   type PulseSample,
@@ -39,6 +38,7 @@ import {
   rememberExplainerSeen,
   type PreferenceStore,
 } from '../shared/onboarding';
+import { readRememberedPlayer, rememberPlayer } from '../shared/player';
 import {
   formatElapsedMs,
   limitWarning,
@@ -74,7 +74,7 @@ import { SensingStrip } from './SensingStrip';
 import { SessionList } from './SessionList';
 import { SetupScreen } from './SetupScreen';
 import { Timeline } from './Timeline';
-import { VerdictLine } from './VerdictLine';
+import { ReportSummary } from './ReportSummary';
 
 const TIME_CONTROLS = ['1+0', '3+2', '10+0'] as const;
 
@@ -110,6 +110,7 @@ export function App() {
     sessionId: string;
     pgns: string[];
     marks: SessionMarkView[];
+    playerName?: string;
   } | null>(null);
   const [previewAttempt, setPreviewAttempt] = useState(0);
   const [starting, setStarting] = useState(false);
@@ -614,12 +615,12 @@ export function App() {
     }
   }
 
-  async function onInsightRequest(provider: AiProvider, text: string): Promise<void> {
+  async function onInsightRequest(text: string): Promise<void> {
     if (!bridge || !sessionId) return;
     const seq = ++insightRequestSeq.current;
     setInsightState({ status: 'loading' });
     try {
-      const raw = await bridge.requestInsight({ sessionId, provider, text });
+      const raw = await bridge.requestInsight({ sessionId, text });
       if (seq !== insightRequestSeq.current) return;
       const parsed = insightResultSchema.safeParse(raw);
       if (!parsed.success) {
@@ -656,6 +657,7 @@ export function App() {
     pgns: string[],
     _validation?: PasteValidation,
     gameEndMarks?: number[],
+    playerName?: string,
   ): Promise<void> {
     if (!sessionId) {
       dispatch({ type: 'error', message: COPY.errors.noStoredSession });
@@ -682,11 +684,16 @@ export function App() {
           return;
         }
         if (markChoiceNeeded(answers.data.marks, pgns.length)) {
-          setMarkChoice({ sessionId, pgns, marks: answers.data.marks });
+          setMarkChoice({
+            sessionId,
+            pgns,
+            marks: answers.data.marks,
+            ...(playerName === undefined ? {} : { playerName }),
+          });
           return;
         }
       }
-      const raw = await bridge.buildReport(sessionId, pgns, gameEndMarks);
+      const raw = await bridge.buildReport(sessionId, pgns, gameEndMarks, playerName);
       if (seq !== reportRequestSeq.current) return;
       const parsed = reportResultSchema.safeParse(raw);
       if (!parsed.success) {
@@ -1005,12 +1012,15 @@ export function App() {
         {status.tone === 'error' ? <StatusRegion status={status} /> : null}
         <PasteScreen
           initialSlots={flow.draft.length > 0 ? flow.draft : undefined}
+          rememberedPlayer={readRememberedPlayer(preferenceStore())}
           onBack={(currentSlots) => {
             dispatch({ type: 'pasteChanged', slots: currentSlots });
             dispatch({ type: 'openStopped' });
           }}
-          onContinue={(pgns, validation) => {
-            void onPasteContinue(pgns, validation);
+          onContinue={(pgns, validation, playerName) => {
+            // Stored only in this window's local storage, so the next paste can preselect it.
+            if (playerName) rememberPlayer(preferenceStore(), playerName);
+            void onPasteContinue(pgns, validation, undefined, playerName);
           }}
           onHelp={() => dispatch({ type: 'openHelp' })}
           onSlotsChange={(slots) => dispatch({ type: 'pasteChanged', slots })}
@@ -1030,7 +1040,7 @@ export function App() {
             setMarkChoice(null);
             // The picker was opened for one session; its PGNs and marks must never reach another.
             if (chosen.sessionId !== sessionId) return;
-            void onPasteContinue(chosen.pgns, undefined, ends);
+            void onPasteContinue(chosen.pgns, undefined, ends, chosen.playerName);
           }}
           onCancel={() => {
             setMarkChoice(null);
@@ -1069,7 +1079,7 @@ export function App() {
           reading: (
             <InsightPanel
               state={insightState}
-              onRequest={(provider, text) => void onInsightRequest(provider, text)}
+              onRequest={(text) => void onInsightRequest(text)}
               onCancel={() => void onInsightCancel()}
             />
           ),
@@ -1084,8 +1094,13 @@ export function App() {
             ),
           }
         : {};
+    const asides = result?.ok
+      ? {
+          engine: COPY.stages.engineBadge(result.engine.name ?? 'Stockfish', result.engine.version, result.engine.depth),
+        }
+      : {};
     return (
-      <main>
+      <main className="main-report">
         <p className="label">{COPY.common.screenLabels.report}</p>
         {status.tone === 'error' ? <StatusRegion status={status} /> : null}
         {review?.building ? (
@@ -1105,11 +1120,11 @@ export function App() {
             </div>
           </>
         ) : result?.ok ? (
-          <VerdictLine report={result} />
+          <ReportSummary report={result} />
         ) : (
           <h1>{result ? COPY.review.withheld : COPY.review.timelineOnly}</h1>
         )}
-        <ReviewStages stages={stages} bodies={bodies} />
+        <ReviewStages stages={stages} bodies={bodies} asides={asides} />
         <div className="actions">
           <button type="button" onClick={() => dispatch({ type: 'openGames' })} className="btn btn-secondary">
             {COPY.review.editGames}

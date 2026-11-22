@@ -178,18 +178,33 @@ export const COPY = {
       aborted: (count: number) => `${count} aborted`,
       abandoned: (count: number) => `${count} abandoned`,
     },
+    player: {
+      legend: 'Which player are you?',
+      help: 'Your pulse is compared only with your own moves. Pick your chess.com username.',
+      both: 'Count both players’ moves',
+      required: 'Choose which player you are to continue.',
+      single: (name: string) => `Accuracy counts only the moves played by ${name}.`,
+      none: 'No player appears in every game, so accuracy counts both players’ moves.',
+    },
     unavailablePage:
       'This page is open outside the ChessPulse window. Paste validation is unavailable.',
     unexpectedResult: 'Validation returned an unexpected result.',
   },
   stages: {
-    label: 'Review stages',
-    heading: (index: number) => `Stage ${index}`,
+    label: 'Review sections',
     titles: {
-      pulse: 'Pulse',
-      engine: 'Engine',
-      reading: 'Reading',
+      pulse: 'Pulse & Play Timeline',
+      engine: 'Move Quality',
+      reading: 'AI Session Explainer',
     },
+    descriptions: {
+      pulse: 'See how pulse, games, think time, and move quality line up on the session clock.',
+      engine: 'Review the session overall, then open a game to inspect its locally scored moves.',
+      reading:
+        'Ask for an explanation of the locally computed report. The model may interpret patterns, but it does not calculate report values.',
+    },
+    engineBadge: (name: string, version: string | undefined, depth: number) =>
+      version ? `${name} ${version} · depth ${depth} · runs locally` : `${name} · depth ${depth} · local`,
     states: {
       ready: 'Ready',
       refused: 'Refused',
@@ -200,7 +215,7 @@ export const COPY = {
     reasons: {
       low_coverage: 'Coverage was too low, so nothing could be compared.',
       refused: 'The report was refused, so this stage did not run.',
-      blocked: 'Blocked: Stage 1 produced no trace, so there is nothing to compare against.',
+      blocked: 'Not run: the pulse timeline has no usable trace, so there is nothing to compare against.',
       building: 'Building the report…',
       report_failed: 'The report could not be built. Fix the pasted games and try again.',
       no_report: 'No report was built yet.',
@@ -253,6 +268,46 @@ export const COPY = {
     insufficientBar: (title: string, count: number) =>
       `${title} accuracy insufficient: ${count} scored ${count === 1 ? 'move' : 'moves'}, minimum 5 required`,
   },
+  summary: {
+    label: 'Session summary',
+    eyebrow: 'Session report',
+    context: (games: number, duration: string) =>
+      `${games} ${games === 1 ? 'game' : 'games'} · ${duration} session`,
+    headlines: {
+      no_scored: 'There were not enough scored moves for a session comparison.',
+      thin_bands: 'This session did not have enough moves in both pulse ranges for a reliable comparison.',
+      no_blunders: 'No moves met ChessPulse’s local blunder rule in this session.',
+      most_elevated: (personal: boolean) =>
+        personal
+          ? 'Most of your mistakes occurred while your pulse was elevated.'
+          : 'Most mistakes occurred while pulse was elevated.',
+      some_elevated: (personal: boolean) =>
+        personal
+          ? 'Some of your mistakes occurred while your pulse was elevated.'
+          : 'Some mistakes occurred while pulse was elevated.',
+      none_elevated: (personal: boolean) =>
+        personal
+          ? 'Your mistakes did not cluster during elevated pulse.'
+          : 'Mistakes did not cluster during elevated pulse.',
+    },
+    metricsLabel: 'Session facts',
+    metrics: {
+      baseline: { label: 'Baseline', help: 'Median usable pulse during the first minute.' },
+      threshold: { label: 'Elevated at', help: 'Baseline plus 10 bpm.' },
+      coverage: { label: 'Coverage', help: 'Share of session time with usable pulse readings.' },
+      blunders: { label: 'Blunders', help: 'Moves that crossed ChessPulse’s local win-chance-loss rule.' },
+      games: { label: 'Games included', help: 'Finished games counted in move quality.' },
+      scored: { label: 'Scored moves', help: 'Moves the local engine returned a usable score for.' },
+      settledAccuracy: { label: 'Settled accuracy', help: 'Mean move accuracy below the elevated threshold.' },
+      elevatedAccuracy: { label: 'Elevated accuracy', help: 'Mean move accuracy at or above the elevated threshold.' },
+      longestBreak: { label: 'Longest break', help: 'Longest marked gap between two games.' },
+    },
+    moreFacts: 'More session facts',
+    fewerFacts: 'Fewer session facts',
+    explain: 'What these numbers mean',
+    hideExplain: 'Hide explanations',
+    verdictLabel: 'Computed verdict',
+  },
   verdict: {
     occluded: (seconds: number) => {
       if (seconds < 60) return 'Face or motion checks excluded under a minute of readings.';
@@ -262,6 +317,13 @@ export const COPY = {
     label: 'Session verdict',
     meta: (baseline: string, threshold: string, coverage: number) =>
       `Baseline ${baseline} bpm · Elevated ≥ ${threshold} bpm · Coverage ${coverage}%`,
+    scope: {
+      player: (name: string) => `Accuracy and blunders count only the moves played by ${name}.`,
+      ambiguous: 'Accuracy and blunders count both players’ moves, because no player was chosen.',
+      noCommonName:
+        'Accuracy and blunders count both players’ moves, because no player appears in every game.',
+      legacy: 'This report counts both players’ moves. Build it again to count only yours.',
+    },
   },
   refusal: {
     metrics: (measured: number, threshold: number) =>
@@ -310,7 +372,6 @@ export const COPY = {
     label: 'Reading (optional)',
     title: 'Reading',
     inferredLabel: 'INFERRED — written by a model from the numbers above. Not measured.',
-    provider: 'Provider',
     question: 'Question',
     prompt: 'What should I understand from this session?',
     idle: 'Nothing is sent until you choose Write reading.',
@@ -326,9 +387,80 @@ export const COPY = {
     table: 'Table',
     lowCoverage: 'Low coverage · raw trace only',
     chartAria: 'Pulse, move error, think time, and game endings',
-    stepAria: 'Step through samples',
-    previous: 'Previous sample',
-    next: 'Next sample',
+    stepAria: 'Step through pulse readings',
+    previous: 'Previous reading',
+    next: 'Next reading',
+    rails: {
+      games: 'Games',
+      pulse: 'Pulse',
+      bpm: 'bpm',
+      loss: 'Move loss',
+      think: 'Think time',
+      lossCap: '300+ cp',
+      thinkCap: '60 s+',
+      zero: '0',
+    },
+    lineLabels: {
+      elevated: (bpm: string) => `${bpm} elevated`,
+      baseline: (bpm: string) => `${bpm} baseline`,
+    },
+    inspectorLabel: 'Selected moment and chart key',
+    keysHint: 'Focus the chart and press ← or →, or use Previous and Next, to inspect a reading.',
+    key: {
+      title: 'How to read this',
+      label: 'Timeline key',
+      items: {
+        pulse: { term: 'Pulse', text: 'The cyan line is your measured pulse.' },
+        elevated: {
+          term: 'Elevated pulse',
+          text: 'Hatched area and ember line: at least 10 bpm above your first-minute baseline.',
+        },
+        baseline: { term: 'Baseline', text: 'Dashed line: the median usable pulse from the first minute.' },
+        gaps: {
+          term: 'Gaps and faint dots',
+          text: 'Readings that failed confidence or framing checks. They are shown but never counted.',
+        },
+        loss: {
+          term: 'Move loss',
+          text: 'Bars show how much a move worsened the position (centipawn loss). A diamond marks a blunder.',
+        },
+        think: { term: 'Think time', text: 'Dots show how long each move took, from the PGN clock.' },
+        games: { term: 'Games', text: 'Shaded spans, placed from the game-end marks you made while sensing.' },
+      },
+    },
+    moment: {
+      title: 'Selected moment',
+      position: (position: number, total: number) => `Reading ${position} of ${total}`,
+      labels: {
+        time: 'Time in session',
+        pulse: 'Pulse',
+        range: 'Pulse range',
+        signal: 'Signal',
+        game: 'Game',
+        move: 'Nearest move',
+        loss: 'Move loss',
+        think: 'Think time',
+        rule: 'Blunder rule',
+      },
+      ranges: {
+        settled: 'Settled: below the elevated threshold',
+        elevated: 'Elevated: at least 10 bpm above baseline',
+        withheld: 'Not banded: coverage was too low',
+        not_counted: 'Not counted: failed confidence or framing checks',
+      },
+      signal: (confidence: number, counted: boolean) =>
+        counted ? `Counted (confidence ${confidence})` : `Not counted (confidence ${confidence})`,
+      game: (number: number, players: string) => `Game ${number} · ${players}`,
+      noGame: 'Between games, or before the first game',
+      noMove: 'No timed move within 2 seconds',
+      loss: (cpl: number) => `${cpl} centipawns`,
+      mate: 'Part of a mate sequence (no centipawn value)',
+      unscored: 'Not scored by the engine',
+      think: (seconds: string) => `${seconds} s`,
+      noClock: 'No clock data',
+      blunder: 'Met the local blunder rule',
+      notBlunder: 'Did not meet the blunder rule',
+    },
     perGame: 'Per-game timelines',
     gameTimeline: (index: number) => `Game ${index + 1} timeline`,
     elevated: (bpm: string) => `Elevated ≥ ${bpm} bpm`,

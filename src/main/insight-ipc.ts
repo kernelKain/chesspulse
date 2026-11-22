@@ -15,6 +15,16 @@ import { defaultDataRoot, readGames, readReport } from './store.js';
 
 export function registerInsightHandler(dataRoot: () => string = defaultDataRoot, env: NodeJS.ProcessEnv = process.env): void {
   const active = new Map<string, AbortController>();
+  // One random id per report for this app run. OpenCode Go routes a conversation by it; a session
+  // folder name would tell the provider when the session was recorded, so it is never sent.
+  const conversations = new Map<string, string>();
+  const conversationFor = (sessionId: string): string => {
+    const known = conversations.get(sessionId);
+    if (known) return known;
+    const created = randomUUID();
+    conversations.set(sessionId, created);
+    return created;
+  };
 
   registerInvokeChannel('insightRequest', async (_event, payload) => {
     if (active.has(payload.sessionId)) throw new AppError('session_busy');
@@ -29,7 +39,10 @@ export function registerInsightHandler(dataRoot: () => string = defaultDataRoot,
       );
       // Provider and grounding failures carry their own meaning; anything else is a report fault.
       const result = insightResultSchema.parse(
-        await requestInsight(payload, artifacts.report, artifacts.pgns, env, { signal: controller.signal }).catch(
+        await requestInsight(payload, artifacts.report, artifacts.pgns, env, {
+          signal: controller.signal,
+          conversationId: conversationFor(payload.sessionId),
+        }).catch(
           (error: unknown) => {
             if (error instanceof AppError) throw error;
             if (error instanceof AiProviderError) throw new AppError(error.code, { cause: error });
@@ -41,7 +54,7 @@ export function registerInsightHandler(dataRoot: () => string = defaultDataRoot,
       log(`[chesspulse] AI reading ${requestId} ${result.disabled ? 'disabled' : 'ready'}`);
       return result;
     } catch (error) {
-      logError(`[chesspulse] AI reading ${requestId} failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+      logError(`[chesspulse] AI reading ${requestId} failed: ${describeFailure(error)}`);
       throw error;
     } finally {
       if (active.get(payload.sessionId) === controller) active.delete(payload.sessionId);
@@ -53,6 +66,16 @@ export function registerInsightHandler(dataRoot: () => string = defaultDataRoot,
     controller?.abort();
     return { cancelled: controller !== undefined };
   });
+}
+
+/** The code and the provider's safe diagnostic (status and error type), never a body or a key. */
+function describeFailure(error: unknown): string {
+  if (error instanceof AppError) {
+    const cause = error.cause;
+    const diagnostic = cause instanceof AiProviderError && cause.diagnostic ? ` (${cause.diagnostic})` : '';
+    return `${error.code}${diagnostic}`;
+  }
+  return error instanceof Error ? error.message : 'unknown error';
 }
 
 function readArtifacts(

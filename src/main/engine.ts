@@ -11,6 +11,15 @@ import { validateFen } from 'chess.js';
  */
 export const ENGINE_DEPTH = 12;
 export const POSITION_TIMEOUT_MS = 5_000;
+
+/**
+ * What: the engine the report names beside Move Quality.
+ * Why: a review should say which engine scored it. The version must equal the installed `stockfish`
+ *      package; engine.test.ts reads that package and fails if they drift.
+ * Removed: the report would show only a depth, and a dependency bump would go unlabelled.
+ */
+export const ENGINE_IDENTITY = { name: 'Stockfish', version: '19.0.1', build: 'lite-single' } as const;
+export type EngineIdentity = { name: string; version: string; build: string };
 export const ENGINE_BUDGET_MS = 20 * 60 * 1000;
 /** A position whose worker crashes is retried, but only this many times per engine/report. */
 export const MAX_WORKER_RESTARTS = 2;
@@ -57,6 +66,7 @@ export function createEngine(options: EngineOptions = {}): {
   evaluate(fen: string): Promise<PositionEval>;
   close(): Promise<void>;
   depth: number;
+  identity: EngineIdentity;
 } {
   const depth = options.depth ?? ENGINE_DEPTH;
   const timeoutMs = options.timeoutMs ?? POSITION_TIMEOUT_MS;
@@ -238,7 +248,7 @@ export function createEngine(options: EngineOptions = {}): {
     if (timer !== undefined) clearTimeout(timer);
   }
 
-  return { evaluate, close, depth };
+  return { evaluate, close, depth, identity: { ...ENGINE_IDENTITY } };
 }
 
 function isWorkerEval(message: unknown): message is WorkerEval {

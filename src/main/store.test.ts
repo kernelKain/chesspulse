@@ -453,7 +453,7 @@ describe('session store', () => {
     let calls = 0;
     await assert.rejects(
       requestInsight(
-        { sessionId: meta.id, provider: 'openai', text: 'Review this session.' },
+        { sessionId: meta.id, text: 'Review this session.' },
         storedReport,
         mismatchedGames,
         { CP_AI_KEY: 'test-secret', CP_AI_MODEL: 'test-model' },

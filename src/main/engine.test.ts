@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { Worker } from 'node:worker_threads';
 import { Chess } from 'chess.js';
-import { createEngine, ENGINE_DEPTH } from './engine.js';
+import { createEngine, ENGINE_DEPTH, ENGINE_IDENTITY } from './engine.js';
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
@@ -22,6 +23,20 @@ function sixtyPositions(): string[] {
   }
   return fens;
 }
+
+describe('engine identity', () => {
+  it('names the installed stockfish version and the build the worker loads', async () => {
+    const installed = JSON.parse(readFileSync(path.join(process.cwd(), 'node_modules/stockfish/package.json'), 'utf8')) as {
+      version: string;
+    };
+    assert.equal(ENGINE_IDENTITY.version, installed.version);
+    const worker = readFileSync(path.join(process.cwd(), 'src/main/engine-worker.ts'), 'utf8');
+    assert.match(worker, new RegExp(`stockfish\\('${ENGINE_IDENTITY.build}'`));
+    const engine = createEngine();
+    assert.deepEqual(engine.identity, { ...ENGINE_IDENTITY });
+    await engine.close();
+  });
+});
 
 describe('createEngine', { concurrency: false }, () => {
   it('marks a bad FEN and a spent budget without a score', async () => {

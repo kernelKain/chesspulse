@@ -4,6 +4,7 @@ import { downscaleRgbToRgba } from './preview.js';
 import {
   coachGapRequestSchema,
   coachMessageSchema,
+  insightRequestSchema,
   insightResultSchema,
   consentRequestSchema,
   previewFrameSchema,
@@ -12,6 +13,7 @@ import {
   pulseSampleSchema,
   refusalSchema,
   reportBuildRequestSchema,
+  reportSchema,
   sessionEndedSchema,
   sessionStartedSchema,
   stopReasonSchema,
@@ -116,6 +118,86 @@ describe('consentRequestSchema', () => {
   it('rejects a consent payload that adds a field', () => {
     const parsed = consentRequestSchema.safeParse({ granted: true, video: true });
     assert.equal(parsed.success, false);
+  });
+});
+
+/** A report exactly as Phase 6 wrote it: no player scope, totals, summaries, or engine name. */
+const legacyReport = {
+  ok: true,
+  schemaVersion: 1,
+  sessionId: 's1',
+  gamesDigest: 'a'.repeat(64),
+  coveragePct: 88,
+  baselineBpm: 81.4,
+  verdict: '1 blunder, 0 of them while your pulse was elevated. Accuracy 89% settled, settled insufficient.',
+  settled: { band: 'settled', moves: 12, status: 'ok', accuracy: 89 },
+  elevated: { band: 'elevated', moves: 2, status: 'insufficient' },
+  engine: { depth: 12, positions: 30, scored: 30, failed: 0, reasons: { timeout: 0, crash: 0, engine: 0, budget: 0 } },
+  alignmentMode: 'marks',
+  toleranceSec: 0,
+  games: [
+    { index: 0, white: 'Ada', black: 'Nim', result: '1-0', ending: 'resignation', includeInStats: true, moveCount: 30, blunders: 1, aligned: true },
+  ],
+  timeline: {
+    startUs: 0,
+    stopUs: 60_000_000,
+    baselineBpm: 81.4,
+    elevatedThresholdBpm: 91.4,
+    samples: [],
+    games: [],
+    moves: [
+      { gameIndex: 0, moveIndex: 0, san: 'e4', tUs: 1_000_000, cpl: 0, thinkSec: 0.7, blunder: false, mate: false, scored: true, band: 'settled' },
+    ],
+  },
+};
+
+describe('reportSchema compatibility', () => {
+  it('still reads a report saved before player scope and per-game summaries', () => {
+    assert.equal(reportSchema.safeParse(legacyReport).success, true);
+  });
+
+  it('reads the new optional fields and rejects a whole-game accuracy without enough moves', () => {
+    const summary = {
+      scored: 12,
+      unscored: 0,
+      overall: { moves: 12, status: 'ok', accuracy: 88 },
+      settled: { band: 'settled', moves: 10, status: 'ok', accuracy: 89 },
+      elevated: { band: 'elevated', moves: 2, status: 'insufficient' },
+      blunders: 1,
+      elevatedBlunders: 0,
+      avgThinkSec: 3.4,
+      largestLosses: [{ moveIndex: 14, cpl: 210, blunder: true }],
+    };
+    const next = {
+      ...legacyReport,
+      engine: { ...legacyReport.engine, name: 'Stockfish', version: '19.0.1', build: 'lite-single' },
+      playerScope: { kind: 'player', name: 'Ada' },
+      totals: { gamesIncluded: 1, scored: 12, unscored: 0, blunders: 1, elevatedBlunders: 0 },
+      longestGap: { afterIndex: 0, beforeIndex: 1, durationSec: 60 },
+      games: [{ ...legacyReport.games[0], playerSide: 'white', summary }],
+      timeline: { ...legacyReport.timeline, moves: [{ ...legacyReport.timeline.moves[0], accuracy: 100 }] },
+    };
+    assert.equal(reportSchema.safeParse(next).success, true);
+    const forged = {
+      ...next,
+      games: [{ ...next.games[0], summary: { ...summary, overall: { moves: 2, status: 'insufficient', accuracy: 50 } } }],
+    };
+    assert.equal(reportSchema.safeParse(forged).success, false);
+    const thin = {
+      ...next,
+      games: [{ ...next.games[0], summary: { ...summary, overall: { moves: 4, status: 'ok', accuracy: 88 } } }],
+    };
+    assert.equal(reportSchema.safeParse(thin).success, false, 'an ok accuracy needs at least five moves');
+  });
+});
+
+describe('insightRequestSchema', () => {
+  it('carries only the session and the question; the provider comes from .env', () => {
+    assert.equal(insightRequestSchema.safeParse({ sessionId: 's1', text: 'Explain the timeline.' }).success, true);
+    assert.equal(
+      insightRequestSchema.safeParse({ sessionId: 's1', provider: 'openai', text: 'Explain the timeline.' }).success,
+      false,
+    );
   });
 });
 

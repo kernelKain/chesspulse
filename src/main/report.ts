@@ -5,10 +5,18 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { bandFor, ELEVATED_MARGIN_BPM } from './analysis/bands.js';
 import { alignGames, buildMoveTimeIndex, moveTimeKey } from './analysis/align.js';
-import { analyseMoves, scoreMove, verdictLine, type MoveMetric, type Score } from './analysis/metrics.js';
+import {
+  analyseMoves,
+  scoreMove,
+  summariseGame,
+  verdictLine,
+  type MoveMetric,
+  type Score,
+  type ScoredPly,
+} from './analysis/metrics.js';
 import { parsePgnBatch, thinkTimeSec } from './analysis/pgn.js';
 import { firstIllegalMove, illegalMoveMessage, positionsFromMoves, type MovePosition } from './analysis/positions.js';
-import { createEngine, ENGINE_DEPTH, type PositionEval } from './engine.js';
+import { createEngine, ENGINE_DEPTH, type EngineIdentity, type PositionEval } from './engine.js';
 import { baselineFromSamples, coverageFromSamples, isUsableSample } from './session.js';
 import { defaultDataRoot, digestGames, readMeta, readSamples, saveReportArtifacts } from './store.js';
 import { AppError } from '../shared/errors.js';
@@ -24,6 +32,7 @@ import {
   type TimelineMove,
 } from '../shared/contracts.js';
 import { FRAMING_CAUSES, type FramingCause } from '../shared/framing.js';
+import { plyBelongsTo, resolvePlayer, sideInGame, type PlayerSide } from '../shared/player.js';
 import { CONFIDENCE_FLOOR, SAMPLE_HOLD_US, occludedUs } from '../shared/sensing.js';
 
 export const COVERAGE_GATE_PCT = 70;
@@ -77,6 +86,8 @@ interface Evaluator {
   close(): Promise<void>;
   /** Optional for injected test evaluators; production createEngine always supplies it. */
   depth?: number;
+  /** Optional for injected test evaluators, so a stub is never reported as Stockfish. */
+  identity?: EngineIdentity;
 }
 
 export interface ReportBuildControl {
@@ -88,6 +99,9 @@ export interface ReportBuildControl {
 }
 
 interface EngineStats {
+  name?: string;
+  version?: string;
+  build?: string;
   depth: number;
   positions: number;
   scored: number;
@@ -107,6 +121,8 @@ type ScoreOutcome =
       metrics: MoveMetric[];
       elevatedBlunderTimes: (number | null)[];
       timelineMoves: TimelineMove[];
+      /** The scored player's plies per game index, in move order, for the per-game summaries. */
+      plies: Map<number, ScoredPly[]>;
       engine: EngineStats;
     };
 
@@ -146,6 +162,7 @@ export async function buildReport(
   engine?: Evaluator,
   control: ReportBuildControl = {},
   gameEndMarks?: readonly number[],
+  playerName?: string,
 ): Promise<Report | Refusal> {
   if (control.signal?.aborted) return CANCELLED_REFUSAL;
   // The caller owns this array; scoring awaits the engine, so every later read uses one snapshot.
@@ -173,6 +190,13 @@ export async function buildReport(
     }
   }
 
+  // The pulse belongs to one person, so only that person's moves may be banded against it.
+  const player = resolvePlayer(parsed.games, playerName);
+  if (!player.ok) throw new Error(player.message);
+  const sides = new Map<number, PlayerSide>(
+    parsed.games.map((game) => [game.index, sideInGame(game, player.scope)]),
+  );
+
   const stop = meta.stopAnchor;
   if (!stop) {
     return { ok: false, reason: 'no_trace', remedy: 'Stop the session before building a report.' };
@@ -198,6 +222,7 @@ export async function buildReport(
       baseline,
       scorer,
       control,
+      sides,
     );
     if (scoredMoves.cancelled) return CANCELLED_REFUSAL;
     const summary = analyseMoves(scoredMoves.metrics);
@@ -213,6 +238,7 @@ export async function buildReport(
       deltaBpm: claim?.deltaBpm,
       gapClause: gapClause(aligned.gaps),
     });
+    const gap = longestGap(aligned.gaps);
     const coverage = coverageFromSamples(samples, meta.startAnchor.monoUs, stop.monoUs);
     const occludedSec = Math.round(occludedUs(samples, stop.monoUs) / 1_000_000);
     const first = aligned.games[0];
@@ -236,6 +262,23 @@ export async function buildReport(
       toleranceSec: first?.alignment.toleranceSec ?? 0,
       ...(occludedSec > 0 ? { occludedSec } : {}),
       ...(aligned.banner ? { banner: aligned.banner } : {}),
+      playerScope: player.scope,
+      totals: {
+        gamesIncluded: parsed.games.filter((game) => game.includeInStats).length,
+        scored: summary.scored,
+        unscored: summary.unscored,
+        blunders: summary.blunders,
+        elevatedBlunders: summary.elevatedBlunders,
+      },
+      ...(gap
+        ? {
+            longestGap: {
+              afterIndex: gap.afterIndex,
+              beforeIndex: gap.beforeIndex,
+              durationSec: Math.round(gap.durationUs / 1_000_000),
+            },
+          }
+        : {}),
       games: parsed.games.map((game) => ({
         index: game.index,
         white: game.white,
@@ -247,6 +290,9 @@ export async function buildReport(
         blunders: blundersByGame.get(game.index) ?? 0,
         aligned: alignedIndices.has(game.index),
         ...(game.timeControl !== undefined ? { timeControl: game.timeControl } : {}),
+        playerSide: sides.get(game.index) ?? 'both',
+        // Excluded games were never scored, so they get no summary rather than a row of zeros.
+        ...(game.includeInStats ? { summary: summariseGame(scoredMoves.plies.get(game.index) ?? []) } : {}),
       })),
       timeline: {
         startUs: meta.startAnchor.monoUs,
@@ -370,6 +416,7 @@ async function scoreAlignedMoves(
   baseline: number,
   engine: Evaluator,
   control: ReportBuildControl,
+  sides: ReadonlyMap<number, PlayerSide> = new Map(),
 ): Promise<ScoreOutcome> {
   const planned = games
     .filter((entry) => entry.game.includeInStats)
@@ -378,6 +425,7 @@ async function scoreAlignedMoves(
       return {
         aligned: entry,
         sans,
+        side: sides.get(entry.game.index) ?? 'both',
         thinks: thinkTimeSec(entry.game),
         positions: positionsFromMoves(sans),
       };
@@ -418,9 +466,12 @@ async function scoreAlignedMoves(
   const metrics: MoveMetric[] = [];
   const elevatedBlunderTimes: (number | null)[] = [];
   const timelineMoves: TimelineMove[] = [];
+  const plies = new Map<number, ScoredPly[]>();
 
-  for (const { aligned, sans, thinks, positions } of planned) {
+  for (const { aligned, sans, side, thinks, positions } of planned) {
     for (let moveIndex = 0; moveIndex < sans.length; moveIndex += 1) {
+      // The opponent's moves are not scored, banded, or drawn: their clock is not the player's pulse.
+      if (!plyBelongsTo(side, moveIndex)) continue;
       const position = positions[moveIndex];
       if (!position || position.illegal || !position.fenAfter) {
         // buildReport rejects an illegal batch before scoring; reaching here is an internal invariant break.
@@ -451,17 +502,22 @@ async function scoreAlignedMoves(
       if (metric.blunder && metric.band === 'elevated') elevatedBlunderTimes.push(when?.tUs ?? null);
       metrics.push(metric);
       const rawThink = thinks[moveIndex] ?? null;
+      const thinkSec = rawThink !== null && rawThink >= 0 ? rawThink : null;
+      const gamePlies = plies.get(aligned.game.index) ?? [];
+      gamePlies.push({ moveIndex, metric, thinkSec });
+      plies.set(aligned.game.index, gamePlies);
       timelineMoves.push({
         gameIndex: aligned.game.index,
         moveIndex,
         san: sans[moveIndex] ?? '',
         tUs: when?.tUs ?? null,
         cpl: metric.cpl,
-        thinkSec: rawThink !== null && rawThink >= 0 ? rawThink : null,
+        thinkSec,
         blunder: metric.blunder,
         mate: metric.mate,
         scored: metric.accuracy !== null,
         band: metric.band,
+        ...(metric.accuracy !== null ? { accuracy: Math.round(metric.accuracy) } : {}),
       });
     }
   }
@@ -472,14 +528,28 @@ async function scoreAlignedMoves(
     metrics,
     elevatedBlunderTimes,
     timelineMoves,
-    engine: { depth: engine.depth ?? ENGINE_DEPTH, positions: total, scored: scoredPositions, failed, reasons },
+    plies,
+    engine: {
+      ...(engine.identity
+        ? { name: engine.identity.name, version: engine.identity.version, build: engine.identity.build }
+        : {}),
+      depth: engine.depth ?? ENGINE_DEPTH,
+      positions: total,
+      scored: scoredPositions,
+      failed,
+      reasons,
+    },
   };
 }
 
-function countPositions(planned: readonly { positions: readonly MovePosition[] }[]): number {
+function countPositions(
+  planned: readonly { positions: readonly MovePosition[]; side: PlayerSide }[],
+): number {
   const fens = new Set<string>();
-  for (const { positions } of planned) {
-    for (const position of positions) {
+  for (const { positions, side } of planned) {
+    for (let plyIndex = 0; plyIndex < positions.length; plyIndex += 1) {
+      const position = positions[plyIndex];
+      if (!plyBelongsTo(side, plyIndex)) continue;
       if (!position || position.illegal || !position.fenAfter) continue;
       fens.add(position.fenBefore);
       if (!position.terminalAfter) fens.add(position.fenAfter);
@@ -577,11 +647,18 @@ function elevatedPeriods(
   return periods;
 }
 
-function gapClause(gaps: readonly { afterIndex: number; beforeIndex: number; durationUs: number }[]): string | undefined {
-  const gap = gaps.reduce<(typeof gaps)[number] | undefined>((best, current) => {
+type GapLike = { afterIndex: number; beforeIndex: number; durationUs: number };
+
+/** The first of the longest marked breaks. The verdict sentence and `longestGap` use the same one. */
+function longestGap<T extends GapLike>(gaps: readonly T[]): T | undefined {
+  return gaps.reduce<T | undefined>((best, current) => {
     if (!best || current.durationUs > best.durationUs) return current;
     return best;
   }, undefined);
+}
+
+function gapClause(gaps: readonly GapLike[]): string | undefined {
+  const gap = longestGap(gaps);
   if (!gap) return undefined;
   const minutes = Math.round(gap.durationUs / 60_000_000);
   const seconds = Math.max(1, Math.round(gap.durationUs / 1_000_000));

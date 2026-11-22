@@ -22,27 +22,42 @@ const refusal: Refusal = {
   },
 };
 
-describe('Timeline legend and keyboard readout', () => {
-  it('shows a text legend for every chart encoding', () => {
+describe('Timeline key and inspector', () => {
+  it('explains only the encodings a refused trace shows, beside the chart', () => {
     const harness = mountDom(createElement(Timeline, { result: refusal }));
-    const legend = harness.document.querySelector('[aria-label="Timeline key"]');
-    assert.ok(legend);
-    const text = legend.textContent ?? '';
-    for (const label of ['Pulse', 'Move error (CPL)', 'Think time', 'Elevated pulse', 'Game ending']) {
-      assert.match(text, new RegExp(label.replace(/[()]/g, '\\$&')));
+    try {
+      const key = harness.document.querySelector('[aria-label="Timeline key"]');
+      assert.ok(key);
+      assert.ok(key.closest('.timeline-inspector'), 'the key sits in the inspector beside the chart');
+      const terms = [...key.querySelectorAll('dt')].map((node) => node.textContent);
+      assert.deepEqual(terms, ['Pulse', 'Baseline', 'Gaps and faint dots']);
+      assert.equal(harness.document.querySelector('.timeline-legend'), null, 'the old legend row is gone');
+    } finally {
+      harness.unmount();
     }
-    assert.ok(harness.document.querySelector('.legend-hatch'));
-    harness.unmount();
   });
 
-  it('steps the sample readout with the arrow keys', () => {
+  it('shows labelled facts for the reading the arrow keys select', () => {
     const harness = mountDom(createElement(Timeline, { result: refusal }));
-    const frame = harness.document.querySelector('.timeline-frame');
-    assert.ok(frame);
-    harness.keyDown(frame, 'ArrowRight');
-    harness.keyDown(frame, 'ArrowRight');
-    const readout = harness.document.querySelector('.timeline-readout')?.textContent ?? '';
-    assert.match(readout, /84(\.\d)? bpm/);
-    harness.unmount();
+    try {
+      const frame = harness.document.querySelector('.timeline-frame');
+      assert.ok(frame);
+      assert.match(harness.document.querySelector('.inspector-moment')?.textContent ?? '', /press ← or →/);
+      harness.keyDown(frame, 'ArrowRight');
+      harness.keyDown(frame, 'ArrowRight');
+      const moment = harness.document.querySelector('.inspector-moment');
+      assert.ok(moment);
+      assert.equal(moment.getAttribute('aria-live'), 'polite');
+      const facts = Object.fromEntries(
+        [...moment.querySelectorAll('.fact')].map((node) => [node.querySelector('dt')?.textContent, node.querySelector('dd')?.textContent]),
+      );
+      assert.equal(facts['Pulse'], '84 bpm');
+      assert.equal(facts['Time in session'], '0:02');
+      assert.equal(facts['Pulse range'], 'Not banded: coverage was too low');
+      assert.match(moment.textContent ?? '', /Reading 2 of 2/);
+      assert.equal((moment.textContent ?? '').includes('Sample '), false, 'no raw "Sample n/m" line');
+    } finally {
+      harness.unmount();
+    }
   });
 });
