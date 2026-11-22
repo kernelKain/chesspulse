@@ -5,13 +5,14 @@ import {
   reportCancelResultSchema,
   reportProgressSchema,
   reportResultSchema,
+  sessionMarksResultSchema,
 } from '../shared/contracts.js';
 import { EVENT_CHANNELS } from '../shared/channels.js';
 import { AppError } from '../shared/errors.js';
 import { registerInvokeChannel } from './ipc-registry.js';
 import { CANCELLED_REFUSAL, buildReport } from './report.js';
 import { withReportExclusion } from './report-lock.js';
-import { defaultDataRoot } from './store.js';
+import { defaultDataRoot, readMeta } from './store.js';
 
 interface ActiveBuild {
   controller: AbortController;
@@ -29,7 +30,7 @@ export function isReportBuilding(sessionId: string): boolean {
 
 export function registerReportHandler(dataRoot: () => string = defaultDataRoot): void {
   registerInvokeChannel('reportBuild', async (event, payload) => {
-    const { sessionId, pgns } = payload;
+    const { sessionId, pgns, gameEndMarks } = payload;
     if (activeBuilds.has(sessionId)) throw new AppError('session_busy');
     const build: ActiveBuild = { controller: new AbortController(), committing: false };
     activeBuilds.set(sessionId, build);
@@ -47,7 +48,7 @@ export function registerReportHandler(dataRoot: () => string = defaultDataRoot):
               const message = reportProgressSchema.safeParse({ sessionId, ...progress });
               if (message.success) event.sender.send(EVENT_CHANNELS.reportProgress, message.data);
             },
-          }),
+          }, gameEndMarks),
         build.controller.signal,
       );
       return reportResultSchema.parse(result);
@@ -58,6 +59,18 @@ export function registerReportHandler(dataRoot: () => string = defaultDataRoot):
     } finally {
       if (activeBuilds.get(sessionId) === build) activeBuilds.delete(sessionId);
     }
+  });
+
+  registerInvokeChannel('sessionMarks', async (_event, payload) => {
+    const meta = await readMeta(dataRoot(), payload.sessionId);
+    // Elapsed time is the only clock the player saw; raw monotonic µs means nothing to them.
+    return sessionMarksResultSchema.parse({
+      marks: (meta.marks ?? []).map((mark) => ({
+        atUs: mark.atUs,
+        kind: mark.kind,
+        elapsedUs: Math.max(0, mark.atUs - meta.startAnchor.monoUs),
+      })),
+    });
   });
 
   registerInvokeChannel('reportCancel', (_event, payload) => {

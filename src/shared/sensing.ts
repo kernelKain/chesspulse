@@ -18,7 +18,33 @@ export const SESSION_WARNING_MS = 80 * 60 * 1_000;
 export const SESSION_LIMIT_MS = 90 * 60 * 1_000;
 
 export function isUsableSample(sample: PulseSample, floor = CONFIDENCE_FLOOR): boolean {
+  // An occluded sample was taken where no face could be measured, so it cannot support a number.
+  if (sample.occluded === true) return false;
   return sample.stable && sample.confidence >= floor;
+}
+
+/**
+ * What: the time covered by samples taken while the face was covered.
+ * Why: R6-07 reports that time as its own line, and it must match what coverage actually drops by,
+ *      so each marked sample covers only the wait until the next sample, as coverage does.
+ * Removed: the report could claim a covered minute that coverage never counted.
+ */
+export function occludedUs(
+  samples: readonly PulseSample[],
+  stopUs: number,
+  holdUs = SAMPLE_HOLD_US,
+): number {
+  const ordered = [...samples].sort((left, right) => left.tUs - right.tUs);
+  let total = 0;
+  for (let index = 0; index < ordered.length; index += 1) {
+    const sample = ordered[index];
+    if (!sample || sample.occluded !== true) continue;
+    const nextUs = index + 1 < ordered.length ? (ordered[index + 1]?.tUs ?? stopUs) : stopUs;
+    const gap = nextUs - sample.tUs;
+    if (gap <= 0) continue;
+    total += Math.min(gap, holdUs);
+  }
+  return total;
 }
 
 export type SignalQuality = 'waiting' | 'good' | 'weak' | 'poor';

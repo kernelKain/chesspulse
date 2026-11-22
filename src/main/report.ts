@@ -15,17 +15,62 @@ import { AppError } from '../shared/errors.js';
 import {
   REPORT_SCHEMA_VERSION,
   reportSchema,
+  type FramingCounts,
   type PulseSample,
   type Refusal,
   type Report,
+  type SessionMark,
   type SessionMeta,
   type TimelineMove,
 } from '../shared/contracts.js';
-import { CONFIDENCE_FLOOR, SAMPLE_HOLD_US } from '../shared/sensing.js';
+import { FRAMING_CAUSES, type FramingCause } from '../shared/framing.js';
+import { CONFIDENCE_FLOOR, SAMPLE_HOLD_US, occludedUs } from '../shared/sensing.js';
 
 export const COVERAGE_GATE_PCT = 70;
 const LOW_COVERAGE_REMEDY =
   'Most often this is lighting or moving out of frame. Sit facing the screen with a lamp in front of you, and keep the session shorter next time.';
+
+/** What the player can change, per cause. The share comes from the session's own counts. */
+const CAUSE_REMEDIES: Record<FramingCause, (share: number) => string> = {
+  no_face: (share) =>
+    `The face was out of frame in ${share}% of the framing checks. Sit centred, with your upper chest in view.`,
+  too_dark: (share) => `The room was too dark in ${share}% of the framing checks. Put a lamp in front of you.`,
+  too_far: (share) =>
+    `You were too far from the camera in ${share}% of the framing checks. Move closer until your face fills the frame.`,
+  too_close: (share) =>
+    `You were too close to the camera in ${share}% of the framing checks. Move back until your face fits in the frame.`,
+  motion: (share) =>
+    `There was too much movement in ${share}% of the framing checks. Rest your arms on the desk.`,
+  chest: (share) =>
+    `Your chest was out of frame in ${share}% of the framing checks. Sit back so your upper chest is in view.`,
+  too_bright: (share) =>
+    `The light behind you was too bright in ${share}% of the framing checks. Face a lamp instead of a window.`,
+};
+
+/**
+ * What: the refusal's remedy, naming the most frequent framing cause and its share of the checks.
+ * Why: R6-08 asks the refusal to say what went wrong and how to improve the session. The share is
+ *      a share of validation messages, not of seconds, so the sentence names that denominator.
+ * Removed: a refused session would only offer the generic remedy, even when it knew the cause.
+ *
+ * Ties follow FRAMING_CAUSES order. A session recorded before framing was counted, or one with no
+ * named cause, keeps the generic remedy rather than inventing a cause.
+ */
+export function refusalRemedy(framing: FramingCounts | undefined): string {
+  if (!framing || framing.total <= 0) return LOW_COVERAGE_REMEDY;
+  let cause: FramingCause | null = null;
+  let count = 0;
+  for (const candidate of FRAMING_CAUSES) {
+    const value = framing.counts[candidate] ?? 0;
+    // Strictly greater, so the earlier declared cause wins a tie.
+    if (value > count) {
+      cause = candidate;
+      count = value;
+    }
+  }
+  if (!cause || count === 0) return LOW_COVERAGE_REMEDY;
+  return CAUSE_REMEDIES[cause](Math.round((count / framing.total) * 100));
+}
 
 interface Evaluator {
   evaluate(fen: string): Promise<PositionEval>;
@@ -65,6 +110,29 @@ type ScoreOutcome =
       engine: EngineStats;
     };
 
+/**
+ * What: the marks placement may use, either as recorded or as the player chose after a mismatch.
+ * Why: the Review lets the player say which mark ended each game; the choice must be one the
+ *      session actually recorded, so a stale or forged id cannot place a game.
+ * Removed: a chosen mark would be trusted blindly and could place a game outside the session.
+ */
+function placementMarks(
+  recorded: readonly SessionMark[],
+  chosen: readonly number[] | undefined,
+): readonly SessionMark[] {
+  if (!chosen) return recorded;
+  const known = new Set(recorded.map((mark) => mark.atUs));
+  const unknown = chosen.filter((atUs) => !known.has(atUs));
+  if (unknown.length > 0) throw new Error('A chosen game mark was not recorded in this session.');
+  const ends = new Set(chosen);
+  // The player answered which mark ended each game; the recorded starts between games are theirs
+  // too, and dropping them would erase the gap the verdict reports.
+  return [
+    ...recorded.filter((mark) => mark.kind === 'next' && !ends.has(mark.atUs)),
+    ...[...ends].map((atUs) => ({ atUs, kind: 'end' as const })),
+  ].sort((left, right) => left.atUs - right.atUs);
+}
+
 export const CANCELLED_REFUSAL: Refusal = {
   ok: false,
   reason: 'cancelled',
@@ -77,6 +145,7 @@ export async function buildReport(
   pgns: readonly string[],
   engine?: Evaluator,
   control: ReportBuildControl = {},
+  gameEndMarks?: readonly number[],
 ): Promise<Report | Refusal> {
   if (control.signal?.aborted) return CANCELLED_REFUSAL;
   // The caller owns this array; scoring awaits the engine, so every later read uses one snapshot.
@@ -108,7 +177,12 @@ export async function buildReport(
   if (!stop) {
     return { ok: false, reason: 'no_trace', remedy: 'Stop the session before building a report.' };
   }
-  const aligned = alignGames(parsed.games, { startAnchor: meta.startAnchor, stopAnchor: stop }, samples);
+  const aligned = alignGames(
+    parsed.games,
+    { startAnchor: meta.startAnchor, stopAnchor: stop },
+    samples,
+    placementMarks(meta.marks ?? [], gameEndMarks),
+  );
   if (!aligned.ok) throw new Error(aligned.banner);
 
   const baseline = meta.baselineBpm ?? baselineFromSamples(samples, meta.startAnchor.monoUs)?.baselineBpm;
@@ -140,6 +214,7 @@ export async function buildReport(
       gapClause: gapClause(aligned.gaps),
     });
     const coverage = coverageFromSamples(samples, meta.startAnchor.monoUs, stop.monoUs);
+    const occludedSec = Math.round(occludedUs(samples, stop.monoUs) / 1_000_000);
     const first = aligned.games[0];
     const alignedIndices = new Set(aligned.games.map((entry) => entry.game.index));
     const blundersByGame = new Map<number, number>();
@@ -157,8 +232,9 @@ export async function buildReport(
       settled: summary.settled,
       elevated: summary.elevated,
       engine: scoredMoves.engine,
-      alignmentMode: first?.alignment.mode ?? 'inferred',
+      alignmentMode: first?.alignment.mode ?? 'none',
       toleranceSec: first?.alignment.toleranceSec ?? 0,
+      ...(occludedSec > 0 ? { occludedSec } : {}),
       ...(aligned.banner ? { banner: aligned.banner } : {}),
       games: parsed.games.map((game) => ({
         index: game.index,
@@ -266,7 +342,7 @@ function gate(meta: SessionMeta, samples: readonly PulseSample[], pgns: readonly
       reason: 'low_coverage',
       measured: Math.floor(coverage.pct),
       threshold: COVERAGE_GATE_PCT,
-      remedy: LOW_COVERAGE_REMEDY,
+      remedy: refusalRemedy(meta.framing),
       trace: {
         startUs: meta.startAnchor.monoUs,
         stopUs: stopAnchor.monoUs,

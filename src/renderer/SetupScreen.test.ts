@@ -89,6 +89,19 @@ describe('SetupScreen markup', () => {
     assert.match(html, /<button[^>]*disabled[^>]*>Start sensing<\/button>/);
   });
 
+  it('shows the light meter with the measured percentage and its note', () => {
+    const html = render({ light: 0.42 });
+    assert.match(html, /role="meter"/);
+    assert.match(html, /aria-valuenow="42"/);
+    assert.match(html, /Light 42%\. Camera preview\. Nothing is recorded\./);
+  });
+
+  it('waits for the first frame before showing a light value', () => {
+    const html = render({ light: null });
+    assert.match(html, /The light meter starts with the preview\./);
+    assert.equal(html.includes('role="meter"'), false);
+  });
+
   it('enables Start only when the gate says every check passed', () => {
     const html = render({ gate: gateFor() });
     assert.equal(html.includes('disabled'), false);

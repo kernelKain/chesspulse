@@ -8,6 +8,7 @@ import {
   type FramingChecks,
 } from '../shared/framing.js';
 import type { KeyStatus, PreviewStatus, SetupGate } from '../shared/setup.js';
+import { DARK_LIGHT, DIM_LIGHT, lightNote } from '../shared/preview.js';
 import { COPY } from './copy';
 export interface SetupScreenProps {
   consent: boolean;
@@ -15,6 +16,8 @@ export interface SetupScreenProps {
   keyDetail: string;
   framing: FramingChecks;
   framingHint: string | null;
+  /** Brightness of the latest preview frame, 0–1, or null before the first frame. */
+  light?: number | null;
   preview: PreviewStatus;
   previewError: string | null;
   starting?: boolean;
@@ -37,6 +40,7 @@ export function SetupScreen({
   keyDetail,
   framing,
   framingHint,
+  light = null,
   preview,
   previewError,
   starting = false,
@@ -79,38 +83,45 @@ export function SetupScreen({
       </p>
       {alert}
 
-      <section className="setup-section" aria-labelledby="setup-consent">
+      <section className="setup-card" aria-labelledby="setup-consent">
         <h2 id="setup-consent">{COPY.setup.consentHeading}</h2>
         <p>
           {consent ? COPY.setup.consentOn : COPY.setup.consentOff}
         </p>
-        <button type="button" aria-pressed={consent} onClick={onConsent} className="btn btn-secondary">
-          {consent ? COPY.setup.revokeCamera : COPY.setup.allowCamera}
-        </button>
-        <p className="setup-key">
-          <strong>{COPY.setup.keyLabel}</strong> <span>{keyText}</span>
-        </p>
+        <div className="card-row">
+          <button type="button" aria-pressed={consent} onClick={onConsent} className="btn btn-secondary">
+            {consent ? COPY.setup.revokeCamera : COPY.setup.allowCamera}
+          </button>
+          <p className={`key-pill state-${keyStatus}`}>
+            <strong>{COPY.setup.keyLabel}</strong> <span>{keyText}</span>
+          </p>
+        </div>
       </section>
 
-      <section className="setup-section" aria-labelledby="setup-framing">
+      <section className="setup-card" aria-labelledby="setup-framing">
         <h2 id="setup-framing">{COPY.setup.framingHeading}</h2>
         <p>{COPY.setup.framingBody}</p>
-        {previewSlot}
-        {previewNote ? <p className="framing-note">{previewNote}</p> : null}
-        {preview === 'error' ? (
-          <button type="button" onClick={onRetryPreview} className="btn btn-secondary">
-            {COPY.setup.framingRetry}
-          </button>
-        ) : null}
+        <div className="framing-panel">
+          {previewSlot}
+          <div className="framing-side">
+            <LightMeter light={light} />
+            {previewNote ? <p className="framing-note">{previewNote}</p> : null}
+            {preview === 'error' ? (
+              <button type="button" onClick={onRetryPreview} className="btn btn-secondary">
+                {COPY.setup.framingRetry}
+              </button>
+            ) : null}
+            <p className="framing-hint">{hint}</p>
+          </div>
+        </div>
         <ul className="framing-checks">
-          <FramingRow label={COPY.setup.checks.face} state={framing.face} />
-          <FramingRow label={COPY.setup.checks.chest} state={framing.chest} />
-          <FramingRow label={COPY.setup.checks.light} state={framing.light} />
+          <FramingCheck label={COPY.setup.checks.face} state={framing.face} />
+          <FramingCheck label={COPY.setup.checks.chest} state={framing.chest} />
+          <FramingCheck label={COPY.setup.checks.light} state={framing.light} />
         </ul>
-        <p className="framing-hint">{hint}</p>
       </section>
 
-      <section className="setup-section" aria-labelledby="setup-time">
+      <section className="setup-card" aria-labelledby="setup-time">
         <h2 id="setup-time">{COPY.setup.timeHeading}</h2>
         <div className="choices" role="group" aria-label={COPY.setup.timeControlLabel}>
           {timeControls.map((control) => (
@@ -119,7 +130,7 @@ export function SetupScreen({
               type="button"
               aria-pressed={control === timeControl}
               onClick={() => onTimeControl(control)}
-             className="btn btn-secondary">
+              className="btn btn-secondary">
               {control}
             </button>
           ))}
@@ -160,7 +171,7 @@ export function SetupScreen({
   );
 }
 
-function FramingRow({
+function FramingCheck({
   label,
   state,
 }: {
@@ -168,9 +179,51 @@ function FramingRow({
   state: FramingChecks[keyof FramingChecks];
 }) {
   return (
-    <li>
-      <span>{label}</span>
+    <li className="framing-check" data-state={state}>
+      <span className="check-dot" aria-hidden="true" />
+      <span className="check-label">{label}</span>
       <span className={`check-state state-${state}`}>{framingStatusText(state)}</span>
     </li>
+  );
+}
+
+/**
+ * What: a bar for the brightness the main process already measures on every preview frame.
+ * Why: R6-02 asks for a visual panel; a bare percentage gives no sense of where the usable range is.
+ * Removed: the player would read "Light 21%" and still not know whether to fetch a lamp.
+ */
+function LightMeter({ light }: { light: number | null }) {
+  if (light === null || !Number.isFinite(light)) {
+    return (
+      <div className="light-meter">
+        <span className="light-meter-label">{COPY.setup.lightMeterLabel}</span>
+        <p className="light-waiting">{COPY.setup.lightWaiting}</p>
+      </div>
+    );
+  }
+  const pct = Math.round(Math.max(0, Math.min(1, light)) * 100);
+  // One sentence per band, so a screen reader hears a change of verdict, not every percentage.
+  const band = light < DARK_LIGHT ? 'dark' : light < DIM_LIGHT ? 'dim' : 'ok';
+  return (
+    <div className="light-meter">
+      <span className="light-meter-label">{COPY.setup.lightMeterLabel}</span>
+      <div
+        className="light-track"
+        role="meter"
+        aria-label={COPY.setup.lightMeterLabel}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        aria-valuetext={lightNote(light)}
+      >
+        <span className="light-fill" style={{ width: `${pct}%` }} />
+        <span className="light-tick" style={{ left: `${DARK_LIGHT * 100}%` }} aria-hidden="true" />
+        <span className="light-tick" style={{ left: `${DIM_LIGHT * 100}%` }} aria-hidden="true" />
+      </div>
+      <p className="light-note">{lightNote(light)}</p>
+      <p className="sr-only" role="status" aria-live="polite">
+        {COPY.setup.lightStatus[band]}
+      </p>
+    </div>
   );
 }

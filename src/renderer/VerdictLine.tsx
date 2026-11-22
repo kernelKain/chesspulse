@@ -15,6 +15,9 @@ export function VerdictLine({ report }: { report: Report }) {
     <section className="verdict-section" aria-label={COPY.verdict.label}>
       <p className="verdict-meta">{COPY.verdict.meta(baseline, threshold, coverage)}</p>
       <h1 className="verdict-line">{report.verdict}</h1>
+      {report.occludedSec !== undefined ? (
+        <p className="verdict-note verdict-occluded">{COPY.verdict.occluded(report.occludedSec)}</p>
+      ) : null}
       <p className="verdict-note verdict-engine">{engineCalibrationNote(report.engine)}</p>
       {engineNote ? <p className="verdict-note">{engineNote}</p> : null}
     </section>

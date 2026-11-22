@@ -29,6 +29,7 @@ const VALID: Record<InvokeChannelKey, unknown> = {
   coachGap: { betweenGames: true },
   pasteValidate: { slots: [''] },
   reportBuild: { sessionId: 'session', pgns: [] },
+  sessionMarks: { sessionId: 'session' },
   reportCancel: { sessionId: 'session' },
   insightRequest: { sessionId: 'session', provider: 'openai', text: 'What stood out?' },
   insightCancel: { sessionId: 'session' },

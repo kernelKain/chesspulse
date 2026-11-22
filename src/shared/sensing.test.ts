@@ -5,6 +5,7 @@ import {
   SAMPLE_HOLD_US,
   formatElapsedMs,
   limitWarning,
+  occludedUs,
   signalQuality,
   signalStale,
   traceSegments,
@@ -99,5 +100,24 @@ describe('session clock', () => {
     assert.equal(limitWarning(80 * 60_000), '10 minutes left before the 90-minute limit.');
     assert.equal(limitWarning(89 * 60_000 + 30_000), '1 minute left before the 90-minute limit.');
     assert.match(limitWarning(90 * 60_000) ?? '', /limit is reached/);
+  });
+});
+
+describe('occludedUs', () => {
+  it('counts a marked sample to the next sample, capped by the hold time', () => {
+    const samples: PulseSample[] = [
+      { ...sample(1_000_000), occluded: true },
+      sample(2_000_000),
+      { ...sample(4_000_000), occluded: true },
+      sample(9_000_000),
+    ];
+    // 1 s to the next sample, then 5 s capped at the 1 s hold.
+    assert.equal(occludedUs(samples, 10_000_000), 2 * SAMPLE_HOLD_US);
+  });
+
+  it('uses the session stop for a marked final sample', () => {
+    const samples: PulseSample[] = [sample(1_000_000), { ...sample(2_000_000), occluded: true }];
+    assert.equal(occludedUs(samples, 2_500_000), 500_000);
+    assert.equal(occludedUs(samples, 9_000_000), SAMPLE_HOLD_US);
   });
 });

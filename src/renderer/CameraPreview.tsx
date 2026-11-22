@@ -10,7 +10,17 @@ import { COPY } from './copy';
 const STALE_MS = 2_000;
 const LIGHT_UPDATE_MS = 500;
 
-export function CameraPreview({ active, guide = false }: { active: boolean; guide?: boolean }) {
+export function CameraPreview({
+  active,
+  guide = false,
+  lightText = true,
+  onLight,
+}: {
+  active: boolean;
+  guide?: boolean;
+  lightText?: boolean;
+  onLight?: (light: number | null) => void;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastFrameAt = useRef(0);
   const lastLightAt = useRef(0);
@@ -18,6 +28,12 @@ export function CameraPreview({ active, guide = false }: { active: boolean; guid
   const [hasFrame, setHasFrame] = useState(false);
   const [stale, setStale] = useState(false);
   const bridge = window.chesspulse;
+  // The frame callback is registered once; a ref keeps it from resubscribing on every render.
+  const lightHandler = useRef(onLight);
+  const staleRef = useRef(false);
+  useEffect(() => {
+    lightHandler.current = onLight;
+  });
 
   useEffect(() => {
     if (!bridge) return undefined;
@@ -36,22 +52,40 @@ export function CameraPreview({ active, guide = false }: { active: boolean; guid
       if (Date.now() - lastLightAt.current > LIGHT_UPDATE_MS) {
         lastLightAt.current = Date.now();
         setLight(frame.light);
+        lightHandler.current?.(frame.light);
       }
     });
   }, [bridge]);
 
   useEffect(() => {
     if (!active) {
+      staleRef.current = false;
       setStale(false);
       return undefined;
     }
     const timer = window.setInterval(() => {
-      setStale(Date.now() - lastFrameAt.current > STALE_MS);
+      const next = Date.now() - lastFrameAt.current > STALE_MS;
+      const wasStale = staleRef.current;
+      staleRef.current = next;
+      setStale(next);
+      // A stopped camera must not leave the last brightness standing in the Setup meter.
+      if (next && !wasStale) {
+        setLight(null);
+        lightHandler.current?.(null);
+      }
     }, 500);
     return () => window.clearInterval(timer);
   }, [active]);
 
   const boost = previewBoost(light);
+  // Setup shows the meter in its framing card, so the caption would repeat the same number.
+  const caption = !active
+    ? COPY.camera.closed
+    : !hasFrame || stale
+      ? COPY.camera.waiting
+      : lightText
+        ? lightNote(light)
+        : null;
 
   return (
     <figure className="camera">
@@ -72,13 +106,11 @@ export function CameraPreview({ active, guide = false }: { active: boolean; guid
           </div>
         ) : null}
       </div>
-      <figcaption className="hint" aria-live="polite" aria-atomic="true">
-        {!active
-          ? COPY.camera.closed
-          : !hasFrame || stale
-            ? COPY.camera.waiting
-            : lightNote(light)}
-      </figcaption>
+      {caption ? (
+        <figcaption className="hint" aria-live="polite" aria-atomic="true">
+          {caption}
+        </figcaption>
+      ) : null}
     </figure>
   );
 }

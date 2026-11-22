@@ -49,6 +49,8 @@ import {
   hasActiveSession,
   ingestSamples,
   isActiveSession,
+  recordFraming,
+  recordMark,
   recoverInterruptedSessions,
   setSampleSink,
   startSession,
@@ -304,7 +306,11 @@ function registerSessionHandlers(): void {
         anchor: meta.startAnchor,
         events: {
           onSamples: (samples) => ingestSamples(defaultDataRoot(), samples),
-          onValidation: publishValidation,
+          onValidation: (message) => {
+            // Counted only while a session runs, so the refusal can name its most frequent cause.
+            recordFraming(defaultDataRoot(), message.code);
+            publishValidation(message);
+          },
           onError: publishSdkError,
           onPreview: publishPreview,
           onEnded: (reason) => {
@@ -351,6 +357,17 @@ function registerSessionHandlers(): void {
   });
   registerInvokeChannel('coachGap', (_event, payload) => {
     if (!coach) throw new AppError('session_not_running');
+    // A repeated request (a reload, a double click) is not a new boundary: the coach ignores it,
+    // so no second mark may be written for it either.
+    if (coach.isBetweenGames === payload.betweenGames) return payload;
+    // "Game ended" and "Next game started" are the only game boundaries the report may use.
+    // A dropped mark must not be acknowledged: the page would count a game main never stored.
+    const recorded = recordMark(
+      defaultDataRoot(),
+      payload.betweenGames ? 'end' : 'next',
+      currentAnchor().monoUs,
+    );
+    if (!recorded) throw new AppError('mark_not_recorded');
     const message = coach.setBetweenGames(payload.betweenGames);
     if (message) publishToWindows(EVENT_CHANNELS.coachMessage, coachMessageSchema.parse(message));
     return payload;

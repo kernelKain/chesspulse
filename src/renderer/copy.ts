@@ -79,6 +79,13 @@ export const COPY = {
     framingRetry: 'Try the preview again',
     previewFailed: 'The camera preview could not start.',
     previewStarting: 'Starting the camera preview…',
+    lightMeterLabel: 'Light level',
+    lightStatus: {
+      dark: 'The room is too dark for the measurement.',
+      dim: 'The room is dim. A lamp in front of you will help.',
+      ok: 'The light is enough for the measurement.',
+    },
+    lightWaiting: 'The light meter starts with the preview.',
     timeControlLabel: 'Time control',
     checks: {
       face: 'One face in view',
@@ -154,6 +161,15 @@ export const COPY = {
     noClocks: 'No clocks',
     partialClocks: 'Partial clocks',
     clocksOk: 'Clocks OK',
+    clockOptionNote:
+      'On chess.com, turn on the option that includes clock times when you copy a game. The review uses the clock on each move.',
+    card: {
+      result: 'Result',
+      ending: 'Ending',
+      moves: 'Moves',
+      clock: 'Clock',
+      timeControl: 'Time control',
+    },
     noMoves: 'No moves',
     playersUnnamed: 'Players unnamed',
     counts: {
@@ -165,6 +181,50 @@ export const COPY = {
     unavailablePage:
       'This page is open outside the ChessPulse window. Paste validation is unavailable.',
     unexpectedResult: 'Validation returned an unexpected result.',
+  },
+  stages: {
+    label: 'Review stages',
+    heading: (index: number) => `Stage ${index}`,
+    titles: {
+      pulse: 'Pulse',
+      engine: 'Engine',
+      reading: 'Reading',
+    },
+    states: {
+      ready: 'Ready',
+      refused: 'Refused',
+      unavailable: 'Unavailable',
+      disabled: 'Disabled',
+      empty: 'Waiting',
+    },
+    reasons: {
+      low_coverage: 'Coverage was too low, so nothing could be compared.',
+      refused: 'The report was refused, so this stage did not run.',
+      blocked: 'Blocked: Stage 1 produced no trace, so there is nothing to compare against.',
+      building: 'Building the report…',
+      report_failed: 'The report could not be built. Fix the pasted games and try again.',
+      no_report: 'No report was built yet.',
+      no_key: 'Disabled: no provider key set.',
+      ai_error: 'The reading could not be written. The rest of the report is unchanged.',
+      not_written: 'Nothing is sent until you choose Write reading.',
+      writing: 'Writing from the computed report…',
+    },
+  },
+  markChoice: {
+    label: 'Game marks',
+    title: 'Which mark ended each game?',
+    intro:
+      'Your marks did not line up with the pasted games. Pick the mark that ended each game. No time is typed in.',
+    game: (index: number) => `Game ${index + 1} ended at`,
+    choose: 'Choose a mark',
+    option: (elapsed: string, kind: string) => `${elapsed} · ${kind}`,
+    kindEnd: 'Game ended',
+    kindNext: 'Next game started',
+    order: 'Each game needs a later mark than the game before it.',
+    tooFew:
+      'This session recorded fewer marks than the pasted games, so the games cannot be placed. Paste fewer games, or start a new session and mark each game end.',
+    build: 'Build the report',
+    cancel: 'Back to the games',
   },
   review: {
     building: 'Building report.',
@@ -194,6 +254,11 @@ export const COPY = {
       `${title} accuracy insufficient: ${count} scored ${count === 1 ? 'move' : 'moves'}, minimum 5 required`,
   },
   verdict: {
+    occluded: (seconds: number) => {
+      if (seconds < 60) return 'Face or motion checks excluded under a minute of readings.';
+      const minutes = Math.round(seconds / 60);
+      return `Face or motion checks excluded ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} of readings.`;
+    },
     label: 'Session verdict',
     meta: (baseline: string, threshold: string, coverage: number) =>
       `Baseline ${baseline} bpm · Elevated ≥ ${threshold} bpm · Coverage ${coverage}%`,

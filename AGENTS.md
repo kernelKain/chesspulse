@@ -208,3 +208,23 @@ What crossed over, and what did not:
 | TypeScript strict; validate boundaries; a11y as done | Its **frontend-first phase order** — conflicts with the packet's proof-first order (real session report before polish). The blueprint wins. |
 | Demo script; never publish on the user's behalf | Its **6-phase frontend-first ladder** — replaced by the blueprint's proof-first phases, where the report is built from real data before any polish. |
 | Article and demo production owned by Prompt 3 (blueprint amendment P2-A) | Its **"I will not appear on camera"** — only compatible if the demo never needs the player's face; flagged to the user rather than assumed. |
+
+---
+
+## 13. Session capture and the per-step review gate
+
+Added 2026-11-22 by the user's instruction.
+
+### 13.1 Every session is captured (Entire)
+
+- Entire records every agent session on this repository. Sessions run in OpenCode and Cursor are hooked. Other agents are not hooked unless `entire status` lists them.
+- **At the start of each session,** the agent runs `entire status` and confirms that the current agent appears under "Agents" and is enabled for this branch. If it does not appear, the agent stops and tells the user before any work. It does not start an unrecorded session.
+- The agent does not disable, bypass, or edit Entire hooks, and does not change `push_sessions` or checkpoint settings. Those are the user's decisions and are recorded in `docs/decisions.md`.
+- A session that Entire cannot record (for example, an agent without an integration) is named in the phase note as unrecorded. It is not described as captured.
+
+### 13.2 A step is done only after the user's review
+
+- Each step in a phase is reviewed by the user with CodeRabbit in the editor before the next step starts. The user asks for fixes if needed.
+- After the step's report (AGENTS §11), the agent waits. It does not begin the next step until the user says to proceed, even if the verification checks pass.
+- When the user asks for fixes, the agent applies only the fixes the user names. It re-runs the step's checks and reports again. The review cycle counts toward the repair budget in §5.
+- Commit timing does not change: commits stay per workstream, under the ASK rule in §4.

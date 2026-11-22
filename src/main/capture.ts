@@ -18,7 +18,13 @@ import type {
   SessionEndReason,
   ValidationMessage,
 } from '../shared/contracts.js';
-import { newPulseSamples, sdkErrorMessage, validationMessage } from './capture-samples.js';
+import {
+  newPulseSamples,
+  sdkErrorMessage,
+  validationMessage,
+  withOcclusion,
+  type ValidationInterval,
+} from './capture-samples.js';
 import { log } from './log.js';
 import { downscaleRgbToRgba } from '../shared/preview.js';
 
@@ -109,7 +115,9 @@ export function startCapture(input: {
       timer = undefined;
     }
     if (pending.length === 0) return;
-    const batch = pending;
+    // Occlusion is decided here, not when the reading arrived: a validation code timestamped
+    // before this reading may reach us after it, and the batch is still in hand.
+    const batch = withOcclusion(pending, validationHistory);
     pending = [];
     let run: void | Promise<void>;
     try {
@@ -187,6 +195,34 @@ export function startCapture(input: {
     return stopping;
   }
 
+  // Validation codes with the instant each started, so a reading is judged by its own timestamp
+  // even when one coalesced batch spans a change. Pruned by time, not by count, so an interval
+  // stays available while a reading that needs it can still be pending.
+  const validationHistory: ValidationInterval[] = [];
+  const HISTORY_US = 65_000_000;
+  function rememberValidation(fromUs: number, code: number): void {
+    validationHistory.push({ fromUs, code });
+    if (validationHistory.length > 512) validationHistory.shift();
+    const cutoff = fromUs - HISTORY_US;
+    // Keep everything inside the window plus the last interval that started before it, so a late
+    // reading older than the window still finds the code that was in force at its own timestamp.
+    let baseline: ValidationInterval | null = null;
+    for (const entry of validationHistory) {
+      if (entry.fromUs < cutoff) baseline = entry;
+    }
+    if (baseline) {
+      const kept = validationHistory.filter((entry) => entry.fromUs >= cutoff);
+      kept.unshift(baseline);
+      validationHistory.length = 0;
+      validationHistory.push(...kept);
+    }
+  }
+  /** A transition with no usable SDK timestamp still ends the previous interval; use now. */
+  function validationNowUs(): number {
+    const elapsedMs = Date.now() - input.anchor.epochMs;
+    return Math.max(input.anchor.monoUs, input.anchor.monoUs + Math.round(elapsedMs * 1000));
+  }
+
   sdk.on('metrics', (buffer) => {
     if (closed) return;
     let payload: unknown;
@@ -215,6 +251,9 @@ export function startCapture(input: {
     if (closed) return;
     debug('validation', code, JSON.stringify(hint));
     const message = validationMessage(code, timestampUs, hint, input.anchor);
+    // The history follows the code, not the message: a transition the schema rejects still ends
+    // the previous interval, or readings after it would stay marked as occluded.
+    rememberValidation(message ? message.ts : validationNowUs(), code);
     if (message) input.events.onValidation(message);
   });
 

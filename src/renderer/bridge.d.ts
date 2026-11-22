@@ -2,6 +2,7 @@
 // Why: the renderer has no Node, and the main process checks every argument again.
 // Removed: a screen could not tell the desktop process that consent or the session changed.
 import type {
+  SessionMarkView,
   AppState,
   CoachMessage,
   InsightRequest,
@@ -50,7 +51,8 @@ export interface ChessPulseBridge {
   cancelInsight(sessionId: string): Promise<{ cancelled: boolean }>;
   validatePgns(slots: string[]): Promise<PasteValidation>;
   onReportProgress(listener: (progress: ReportProgress) => void): () => void;
-  buildReport(sessionId: string, pgns: string[]): Promise<ReportResult>;
+  buildReport(sessionId: string, pgns: string[], gameEndMarks?: number[]): Promise<ReportResult>;
+  sessionMarks(sessionId: string): Promise<{ marks: SessionMarkView[] }>;
   cancelReport(sessionId: string): Promise<{ cancelled: boolean }>;
   copyDiagnostics(): Promise<{ copied: true }>;
   deleteSession(sessionId: string): Promise<{ deleted: boolean }>;

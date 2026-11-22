@@ -9,12 +9,14 @@ import {
   sessionEndedSchema,
   sessionListResultSchema,
   sessionOpenResultSchema,
+  sessionMarksResultSchema,
   sessionStartedSchema,
   setupStatusSchema,
   type AiProvider,
   type CoachMessage,
   type PasteValidation,
   type PulseSample,
+  type SessionMarkView,
   type SessionMeta,
   type SessionSummary,
   type ValidationMessage,
@@ -50,6 +52,7 @@ import {
   type PreviewStatus,
 } from '../shared/setup';
 import { BandBars } from './BandBars';
+import logoUrl from './assets/logo.svg?url';
 import { COPY } from './copy';
 import { CameraOpenIndicator } from './CameraOpenIndicator';
 import { CameraPreview } from './CameraPreview';
@@ -58,7 +61,11 @@ import { Explainer } from './Explainer';
 import { GameList } from './GameList';
 import { InsightPanel, type InsightViewState } from './InsightPanel';
 import { openKeyboardHelp } from './KeyboardHelp';
+import { MarkPicker } from './MarkPicker';
+import { ReviewStages } from './ReviewStages';
 import { readIpcError } from './ipc-error';
+import { markChoiceNeeded, tooFewMarks } from '../shared/marks';
+import { reviewStages } from '../shared/stages';
 import { PasteScreen } from './PasteScreen';
 import { RefusalPanel } from './RefusalPanel';
 import { ReviewProgress } from './ReviewProgress';
@@ -97,6 +104,13 @@ export function App() {
   });
   const [preview, setPreview] = useState<PreviewStatus>('idle');
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewLight, setPreviewLight] = useState<number | null>(null);
+  /** Set when the player's own marks cannot place the pasted games; the Review asks which ended each. */
+  const [markChoice, setMarkChoice] = useState<{
+    sessionId: string;
+    pgns: string[];
+    marks: SessionMarkView[];
+  } | null>(null);
   const [previewAttempt, setPreviewAttempt] = useState(0);
   const [starting, setStarting] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -272,6 +286,7 @@ export function App() {
     if (flow.screen !== 'setup') {
       setPreview('idle');
       setPreviewError(null);
+      setPreviewLight(null);
       // Forget this visit's key result, so returning to Setup does not blink the camera
       // between a stale "present" and the fresh doctor answer.
       setSetupKey({ status: 'loading', detail: COPY.setup.checkingKey });
@@ -459,7 +474,9 @@ export function App() {
     if (!heading) return;
     heading.tabIndex = -1;
     heading.focus();
-  }, [flow.screen, flow.explainerSeen, flow.review?.building]);
+    // The mark question replaces the loading view without changing screen or building, so its
+    // arrival and its removal both move focus to the heading that now stands in its place.
+  }, [flow.screen, flow.explainerSeen, flow.review?.building, Boolean(markChoice)]);
 
   const sessionId = currentSessionId(flow);
   const framing = validation ? framingFromValidation(validation.code) : UNKNOWN_FRAMING;
@@ -635,7 +652,11 @@ export function App() {
     }
   }
 
-  async function onPasteContinue(pgns: string[], _validation: PasteValidation): Promise<void> {
+  async function onPasteContinue(
+    pgns: string[],
+    _validation?: PasteValidation,
+    gameEndMarks?: number[],
+  ): Promise<void> {
     if (!sessionId) {
       dispatch({ type: 'error', message: COPY.errors.noStoredSession });
       return;
@@ -649,7 +670,23 @@ export function App() {
       return;
     }
     try {
-      const raw = await bridge.buildReport(sessionId, pgns);
+      if (!gameEndMarks) {
+        const answers = sessionMarksResultSchema.safeParse(await bridge.sessionMarks(sessionId));
+        if (seq !== reportRequestSeq.current) return;
+        if (!answers.success) {
+          dispatch({ type: 'reportFailed', message: COPY.errors.reportUnexpected, sessionId });
+          return;
+        }
+        if (tooFewMarks(answers.data.marks, pgns.length)) {
+          dispatch({ type: 'reportFailed', message: COPY.markChoice.tooFew, sessionId });
+          return;
+        }
+        if (markChoiceNeeded(answers.data.marks, pgns.length)) {
+          setMarkChoice({ sessionId, pgns, marks: answers.data.marks });
+          return;
+        }
+      }
+      const raw = await bridge.buildReport(sessionId, pgns, gameEndMarks);
       if (seq !== reportRequestSeq.current) return;
       const parsed = reportResultSchema.safeParse(raw);
       if (!parsed.success) {
@@ -712,6 +749,8 @@ export function App() {
         dispatch({ type: 'error', message: COPY.errors.unexpectedSession });
         return;
       }
+      // A pending mark question belongs to the session it was asked for, never to this one.
+      setMarkChoice(null);
       // A build from the previous review must not land on the newly opened session.
       if (flow.review?.building) {
         void bridge.cancelReport(flow.review.sessionId).catch(() => undefined);
@@ -772,9 +811,11 @@ export function App() {
   if (flow.screen === 'home' && !flow.explainerSeen) {
     return (
       <main>
-        <p className="label">{COPY.common.chessPulse}</p>
+        <BrandLine />
         {flow.session ? <p className="indicator">{COPY.camera.sensing}</p> : null}
-        <Explainer showProgress />
+        <div className="explainer-panel">
+          <Explainer showProgress />
+        </div>
         <StatusRegion status={status} />
         <div className="actions">
           <button type="button" className="btn btn-primary" onClick={() => dismissExplainer(true)}>
@@ -823,10 +864,15 @@ export function App() {
   if (flow.screen === 'home') {
     return (
       <main>
-        <p className="label">{COPY.common.chessPulse}</p>
-        <h1>{COPY.home.heading}</h1>
+        <header className="home-hero">
+          <div className="home-hero-text">
+            <BrandLine />
+            <h1>{COPY.home.heading}</h1>
+            <p>{COPY.home.intro}</p>
+          </div>
+          <BoardTile />
+        </header>
         <StatusRegion status={status} />
-        <p>{COPY.home.intro}</p>
         <div className="actions">
           <button
             type="button"
@@ -917,7 +963,7 @@ export function App() {
   if (flow.screen === 'setup') {
     const previewSlot =
       flow.consent && setupKey.status === 'present' && preview === 'running' ? (
-        <CameraPreview active guide />
+        <CameraPreview active guide lightText={false} onLight={setPreviewLight} />
       ) : null;
     return (
       <>
@@ -932,6 +978,7 @@ export function App() {
             keyDetail={setupKey.detail}
             framing={framing}
             framingHint={validation && validation.code !== 0 ? validation.hint : null}
+            light={previewLight}
             preview={preview}
             previewError={previewError}
             starting={starting}
@@ -972,8 +1019,71 @@ export function App() {
     );
   }
 
+  if (flow.screen === 'review' && markChoice && markChoice.sessionId === sessionId) {
+    return (
+      <main>
+        <MarkPicker
+          gameCount={markChoice.pgns.length}
+          marks={markChoice.marks}
+          onSubmit={(ends) => {
+            const chosen = markChoice;
+            setMarkChoice(null);
+            // The picker was opened for one session; its PGNs and marks must never reach another.
+            if (chosen.sessionId !== sessionId) return;
+            void onPasteContinue(chosen.pgns, undefined, ends);
+          }}
+          onCancel={() => {
+            setMarkChoice(null);
+            dispatch({ type: 'openGames' });
+          }}
+        />
+      </main>
+    );
+  }
+
   if (flow.screen === 'review') {
     const review = flow.review;
+    const result = review?.result ?? null;
+    const stages = reviewStages({
+      result,
+      building: Boolean(review?.building),
+      failed: Boolean(review?.error),
+      reading: insightState.status,
+      // The service's own reason distinguishes a missing model from a missing key.
+      readingDetail:
+        insightState.status === 'disabled'
+          ? insightState.reason
+          : insightState.status === 'error'
+            ? insightState.message
+            : undefined,
+    });
+    const bodies = result?.ok
+      ? {
+          pulse: <Timeline key={`pulse-${result.sessionId}`} result={result} />,
+          engine: (
+            <>
+              <BandBars report={result} />
+              <GameList report={result} />
+            </>
+          ),
+          reading: (
+            <InsightPanel
+              state={insightState}
+              onRequest={(provider, text) => void onInsightRequest(provider, text)}
+              onCancel={() => void onInsightCancel()}
+            />
+          ),
+        }
+      : result
+        ? {
+            pulse: (
+              <>
+                <RefusalPanel refusal={result} />
+                <Timeline key={`refusal-${sessionId ?? ''}`} result={result} />
+              </>
+            ),
+          }
+        : {};
     return (
       <main>
         <p className="label">{COPY.common.screenLabels.report}</p>
@@ -994,27 +1104,12 @@ export function App() {
               <p>{review.error}</p>
             </div>
           </>
-        ) : review?.result?.ok ? (
-          <div className="report-layout">
-            <VerdictLine report={review.result} />
-            <Timeline key={`ok-${review.result.sessionId}`} result={review.result} />
-            <BandBars report={review.result} />
-            <GameList report={review.result} />
-            <InsightPanel
-              state={insightState}
-              onRequest={(provider, text) => void onInsightRequest(provider, text)}
-              onCancel={() => void onInsightCancel()}
-            />
-          </div>
+        ) : result?.ok ? (
+          <VerdictLine report={result} />
         ) : (
-          <>
-            <h1>{review?.result ? COPY.review.withheld : COPY.review.timelineOnly}</h1>
-            {review?.result && !review.result.ok ? (
-              <RefusalPanel refusal={review.result} />
-            ) : null}
-            <Timeline key={`refusal-${sessionId ?? ''}`} result={review?.result ?? null} />
-          </>
+          <h1>{result ? COPY.review.withheld : COPY.review.timelineOnly}</h1>
         )}
+        <ReviewStages stages={stages} bodies={bodies} />
         <div className="actions">
           <button type="button" onClick={() => dispatch({ type: 'openGames' })} className="btn btn-secondary">
             {COPY.review.editGames}
@@ -1089,6 +1184,34 @@ function reportErrorCopy(kind: 'stale' | 'newer' | 'invalid'): string {
   if (kind === 'stale') return appErrorInfo('report_stale').message;
   if (kind === 'newer') return appErrorInfo('report_newer').message;
   return COPY.errors.reportInvalid;
+}
+
+function BrandLine() {
+  // What: the mark and the product name on the two first screens.
+  // Why: the image is decorative, so it carries an empty alt and the word stays real text.
+  // Removed: the first screen would be a word with no mark, which is what R6-01 asked to change.
+  return (
+    <p className="label brand-line">
+      <img className="brand-mark" src={logoUrl} alt="" draggable={false} />
+      <span>{COPY.common.chessPulse}</span>
+    </p>
+  );
+}
+
+function BoardTile() {
+  // What: one decorative board square, tilted, with the pulse line across it.
+  // Why: R6-03 asks for 3D where it helps; this is the only 3D element and it is on Home only.
+  // Removed: the first screen loses the chess half of the brand. The report keeps a flat chart.
+  return (
+    <div className="board-tile" aria-hidden="true">
+      <div className="board-tile-face">
+        <svg className="board-tile-pulse" viewBox="0 0 120 120" preserveAspectRatio="none" focusable="false">
+          <polyline className="tile-pulse-under" points="6,66 34,66 42,42 50,92 58,54 64,66 114,66" />
+          <polyline className="tile-pulse" points="6,66 34,66 42,42 50,92 58,54 64,66 114,66" />
+        </svg>
+      </div>
+    </div>
+  );
 }
 
 function StatusRegion({ status }: { status: StatusLine }) {

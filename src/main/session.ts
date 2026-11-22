@@ -2,7 +2,15 @@
 // Why: bands later compare against the player's own first minute, and a thin trace must count as thin.
 // Removed: the header would have no baseline, and a gap would be treated as a normal pulse.
 import path from 'node:path';
-import { sessionStartRequestSchema, type PulseSample, type SessionAnchor, type SessionMeta } from '../shared/contracts.js';
+import { FRAMING_CAUSES, framingCause } from '../shared/framing.js';
+import {
+  sessionStartRequestSchema,
+  type PulseSample,
+  type SessionAnchor,
+  type FramingCounts,
+  type SessionMark,
+  type SessionMeta,
+} from '../shared/contracts.js';
 import {
   BASELINE_WINDOW_US,
   CONFIDENCE_FLOOR,
@@ -51,6 +59,10 @@ interface ActiveSession {
   finishStop?: Promise<SessionMeta>;
   limitScheduler: SessionLimitScheduler;
   limitTimer?: unknown;
+  /** Player marks, held in memory and written with the stop, like the stop anchor. */
+  marks: SessionMark[];
+  /** Framing causes seen during sensing, counted for the refusal's remedy. */
+  framing: { total: number; counts: Record<string, number> };
 }
 
 const active = new Map<string, ActiveSession>();
@@ -126,7 +138,14 @@ export async function startSession(
       startAnchor: anchor,
     });
     if (reservation.state === 'stopping' && reservation.stopRequest) {
-      const saved = await finalize(root, meta, reservation.stopRequest.anchor, reservation.stopRequest.reason);
+      const saved = await finalize(
+        root,
+        meta,
+        reservation.stopRequest.anchor,
+        reservation.stopRequest.reason,
+        reservation.marks,
+        reservation.framing.total > 0 ? reservation.framing : undefined,
+      );
       if (active.get(key) === reservation) active.delete(key);
       reservation.resolveStopped(saved);
       stoppedEarly = true;
@@ -164,6 +183,32 @@ export function setSampleSink(
   else sampleSinks.delete(key);
 }
 
+/**
+ * What: counts one framing validation message toward the refusal's cause.
+ * Why: R6-08 needs the most frequent cause and its share, and only the session can accumulate it.
+ * Removed: a low-coverage refusal could not say what to change.
+ */
+export function recordFraming(root: string, code: number): void {
+  const current = active.get(path.resolve(root));
+  if (!current || current.state !== 'running') return;
+  current.framing.total += 1;
+  const cause = framingCause(code);
+  if (cause) current.framing.counts[cause] = (current.framing.counts[cause] ?? 0) + 1;
+}
+
+/**
+ * What: records one player mark at a monotonic time, before the stop anchor closes the session.
+ * Why: R6-06 makes these marks the only source of game boundaries; a count alone cannot place a game.
+ * Removed: the transcript would know how many games were marked but not when, so nothing could be placed.
+ */
+export function recordMark(root: string, kind: SessionMark['kind'], atUs: number): boolean {
+  const current = active.get(path.resolve(root));
+  if (!current || current.state !== 'running') return false;
+  if (current.marks.length >= 80) return false;
+  current.marks.push({ atUs, kind });
+  return true;
+}
+
 export async function stopSession(
   root: string,
   stopAnchor: SessionAnchor,
@@ -197,7 +242,14 @@ function beginStop(
     try {
       await current.ingest;
       const meta = await readMeta(root, sessionId);
-      const saved = await finalize(root, meta, stopAnchor, reason);
+      const saved = await finalize(
+        root,
+        meta,
+        stopAnchor,
+        reason,
+        current.marks,
+        current.framing.total > 0 ? current.framing : undefined,
+      );
       clearLimitTimer(current);
       if (active.get(key) === current) active.delete(key);
       return saved;
@@ -252,6 +304,8 @@ async function finalize(
   meta: SessionMeta,
   stopAnchor: SessionAnchor,
   reason: NonNullable<SessionMeta['stopReason']>,
+  marks: readonly SessionMark[] = [],
+  framing?: { total: number; counts: Record<string, number> },
 ): Promise<SessionMeta> {
   const samples = await readSamples(root, meta.id);
   const baseline = baselineFromSamples(samples, meta.startAnchor.monoUs);
@@ -262,8 +316,20 @@ async function finalize(
     stopAnchor,
     stopReason: reason,
     coverage,
+    ...(marks.length > 0 ? { marks: [...marks] } : {}),
+    ...(framing ? { framing: normalizedFraming(framing) } : {}),
   });
   return readMeta(root, meta.id);
+}
+
+function normalizedFraming(framing: { total: number; counts: Record<string, number> }): FramingCounts {
+  const counts: Record<string, number> = {};
+  // Only the named causes are stored; the contract rejects an unknown key, so filter here.
+  for (const cause of FRAMING_CAUSES) {
+    const value = framing.counts[cause];
+    if (value !== undefined && value > 0) counts[cause] = value;
+  }
+  return { total: framing.total, counts };
 }
 
 export function activeTimeControl(root: string): string | undefined {
@@ -324,6 +390,8 @@ function reserve(
     resolveStopped,
     rejectStopped,
     limitScheduler,
+    marks: [],
+    framing: { total: 0, counts: {} },
   };
 }
 
@@ -360,6 +428,8 @@ function snapshotSamples(samples: readonly PulseSample[]): PulseSample[] {
     bpm: sample.bpm,
     confidence: sample.confidence,
     stable: sample.stable,
+    // Dropping this flag would count an occluded reading as measured time when it is stored.
+    ...(sample.occluded === true ? { occluded: true } : {}),
   }));
 }
 

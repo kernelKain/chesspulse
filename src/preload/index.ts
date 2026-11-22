@@ -495,16 +495,38 @@ contextBridge.exposeInMainWorld('chesspulse', {
       return value;
     });
   },
-  buildReport(sessionId: unknown, pgns: unknown): Promise<unknown> {
+  buildReport(sessionId: unknown, pgns: unknown, gameEndMarks?: unknown): Promise<unknown> {
     if (typeof sessionId !== 'string' || sessionId.length === 0) {
       return rejectInvalidRequest();
     }
     if (!Array.isArray(pgns) || !pgns.every((item) => typeof item === 'string')) {
       return rejectInvalidRequest();
     }
-    return invoke(INVOKE_CHANNELS.reportBuild.name, { sessionId, pgns }).then((value: unknown) => {
+    if (
+      gameEndMarks !== undefined &&
+      (!Array.isArray(gameEndMarks) ||
+        !gameEndMarks.every((item: unknown) => typeof item === 'number' && Number.isFinite(item)))
+    ) {
+      return rejectInvalidRequest();
+    }
+    const payload =
+      gameEndMarks === undefined
+        ? { sessionId, pgns }
+        : { sessionId, pgns, gameEndMarks };
+    return invoke(INVOKE_CHANNELS.reportBuild.name, payload).then((value: unknown) => {
       if (typeof value !== 'object' || value === null || !('ok' in value) || typeof value.ok !== 'boolean') {
         throw new Error('The window returned an unexpected report.');
+      }
+      return value;
+    });
+  },
+  sessionMarks(sessionId: unknown): Promise<unknown> {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      return rejectInvalidRequest();
+    }
+    return invoke(INVOKE_CHANNELS.sessionMarks.name, { sessionId }).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('marks' in value) || !Array.isArray(value.marks)) {
+        throw new Error('The window returned unexpected session marks.');
       }
       return value;
     });
