@@ -5,15 +5,30 @@ import { dialog } from 'electron';
 import {
   reportExportResultSchema,
   sessionDeleteResultSchema,
+  sessionListResultSchema,
+  sessionOpenResultSchema,
 } from '../shared/contracts.js';
-import { toAppError } from '../shared/errors.js';
+import { AppError, toAppError } from '../shared/errors.js';
 import { registerInvokeChannel } from './ipc-registry.js';
 import { reportAppError } from './report-errors.js';
 import { exportResult, writeReportExport } from './report-export.js';
+import { activeSessionState } from './session.js';
+import { listSessionSummaries, openStoredSession } from './session-library.js';
 import { defaultDataRoot, deleteSession, readReport } from './store.js';
 
 export function registerLibraryHandler(dataRoot: () => string = defaultDataRoot): void {
+  registerInvokeChannel('sessionsList', async () =>
+    sessionListResultSchema.parse(await listSessionSummaries(dataRoot())),
+  );
+
+  registerInvokeChannel('sessionOpen', async (_event, payload) =>
+    sessionOpenResultSchema.parse(await openStoredSession(dataRoot(), payload.sessionId)),
+  );
+
   registerInvokeChannel('sessionDelete', async (_event, payload) => {
+    if (activeSessionState(dataRoot()).sessionId === payload.sessionId) {
+      throw new AppError('session_busy');
+    }
     const deleted = await deleteSession(dataRoot(), payload.sessionId);
     return sessionDeleteResultSchema.parse({ deleted });
   });

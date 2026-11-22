@@ -9,6 +9,7 @@ import type { PulseSample } from '../shared/contracts.js';
 import { createSession, readMeta, readSamples } from './store.js';
 import {
   BASELINE_WINDOW_US,
+  activeSessionState,
   baselineFromSamples,
   coverageFromSamples,
   activeTimeControl,
@@ -120,6 +121,23 @@ describe('session controller', () => {
     assert.equal(isActiveSession(root, '01OTHER0000000000000000000'), false);
     await stopSession(root, { monoUs: 1_000, epochMs: anchor.epochMs + 1 }, 'user');
     assert.equal(isActiveSession(root, started.id), false);
+  });
+
+  it('reports the running session and its start time to a reloaded page', async () => {
+    const root = useRoot();
+    assert.deepEqual(activeSessionState(root), {
+      active: false,
+      sessionId: null,
+      startedAtEpochMs: null,
+    });
+    const started = await startSession(root, anchor, '3+2');
+    assert.deepEqual(activeSessionState(root), {
+      active: true,
+      sessionId: started.id,
+      startedAtEpochMs: anchor.epochMs,
+    });
+    await stopSession(root, { monoUs: 1_000, epochMs: anchor.epochMs + 1 }, 'user');
+    assert.equal(activeSessionState(root).active, false);
   });
 
   it('leaves the 90-minute boundary to the timer instead of rejecting a sample batch', async () => {

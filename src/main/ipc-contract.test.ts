@@ -19,6 +19,10 @@ const event = {} as IpcMainInvokeEvent;
 const keys = Object.keys(INVOKE_CHANNELS) as InvokeChannelKey[];
 
 const VALID: Record<InvokeChannelKey, unknown> = {
+  appStateGet: {},
+  setupStatus: {},
+  previewStart: {},
+  previewStop: {},
   consentSet: { granted: true },
   sessionStart: { timeControl: '3+2' },
   sessionStop: {},
@@ -30,6 +34,8 @@ const VALID: Record<InvokeChannelKey, unknown> = {
   insightCancel: { sessionId: 'session' },
   diagnosticsCopy: {},
   sessionDelete: { sessionId: 'session' },
+  sessionsList: {},
+  sessionOpen: { sessionId: 'session' },
   reportExport: { sessionId: 'session' },
 };
 

@@ -270,6 +270,17 @@ export async function readReport(root: string, sessionId: string): Promise<Repor
   return parsed.data;
 }
 
+/** True when a report file is present. The list does not parse it; opening does. */
+export async function hasSavedReport(root: string, sessionId: string): Promise<boolean> {
+  try {
+    await stat(path.join(sessionDir(root, sessionId), 'report.json'));
+    return true;
+  } catch (error) {
+    if (isEnoent(error)) return false;
+    throw error;
+  }
+}
+
 export async function saveGames(root: string, sessionId: string, pgns: readonly string[]): Promise<void> {
   const parsed = reportBuildRequestSchema.safeParse({ sessionId, pgns });
   if (!parsed.success) throw new Error('The PGN batch is not valid.');

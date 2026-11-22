@@ -8,6 +8,10 @@ import {
   type SessionAnchor,
   type ValidationMessage,
 } from '../shared/contracts.js';
+import { VALIDATION } from '../shared/framing.js';
+
+/** Kept exported here for the existing capture tests; the codes themselves live in shared framing. */
+export { VALIDATION };
 
 /**
  * The SDK's integer codes, copied here so this module loads without the native binding.
@@ -29,24 +33,6 @@ export const SDK_ERROR = {
   sustainedLowFrameRate: 14,
 } as const;
 
-export const VALIDATION = {
-  ok: 0,
-  noFaceFound: 1,
-  multipleFacesFound: 2,
-  faceNotCentered: 3,
-  faceSizeOutOfRange: 4,
-  tooDark: 5,
-  tooBright: 6,
-  chestNotVisible: 7,
-  cameraTuning: 10,
-  frameRateTooLow: 11,
-  excessiveMotion: 12,
-  faceTooClose: 13,
-  faceTooFar: 14,
-  faceTooHigh: 15,
-  faceTooLow: 16,
-  faceNotForward: 17,
-} as const;
 
 /** A pulse outside this range is a decoding mistake, not a reading. Kept narrow on purpose. */
 const MIN_PULSE_BPM = 20;

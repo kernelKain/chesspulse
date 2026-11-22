@@ -1,0 +1,43 @@
+// What: a test-only TypeScript project for renderer markup checks.
+// Why: H-19 asserts heading order and list semantics, and `react-dom/server` is already a dependency.
+// Removed: those checks would stay code-reviewed until S57 brings a DOM runner.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "jsx": "react-jsx",
+    "strict": true,
+    "outDir": "dist-renderer-test",
+    "rootDir": "src",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "useUnknownInCatchVariables": true
+  },
+  "include": [
+    "src/renderer/Explainer.tsx",
+    "src/renderer/Explainer.test.ts",
+    "src/renderer/SetupScreen.tsx",
+    "src/renderer/SetupScreen.test.ts",
+    "src/renderer/SensingControls.tsx",
+    "src/renderer/SensingControls.test.ts",
+    "src/renderer/CameraOpenIndicator.tsx",
+    "src/renderer/CameraOpenIndicator.test.ts",
+    "src/renderer/SessionList.tsx",
+    "src/renderer/SessionList.test.ts",
+    "src/renderer/PasteValidation.tsx",
+    "src/renderer/PasteValidation.test.ts",
+    "src/renderer/RefusalPanel.tsx",
+    "src/renderer/RefusalPanel.test.ts",
+    "src/renderer/ReviewProgress.tsx",
+    "src/renderer/ReviewProgress.test.ts",
+    "src/renderer/VerdictLine.tsx",
+    "src/renderer/VerdictLine.test.ts",
+    "src/shared/onboarding.ts"
+  ]
+}

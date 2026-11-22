@@ -114,6 +114,23 @@ export function engineCalibrationNote(engine: Report['engine']): string {
   return `Engine depth ${engine.depth}. Speed is checked on fixtures; move accuracy is not calibrated against your games.`;
 }
 
+export function refusalHeading(reason: Refusal['reason']): string {
+  switch (reason) {
+    case 'low_coverage':
+      return 'Coverage was too low for a review.';
+    case 'order':
+      return 'The games are out of order.';
+    case 'no_games':
+      return 'No games were included in the report.';
+    case 'illegal_move':
+      return 'A move in the pasted games is illegal.';
+    case 'cancelled':
+      return 'The report build was cancelled.';
+    case 'no_trace':
+      return 'The session has no pulse trace.';
+  }
+}
+
 export function engineFailureNote(engine: Report['engine']): string | null {
   if (engine.failed === 0) return null;
   const positions = (count: number): string => `${count} ${count === 1 ? 'position' : 'positions'}`;

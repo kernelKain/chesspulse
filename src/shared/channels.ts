@@ -13,6 +13,7 @@ import {
   reportCancelRequestSchema,
   reportExportRequestSchema,
   sessionDeleteRequestSchema,
+  sessionOpenRequestSchema,
   sessionStartRequestSchema,
   sessionStopRequestSchema,
 } from './contracts.js';
@@ -28,6 +29,30 @@ export interface InvokeChannelEntry {
 }
 
 export const INVOKE_CHANNELS = {
+  appStateGet: {
+    name: 'cp:app:state',
+    request: emptyRequestSchema,
+    fallback: 'internal',
+    absentAsEmpty: true,
+  },
+  setupStatus: {
+    name: 'cp:setup:status',
+    request: emptyRequestSchema,
+    fallback: 'internal',
+    absentAsEmpty: true,
+  },
+  previewStart: {
+    name: 'cp:preview:start',
+    request: emptyRequestSchema,
+    fallback: 'camera_unavailable',
+    absentAsEmpty: true,
+  },
+  previewStop: {
+    name: 'cp:preview:stop',
+    request: emptyRequestSchema,
+    fallback: 'internal',
+    absentAsEmpty: true,
+  },
   consentSet: {
     name: 'cp:consent:set',
     request: consentRequestSchema,
@@ -94,6 +119,18 @@ export const INVOKE_CHANNELS = {
     fallback: 'internal',
     absentAsEmpty: false,
   },
+  sessionsList: {
+    name: 'cp:sessions:list',
+    request: emptyRequestSchema,
+    fallback: 'internal',
+    absentAsEmpty: true,
+  },
+  sessionOpen: {
+    name: 'cp:session:open',
+    request: sessionOpenRequestSchema,
+    fallback: 'internal',
+    absentAsEmpty: false,
+  },
   reportExport: {
     name: 'cp:report:export',
     request: reportExportRequestSchema,
@@ -109,6 +146,7 @@ export const EVENT_CHANNELS = {
   sdkError: 'cp:sdk:error',
   preview: 'cp:preview',
   coachMessage: 'cp:coach:message',
+  sessionStarted: 'cp:session:started',
   sessionEnded: 'cp:session:ended',
   reportProgress: 'cp:report:progress',
 } as const;

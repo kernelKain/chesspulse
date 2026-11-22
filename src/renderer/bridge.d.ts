@@ -2,17 +2,24 @@
 // Why: the renderer has no Node, and the main process checks every argument again.
 // Removed: a screen could not tell the desktop process that consent or the session changed.
 import type {
+  AppState,
   CoachMessage,
   InsightRequest,
   InsightResult,
   PasteValidation,
   PreviewFrame,
+  PreviewStartResult,
+  PreviewStopResult,
   PulseSample,
   ReportProgress,
   ReportResult,
   SdkError,
   SessionEnded,
+  SessionListResult,
   SessionMeta,
+  SessionOpenResult,
+  SessionStarted,
+  SetupStatus,
   ValidationMessage,
 } from '../shared/contracts';
 
@@ -22,8 +29,14 @@ export interface ConsentState {
 }
 
 export interface ChessPulseBridge {
+  getAppState(): Promise<AppState>;
+  getSetupStatus(): Promise<SetupStatus>;
+  listSessions(): Promise<SessionListResult>;
+  openSession(sessionId: string): Promise<SessionOpenResult>;
+  startPreview(): Promise<PreviewStartResult>;
+  stopPreview(): Promise<PreviewStopResult>;
   setConsent(granted: boolean): Promise<ConsentState>;
-  startSession(timeControl: string): Promise<{ sessionId: string }>;
+  startSession(timeControl: string): Promise<{ sessionId: string; startedAtEpochMs: number }>;
   stopSession(): Promise<SessionMeta>;
   onSamples(listener: (samples: PulseSample[]) => void): () => void;
   onValidation(listener: (message: ValidationMessage) => void): () => void;
@@ -32,6 +45,7 @@ export interface ChessPulseBridge {
   setBetweenGames(active: boolean): Promise<{ betweenGames: boolean }>;
   onCoachMessage(listener: (message: CoachMessage) => void): () => void;
   onSessionEnded(listener: (event: SessionEnded) => void): () => void;
+  onSessionStarted(listener: (event: SessionStarted) => void): () => void;
   requestInsight(request: InsightRequest): Promise<InsightResult>;
   cancelInsight(sessionId: string): Promise<{ cancelled: boolean }>;
   validatePgns(slots: string[]): Promise<PasteValidation>;

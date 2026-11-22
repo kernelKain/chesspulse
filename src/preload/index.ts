@@ -29,6 +29,49 @@ interface ConsentState {
   cameraAllowed: boolean;
 }
 
+interface AppSessionState {
+  active: boolean;
+  sessionId: string | null;
+  startedAtEpochMs: number | null;
+  betweenGames: boolean;
+  markedGames: number;
+}
+
+interface AppState {
+  consent: ConsentState;
+  session: AppSessionState;
+}
+
+interface DoctorCheck {
+  id: 'node' | 'env' | 'sensing-key' | 'camera' | 'engine' | 'data-dir' | 'ai';
+  label: string;
+  status: 'pass' | 'warn' | 'fail' | 'skip';
+  detail: string;
+}
+
+interface SetupStatus {
+  checks: DoctorCheck[];
+}
+
+interface SessionSummary {
+  id: string;
+  startedAtEpochMs: number;
+  durationMs: number | null;
+  coveragePct: number | null;
+  hasReport: boolean;
+}
+
+interface SessionListResult {
+  sessions: SessionSummary[];
+  unreadable: number;
+}
+
+interface SessionOpenResult {
+  report: unknown | null;
+  reportError: 'stale' | 'newer' | 'invalid' | null;
+  games: string[];
+}
+
 interface ValidationMessage {
   code: number;
   ts: number;
@@ -61,6 +104,11 @@ interface SessionEnded {
   message: string;
 }
 
+interface SessionStarted {
+  sessionId: string;
+  startedAtEpochMs: number;
+}
+
 interface ReportProgress {
   sessionId: string;
   scored: number;
@@ -78,22 +126,197 @@ function readConsentState(value: unknown): ConsentState {
   return { granted: record.granted, cameraAllowed: record.cameraAllowed };
 }
 
+function readAppState(value: unknown): AppState {  if (typeof value !== 'object' || value === null || !('consent' in value) || !('session' in value)) {
+    throw new Error('The window returned an unexpected app state.');
+  }
+  const consent = readConsentState(value.consent);
+  const raw = value.session;
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error('The window returned an unexpected app state.');
+  }
+  const session = raw as {
+    active?: unknown;
+    sessionId?: unknown;
+    startedAtEpochMs?: unknown;
+    betweenGames?: unknown;
+    markedGames?: unknown;
+  };
+  if (
+    typeof session.active !== 'boolean' ||
+    (session.sessionId !== null && typeof session.sessionId !== 'string') ||
+    (session.startedAtEpochMs !== null && typeof session.startedAtEpochMs !== 'number') ||
+    typeof session.betweenGames !== 'boolean' ||
+    typeof session.markedGames !== 'number' ||
+    !Number.isInteger(session.markedGames) ||
+    session.markedGames < 0
+  ) {
+    throw new Error('The window returned an unexpected app state.');
+  }
+  if (
+    session.active
+      ? session.sessionId === null || session.startedAtEpochMs === null
+      : session.sessionId !== null || session.startedAtEpochMs !== null
+  ) {
+    throw new Error('The window returned an unexpected app state.');
+  }
+  return {
+    consent,
+    session: {
+      active: session.active,
+      sessionId: session.sessionId,
+      startedAtEpochMs: session.startedAtEpochMs,
+      betweenGames: session.betweenGames,
+      markedGames: session.markedGames,
+    },
+  };
+}
+
+function readSessionList(value: unknown): SessionListResult {
+  if (typeof value !== 'object' || value === null || !('sessions' in value) || !Array.isArray(value.sessions)) {
+    throw new Error('The window returned an unexpected session list.');
+  }
+  const record = value as { sessions: unknown[]; unreadable?: unknown };
+  const sessions = record.sessions.map((raw) => {
+    if (typeof raw !== 'object' || raw === null) {
+      throw new Error('The window returned an unexpected session list.');
+    }
+    const session = raw as {
+      id?: unknown;
+      startedAtEpochMs?: unknown;
+      durationMs?: unknown;
+      coveragePct?: unknown;
+      hasReport?: unknown;
+    };
+    if (
+      typeof session.id !== 'string' ||
+      typeof session.startedAtEpochMs !== 'number' ||
+      (session.durationMs !== null && typeof session.durationMs !== 'number') ||
+      (session.coveragePct !== null && typeof session.coveragePct !== 'number') ||
+      typeof session.hasReport !== 'boolean'
+    ) {
+      throw new Error('The window returned an unexpected session list.');
+    }
+    return {
+      id: session.id,
+      startedAtEpochMs: session.startedAtEpochMs,
+      durationMs: session.durationMs,
+      coveragePct: session.coveragePct,
+      hasReport: session.hasReport,
+    };
+  });
+  if (typeof record.unreadable !== 'number' || !Number.isInteger(record.unreadable) || record.unreadable < 0) {
+    throw new Error('The window returned an unexpected session list.');
+  }
+  return { sessions, unreadable: record.unreadable };
+}
+
+function readSessionOpen(value: unknown): SessionOpenResult {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('The window returned an unexpected saved session.');
+  }
+  const record = value as { report?: unknown; reportError?: unknown; games?: unknown };
+  if (
+    (record.report !== null && (typeof record.report !== 'object' || record.report === null)) ||
+    (record.reportError !== null &&
+      record.reportError !== 'stale' &&
+      record.reportError !== 'newer' &&
+      record.reportError !== 'invalid') ||
+    !Array.isArray(record.games) ||
+    !record.games.every((game) => typeof game === 'string')
+  ) {
+    throw new Error('The window returned an unexpected saved session.');
+  }
+  return {
+    report: record.report,
+    reportError: record.reportError,
+    games: record.games,
+  };
+}
+
+function readSetupStatus(value: unknown): SetupStatus {
+  if (typeof value !== 'object' || value === null || !('checks' in value) || !Array.isArray(value.checks)) {
+    throw new Error('The window returned an unexpected readiness result.');
+  }
+  const checks = value.checks.map((raw) => {
+    if (typeof raw !== 'object' || raw === null) {
+      throw new Error('The window returned an unexpected readiness result.');
+    }
+    const check = raw as { id?: unknown; label?: unknown; status?: unknown; detail?: unknown };
+    if (
+      typeof check.id !== 'string' ||
+      typeof check.label !== 'string' ||
+      typeof check.detail !== 'string' ||
+      (check.status !== 'pass' &&
+        check.status !== 'warn' &&
+        check.status !== 'fail' &&
+        check.status !== 'skip')
+    ) {
+      throw new Error('The window returned an unexpected readiness result.');
+    }
+    return {
+      id: check.id as DoctorCheck['id'],
+      label: check.label,
+      status: check.status as DoctorCheck['status'],
+      detail: check.detail,
+    };
+  });
+  return { checks };
+}
+
 contextBridge.exposeInMainWorld('chesspulse', {
+  getAppState(): Promise<AppState> {
+    return invoke(INVOKE_CHANNELS.appStateGet.name, {}).then(readAppState);
+  },
+  getSetupStatus(): Promise<SetupStatus> {
+    return invoke(INVOKE_CHANNELS.setupStatus.name, {}).then(readSetupStatus);
+  },
+  listSessions(): Promise<SessionListResult> {
+    return invoke(INVOKE_CHANNELS.sessionsList.name, {}).then(readSessionList);
+  },
+  openSession(sessionId: unknown): Promise<SessionOpenResult> {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      return rejectInvalidRequest();
+    }
+    return invoke(INVOKE_CHANNELS.sessionOpen.name, { sessionId }).then(readSessionOpen);
+  },
+  startPreview(): Promise<{ started: boolean }> {
+    return invoke(INVOKE_CHANNELS.previewStart.name, {}).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('started' in value) || value.started !== true) {
+        throw new Error('The window returned an unexpected preview result.');
+      }
+      return { started: true };
+    });
+  },
+  stopPreview(): Promise<{ stopped: boolean }> {
+    return invoke(INVOKE_CHANNELS.previewStop.name, {}).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('stopped' in value) || typeof value.stopped !== 'boolean') {
+        throw new Error('The window returned an unexpected preview result.');
+      }
+      return { stopped: value.stopped };
+    });
+  },
   setConsent(granted: unknown): Promise<ConsentState> {
     if (typeof granted !== 'boolean') {
       return rejectInvalidRequest();
     }
     return invoke(INVOKE_CHANNELS.consentSet.name, { granted }).then(readConsentState);
   },
-  startSession(timeControl: unknown): Promise<{ sessionId: string }> {
+  startSession(timeControl: unknown): Promise<{ sessionId: string; startedAtEpochMs: number }> {
     if (typeof timeControl !== 'string') {
       return rejectInvalidRequest();
     }
     return invoke(INVOKE_CHANNELS.sessionStart.name, { timeControl }).then((value: unknown) => {
-      if (typeof value !== 'object' || value === null || !('sessionId' in value) || typeof value.sessionId !== 'string') {
+      if (
+        typeof value !== 'object' ||
+        value === null ||
+        !('sessionId' in value) ||
+        typeof value.sessionId !== 'string' ||
+        !('startedAtEpochMs' in value) ||
+        typeof value.startedAtEpochMs !== 'number'
+      ) {
         throw new Error('The window returned an unexpected session.');
       }
-      return { sessionId: value.sessionId };
+      return { sessionId: value.sessionId, startedAtEpochMs: value.startedAtEpochMs };
     });
   },
   stopSession(): Promise<{ id: string }> {
@@ -203,6 +426,19 @@ contextBridge.exposeInMainWorld('chesspulse', {
     ipcRenderer.on(EVENT_CHANNELS.sessionEnded, handler);
     return () => {
       ipcRenderer.removeListener(EVENT_CHANNELS.sessionEnded, handler);
+    };
+  },
+  onSessionStarted(listener: (event: SessionStarted) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      try {
+        listener(readSessionStarted(value));
+      } catch {
+        // A malformed start event is dropped; the invoke reply still adopts the session.
+      }
+    };
+    ipcRenderer.on(EVENT_CHANNELS.sessionStarted, handler);
+    return () => {
+      ipcRenderer.removeListener(EVENT_CHANNELS.sessionStarted, handler);
     };
   },
   onReportProgress(listener: (progress: ReportProgress) => void): () => void {
@@ -388,7 +624,8 @@ function readCoachMessage(value: unknown): CoachMessage {
   };
 }
 
-function readSessionEnded(value: unknown): SessionEnded {  if (typeof value !== 'object' || value === null) {
+function readSessionEnded(value: unknown): SessionEnded {
+  if (typeof value !== 'object' || value === null) {
     throw new Error('The window returned an unexpected session end.');
   }
   const record = value as { sessionId?: unknown; reason?: unknown; message?: unknown };
@@ -400,6 +637,17 @@ function readSessionEnded(value: unknown): SessionEnded {  if (typeof value !== 
     throw new Error('The window returned an unexpected session end.');
   }
   return { sessionId: record.sessionId, reason: record.reason, message: record.message };
+}
+
+function readSessionStarted(value: unknown): SessionStarted {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('The window returned an unexpected session start.');
+  }
+  const record = value as { sessionId?: unknown; startedAtEpochMs?: unknown };
+  if (typeof record.sessionId !== 'string' || typeof record.startedAtEpochMs !== 'number') {
+    throw new Error('The window returned an unexpected session start.');
+  }
+  return { sessionId: record.sessionId, startedAtEpochMs: record.startedAtEpochMs };
 }
 
 function readReportProgress(value: unknown): ReportProgress {

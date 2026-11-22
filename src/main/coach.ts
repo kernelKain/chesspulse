@@ -20,6 +20,7 @@ export class BetweenGamesCoach {
   private baselineResolved = false;
   private baselineBpm: number | undefined;
   private betweenGames = false;
+  private markedGames = 0;
   private fired = false;
 
   constructor(
@@ -32,6 +33,16 @@ export class BetweenGamesCoach {
   /** Test and diagnostic visibility into the bounded window. */
   get retainedSampleCount(): number {
     return this.samples.length;
+  }
+
+  /** A reloaded page reads this so the gap control does not disagree with the running coach. */
+  get isBetweenGames(): boolean {
+    return this.betweenGames;
+  }
+
+  /** Player-marked boundaries in this session. The app never infers one. */
+  get markedGameCount(): number {
+    return this.markedGames;
   }
 
   ingest(batch: readonly PulseSample[]): CoachMessage | null {
@@ -51,6 +62,7 @@ export class BetweenGamesCoach {
       this.fired = false;
       return null;
     }
+    this.markedGames += 1;
     return this.evaluate();
   }
 

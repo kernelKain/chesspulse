@@ -10,6 +10,7 @@ import {
   type PasteValidation,
 } from '../shared/contracts';
 import { readIpcError } from './ipc-error';
+import { SlotBadge, SlotError } from './PasteValidation';
 
 const INITIAL_SLOTS = 3;
 const MAX_SLOTS = 20;
@@ -52,11 +53,15 @@ export function PasteScreen({
   initialSlots,
   onBack,
   onContinue,
+  onHelp,
+  onSlotsChange,
 }: {
   sessionId: string | null;
   initialSlots?: string[];
   onBack: (slots: string[]) => void;
   onContinue: (pgns: string[], validation: PasteValidation) => void;
+  onHelp?: () => void;
+  onSlotsChange?: (slots: string[]) => void;
 }) {
   const [slots, setSlots] = useState<string[]>(() =>
     initialSlots && initialSlots.length > 0
@@ -106,27 +111,34 @@ export function PasteScreen({
   }, [bridge, slots]);
 
   function updateSlot(index: number, value: string): void {
-    setSlots((current) => current.map((item, i) => (i === index ? value : item)));
+    const next = slots.map((item, i) => (i === index ? value : item));
+    setSlots(next);
+    onSlotsChange?.(next);
   }
 
   function addSlot(): void {
-    setSlots((current) => (current.length >= MAX_SLOTS ? current : [...current, '']));
+    if (slots.length >= MAX_SLOTS) return;
+    const next = [...slots, ''];
+    setSlots(next);
+    onSlotsChange?.(next);
   }
 
   function removeSlot(index: number): void {
-    setSlots((current) => (current.length <= 1 ? current : current.filter((_item, i) => i !== index)));
+    if (slots.length <= 1) return;
+    const next = slots.filter((_item, i) => i !== index);
+    setSlots(next);
+    onSlotsChange?.(next);
   }
 
   function moveSlot(index: number, delta: -1 | 1): void {
-    setSlots((current) => {
-      const target = index + delta;
-      if (target < 0 || target >= current.length) return current;
-      const next = [...current];
-      const item = next[index] ?? '';
-      next[index] = next[target] ?? '';
-      next[target] = item;
-      return next;
-    });
+    const target = index + delta;
+    if (target < 0 || target >= slots.length) return;
+    const next = [...slots];
+    const item = next[index] ?? '';
+    next[index] = next[target] ?? '';
+    next[target] = item;
+    setSlots(next);
+    onSlotsChange?.(next);
   }
 
   function handleContinue(): void {
@@ -234,11 +246,7 @@ export function PasteScreen({
                 onChange={(event) => updateSlot(index, event.target.value)}
               />
 
-              {hasError ? (
-                <p id={errorId} className="slot-error" role="alert">
-                  {slotInfo.message}
-                </p>
-              ) : null}
+              {hasError ? <SlotError id={errorId} slot={slotInfo} /> : null}
             </li>
           );
         })}
@@ -254,33 +262,17 @@ export function PasteScreen({
         <button type="button" onClick={() => onBack(slots)}>
           Back to session
         </button>
+        {onHelp ? (
+          <button type="button" onClick={onHelp}>
+            Help
+          </button>
+        ) : null}
       </div>
     </section>
   );
 }
 
-function SlotBadge({ slot }: { slot: PasteSlot }) {
-  if (slot.status === 'empty') {
-    return <span className="slot-badge tone-neutral">Empty</span>;
-  }
-  if (slot.status === 'valid') {
-    return (
-      <span className="slot-badge tone-ok">
-        <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">
-          <path d="M2.5 7.5L5.5 10.5L11.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.75" />
-        </svg>
-        Valid
-      </span>
-    );
-  }
-  if (slot.status === 'order_error') {
-    return <span className="slot-badge tone-warn">Out of order</span>;
-  }
-  return <span className="slot-badge tone-warn">Invalid</span>;
-}
-
-function GameSummaryRow({ game }: { game: PasteGameSummary }) {
-  const players =
+function GameSummaryRow({ game }: { game: PasteGameSummary }) {  const players =
     game.white || game.black
       ? `${game.white || 'Unknown'} vs ${game.black || 'Unknown'}`
       : 'Players unnamed';

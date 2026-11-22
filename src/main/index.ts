@@ -8,10 +8,14 @@ import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, session } from 'electron';
 import {
   coachMessageSchema,
+  consentStateSchema,
   previewFrameSchema,
+  previewStartResultSchema,
+  previewStopResultSchema,
   sampleBatchSchema,
   sdkErrorSchema,
   sessionStartResultSchema,
+  sessionStartedSchema,
   validationMessageSchema,
   type PreviewFrame,
   type SdkError,
@@ -23,6 +27,7 @@ import { EVENT_CHANNELS } from '../shared/channels.js';
 import { contentSecurityPolicy } from '../shared/security.js';
 import { AppError, toAppError } from '../shared/errors.js';
 import { allowsNavigation } from './navigation.js';
+import { readAppState } from './app-state.js';
 import { startCapture, type CaptureSession } from './capture.js';
 import { BetweenGamesCoach } from './coach.js';
 import { currentConsent, registerConsentHandler } from './consent.js';
@@ -34,9 +39,12 @@ import { registerInsightHandler } from './insight-ipc.js';
 import { registerInvokeChannel } from './ipc-registry.js';
 import { registerLibraryHandler } from './library-ipc.js';
 import { registerPasteHandler } from './paste.js';
+import { createPreviewController } from './preview.js';
 import { registerReportHandler } from './report-ipc.js';
+import { registerSetupHandler } from './setup-ipc.js';
 import { grantsMediaPermission } from './permission.js';
 import {
+  activeSessionState,
   hasActiveSession,
   ingestSamples,
   isActiveSession,
@@ -52,6 +60,8 @@ import { defaultDataRoot } from './store.js';
 
 let capture: CaptureSession | null = null;
 let coach: BetweenGamesCoach | null = null;
+/** One camera preview outside a session. Samples are discarded; only frames and hints are published. */
+const preview = createPreviewController(startCapture);
 /** One stop at a time. Every caller shares this promise, so the session is finalized exactly once. */
 let stoppingSession: Promise<SessionMeta> | null = null;
 
@@ -143,8 +153,12 @@ function stopEverything(reason: SessionStopReason): Promise<SessionMeta> {
 }
 
 const shutdownHooks = createShutdownHooks({
-  stop: () => stopEverything('user'),
-  hasActive: () => capture !== null || stoppingSession !== null,
+  stop: async () => {
+    // A preview-only quit still has to release the camera before the window closes.
+    await preview.stop();
+    return stopEverything('user');
+  },
+  hasActive: () => capture !== null || stoppingSession !== null || preview.active(),
   quit: () => app.quit(),
 });
 
@@ -157,10 +171,66 @@ function currentAnchor(): { monoUs: number; epochMs: number } {
 }
 
 function registerSessionHandlers(): void {
+  registerInvokeChannel('appStateGet', (event) => {
+    const granted = currentConsent();
+    return readAppState({
+      consent: () =>
+        consentStateSchema.parse({
+          granted,
+          cameraAllowed: grantsMediaPermission({
+            permission: 'media',
+            requestingUrl: event.senderFrame?.url,
+            appFileUrl: appFileUrl(),
+            devOrigin: rendererDevOrigin(),
+            consentGranted: granted,
+            isMainFrame: true,
+            mediaTypes: ['video'],
+          }),
+        }),
+      session: () => ({
+        ...activeSessionState(defaultDataRoot()),
+        betweenGames: coach?.isBetweenGames ?? false,
+        markedGames: coach?.markedGameCount ?? 0,
+      }),
+    });
+  });
+  registerInvokeChannel('previewStart', async () => {
+    if (!currentConsent()) throw new AppError('consent_required');
+    if (capture || hasActiveSession(defaultDataRoot())) throw new AppError('session_busy');
+    const apiKey = readSensingKey(process.env);
+    if (!apiKey) throw new AppError('key_missing');
+    lastValidationCode = null;
+    try {
+      await preview.start({
+        apiKey,
+        anchor: currentAnchor(),
+        events: {
+          // Framing only: preview samples never enter a session or the store.
+          onSamples: () => undefined,
+          onValidation: publishValidation,
+          onError: (error) => {
+            publishSdkError(error);
+            if (!error.retryable) void preview.stop();
+          },
+          onPreview: publishPreview,
+          onEnded: () => undefined,
+        },
+      });
+    } catch (error) {
+      throw new AppError('camera_unavailable', { cause: error });
+    }
+    return previewStartResultSchema.parse({ started: true });
+  });
+  registerInvokeChannel('previewStop', async () => {
+    await preview.stop();
+    return previewStopResultSchema.parse({ stopped: true });
+  });
   registerInvokeChannel('sessionStart', async (_event, payload) => {
     if (!currentConsent()) throw new AppError('consent_required');
     if (capture) throw new AppError('session_busy');
     shutdownHooks.beginStart();
+    // The preview and the session cannot own the native camera at the same time.
+    await preview.stop();
     // A previous stop may still be draining the camera; the SDK is process-global.
     if (stoppingSession) await stoppingSession.catch(() => undefined);
     if (!shutdownHooks.captureAllowed()) throw new AppError('session_failed');
@@ -220,7 +290,15 @@ function registerSessionHandlers(): void {
       await stopEverything('sdkError').catch(() => undefined);
       throw new AppError('camera_unavailable', { cause: error });
     }
-    return sessionStartResultSchema.parse({ sessionId: meta.id });
+    // Published after capture is open. A page that reloaded during the start invoke can adopt it.
+    publishToWindows(
+      EVENT_CHANNELS.sessionStarted,
+      sessionStartedSchema.parse({ sessionId: meta.id, startedAtEpochMs: meta.startedAtEpochMs }),
+    );
+    return sessionStartResultSchema.parse({
+      sessionId: meta.id,
+      startedAtEpochMs: meta.startedAtEpochMs,
+    });
   });
   registerInvokeChannel('sessionStop', async () =>
     stopEverything('user').catch((error: unknown) => {
@@ -361,6 +439,7 @@ app.whenReady().then(async () => {
     doctorLines: async () =>
       (await runDoctor({ env: process.env, envFile: env, dataRoot: defaultDataRoot() })).lines,
   });
+  registerSetupHandler({ env: process.env, envFile: env, dataRoot: defaultDataRoot() });
   setSampleSink(defaultDataRoot(), publishSamples);
   try {
     const recovery = await recoverInterruptedSessions(defaultDataRoot());

@@ -15,6 +15,19 @@ function restingMinute(): PulseSample[] {
 }
 
 describe('BetweenGamesCoach', () => {
+  it('counts each transition into the gap and not repeats', () => {
+    const coach = new BetweenGamesCoach(START_US);
+    assert.equal(coach.markedGameCount, 0);
+    coach.setBetweenGames(true);
+    assert.equal(coach.markedGameCount, 1);
+    coach.setBetweenGames(true);
+    assert.equal(coach.markedGameCount, 1);
+    coach.setBetweenGames(false);
+    assert.equal(coach.markedGameCount, 1);
+    coach.setBetweenGames(true);
+    assert.equal(coach.markedGameCount, 2);
+  });
+
   it('stays silent during a game and until the first baseline minute is complete', () => {
     const coach = new BetweenGamesCoach(START_US);
     assert.equal(coach.ingest([...restingMinute(), sample(61_000_000, 90)]), null);

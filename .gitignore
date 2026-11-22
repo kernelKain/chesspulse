@@ -23,6 +23,7 @@ spikes/
 node_modules/
 dist/
 dist-electron/
+dist-renderer-test/
 out/
 build/
 .vite/

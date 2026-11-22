@@ -262,18 +262,6 @@ export function Timeline({ result }: { result: ReportResult | null }) {
           ) : null}
         </>
       )}
-
-      {view.refusal ? (
-        <div className="refusal-panel" role="alert">
-          <h2>No report for this session.</h2>
-          {view.refusal.measured !== undefined && view.refusal.threshold !== undefined ? (
-            <p className="refusal-metric">
-              Coverage was {view.refusal.measured}%; a review needs {view.refusal.threshold}%.
-            </p>
-          ) : null}
-          <p>{view.refusal.remedy}</p>
-        </div>
-      ) : null}
     </section>
   );
 }

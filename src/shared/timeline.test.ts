@@ -10,6 +10,7 @@ import {
   endingMark,
   engineCalibrationNote,
   engineFailureNote,
+  refusalHeading,
   formatElapsed,
   moveTableRows,
   sampleReadout,
@@ -400,5 +401,16 @@ describe('timeline helpers', () => {
       spacedEnd.map((t) => t / 1_000_000),
       [0, 300, 600, 900, 1000],
     );
+  });
+});
+
+describe('refusalHeading', () => {
+  it('names each refusal reason without repeating the remedy', () => {
+    assert.match(refusalHeading('low_coverage'), /Coverage/);
+    assert.match(refusalHeading('order'), /out of order/);
+    assert.match(refusalHeading('no_games'), /No games/);
+    assert.match(refusalHeading('illegal_move'), /illegal/);
+    assert.match(refusalHeading('cancelled'), /cancelled/);
+    assert.match(refusalHeading('no_trace'), /pulse trace/);
   });
 });

@@ -7,6 +7,7 @@ import {
   BASELINE_WINDOW_US,
   CONFIDENCE_FLOOR,
   SAMPLE_HOLD_US,
+  isUsableSample,
 } from '../shared/sensing.js';
 import {
   appendSamples,
@@ -19,6 +20,7 @@ import {
 } from './store.js';
 
 export { BASELINE_WINDOW_US, CONFIDENCE_FLOOR, SAMPLE_HOLD_US as MAX_SAMPLE_HOLD_US };
+export { isUsableSample };
 export const MAX_SESSION_US = 90 * 60 * 1_000_000;
 
 const sampleSinks = new Map<string, (samples: readonly PulseSample[]) => void>();
@@ -38,6 +40,7 @@ export interface SessionHooks {
 interface ActiveSession {
   id?: string;
   anchor: SessionAnchor;
+  startedAtEpochMs: number;
   timeControl: string;
   state: 'starting' | 'running' | 'stopping';
   ingest: Promise<void>;
@@ -51,10 +54,6 @@ interface ActiveSession {
 }
 
 const active = new Map<string, ActiveSession>();
-
-export function isUsableSample(sample: PulseSample, floor = CONFIDENCE_FLOOR): boolean {
-  return sample.stable && sample.confidence >= floor;
-}
 
 export function baselineFromSamples(
   samples: readonly PulseSample[],
@@ -275,6 +274,28 @@ export function hasActiveSession(root: string): boolean {
   return active.has(path.resolve(root));
 }
 
+export interface ActiveSessionState {
+  active: boolean;
+  sessionId: string | null;
+  startedAtEpochMs: number | null;
+}
+
+/**
+ * What a reloaded page may adopt. A session that is still starting or already stopping has no
+ * stable id for the page, so it is reported closed and the page starts at Home.
+ */
+export function activeSessionState(root: string): ActiveSessionState {
+  const current = active.get(path.resolve(root));
+  if (!current || current.state !== 'running' || !current.id) {
+    return { active: false, sessionId: null, startedAtEpochMs: null };
+  }
+  return {
+    active: true,
+    sessionId: current.id,
+    startedAtEpochMs: current.startedAtEpochMs,
+  };
+}
+
 /** True only while this exact id is the active, running session. */
 export function isActiveSession(root: string, sessionId: string): boolean {
   const current = active.get(path.resolve(root));
@@ -295,6 +316,7 @@ function reserve(
   stopped.catch(() => undefined);
   return {
     anchor,
+    startedAtEpochMs: anchor.epochMs,
     timeControl,
     state: 'starting',
     ingest: Promise.resolve(),

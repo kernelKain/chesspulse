@@ -9,7 +9,7 @@ import { lightNote, previewBoost } from '../shared/preview';
 const STALE_MS = 2_000;
 const LIGHT_UPDATE_MS = 500;
 
-export function CameraPreview({ sensing }: { sensing: boolean }) {
+export function CameraPreview({ active, guide = false }: { active: boolean; guide?: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastFrameAt = useRef(0);
   const lastLightAt = useRef(0);
@@ -40,7 +40,7 @@ export function CameraPreview({ sensing }: { sensing: boolean }) {
   }, [bridge]);
 
   useEffect(() => {
-    if (!sensing) {
+    if (!active) {
       setStale(false);
       return undefined;
     }
@@ -48,23 +48,31 @@ export function CameraPreview({ sensing }: { sensing: boolean }) {
       setStale(Date.now() - lastFrameAt.current > STALE_MS);
     }, 500);
     return () => window.clearInterval(timer);
-  }, [sensing]);
+  }, [active]);
 
   const boost = previewBoost(light);
 
   return (
     <figure className="camera">
-      <canvas
-        ref={canvasRef}
-        className="camera-video"
-        width={320}
-        height={180}
-        style={boost > 1 ? { filter: `brightness(${boost.toFixed(2)}) contrast(1.15)` } : undefined}
-        role="img"
-        aria-label="Camera preview. Nothing is recorded."
-      />
+      <div className="camera-frame">
+        <canvas
+          ref={canvasRef}
+          className="camera-video"
+          width={320}
+          height={180}
+          style={boost > 1 ? { filter: `brightness(${boost.toFixed(2)}) contrast(1.15)` } : undefined}
+          role="img"
+          aria-label="Camera preview. Nothing is recorded."
+        />
+        {guide ? (
+          <div className="framing-guide" aria-hidden="true">
+            <div className="face-outline" />
+            <div className="chest-line" />
+          </div>
+        ) : null}
+      </div>
       <figcaption className="hint">
-        {!sensing
+        {!active
           ? 'The camera opens when you start sensing.'
           : !hasFrame || stale
             ? 'Waiting for the camera…'

@@ -13,6 +13,7 @@ import {
   refusalSchema,
   reportBuildRequestSchema,
   sessionEndedSchema,
+  sessionStartedSchema,
   stopReasonSchema,
 } from './contracts.js';
 
@@ -57,6 +58,16 @@ describe('session end contracts', () => {
     assert.equal(sessionEndedSchema.safeParse({ ...ended, reason: 'limit' }).success, true);
     assert.equal(sessionEndedSchema.safeParse({ ...ended, reason: 'user' }).success, false);
     assert.equal(sessionEndedSchema.safeParse({ ...ended, trace: [] }).success, false);
+  });
+
+  it('accepts a start event only with an id and a start time', () => {
+    const started = { sessionId: '01TESTSESSION0000000000000', startedAtEpochMs: 1_700_000_000_000 };
+    assert.deepEqual(sessionStartedSchema.parse(started), started);
+    assert.equal(sessionStartedSchema.safeParse({ sessionId: started.sessionId }).success, false);
+    assert.equal(
+      sessionStartedSchema.safeParse({ ...started, startedAtEpochMs: 'now' }).success,
+      false,
+    );
   });
 });
 

@@ -268,6 +268,7 @@ export const sessionStartRequestSchema = z
 export const sessionStartResultSchema = z
   .object({
     sessionId: z.string().min(1),
+    startedAtEpochMs: z.number().finite(),
   })
   .strict();
 
@@ -319,6 +320,14 @@ export const sessionEndedSchema = z
     sessionId: z.string().min(1),
     reason: sessionEndReasonSchema,
     message: z.string().min(1),
+  })
+  .strict();
+
+/** Published once capture is open, so a reload during startup can still adopt the session. */
+export const sessionStartedSchema = z
+  .object({
+    sessionId: z.string().min(1),
+    startedAtEpochMs: z.number().finite(),
   })
   .strict();
 
@@ -398,6 +407,39 @@ export const sessionDeleteRequestSchema = z
   })
   .strict();
 
+export const sessionOpenRequestSchema = z
+  .object({
+    sessionId: z.string().min(1),
+  })
+  .strict();
+
+export const sessionSummarySchema = z
+  .object({
+    id: z.string().min(1),
+    startedAtEpochMs: z.number().finite(),
+    durationMs: z.number().finite().nonnegative().nullable(),
+    coveragePct: z.number().finite().min(0).max(100).nullable(),
+    hasReport: z.boolean(),
+  })
+  .strict();
+
+export const sessionListResultSchema = z
+  .object({
+    sessions: z.array(sessionSummarySchema),
+    unreadable: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const sessionReportErrorSchema = z.enum(['stale', 'newer', 'invalid']);
+
+export const sessionOpenResultSchema = z
+  .object({
+    report: reportSchema.nullable(),
+    reportError: sessionReportErrorSchema.nullable(),
+    games: z.array(z.string()),
+  })
+  .strict();
+
 export const sessionDeleteResultSchema = z
   .object({
     deleted: z.boolean(),
@@ -447,6 +489,59 @@ export const consentStateSchema = z
   .object({
     granted: z.boolean(),
     cameraAllowed: z.boolean(),
+  })
+  .strict();
+
+/** What a reloaded page needs to rebuild its screen without asking the player to consent again. */
+export const appSessionStateSchema = z
+  .object({
+    active: z.boolean(),
+    sessionId: z.string().min(1).nullable(),
+    startedAtEpochMs: z.number().finite().nullable(),
+    betweenGames: z.boolean(),
+    markedGames: z.number().int().nonnegative(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.active
+        ? value.sessionId !== null && value.startedAtEpochMs !== null
+        : value.sessionId === null && value.startedAtEpochMs === null && value.markedGames === 0,
+    { message: 'An active session has an id and start time; a closed one has neither and no marks.' },
+  );
+
+export const appStateSchema = z
+  .object({
+    consent: consentStateSchema,
+    session: appSessionStateSchema,
+  })
+  .strict();
+
+/** The doctor result Setup reuses; only the key row is shown before a session. */
+export const doctorCheckSchema = z
+  .object({
+    id: z.enum(['node', 'env', 'sensing-key', 'camera', 'engine', 'data-dir', 'ai']),
+    label: z.string().min(1),
+    status: z.enum(['pass', 'warn', 'fail', 'skip']),
+    detail: z.string().min(1),
+  })
+  .strict();
+
+export const setupStatusSchema = z
+  .object({
+    checks: z.array(doctorCheckSchema),
+  })
+  .strict();
+
+export const previewStartResultSchema = z
+  .object({
+    started: z.boolean(),
+  })
+  .strict();
+
+export const previewStopResultSchema = z
+  .object({
+    stopped: z.boolean(),
   })
   .strict();
 
@@ -535,6 +630,13 @@ export const pasteValidationSchema = z
   })
   .strict();
 
+export type ConsentState = z.infer<typeof consentStateSchema>;
+export type AppSessionState = z.infer<typeof appSessionStateSchema>;
+export type AppState = z.infer<typeof appStateSchema>;
+export type DoctorCheck = z.infer<typeof doctorCheckSchema>;
+export type SetupStatus = z.infer<typeof setupStatusSchema>;
+export type PreviewStartResult = z.infer<typeof previewStartResultSchema>;
+export type PreviewStopResult = z.infer<typeof previewStopResultSchema>;
 export type PulseSample = z.infer<typeof pulseSampleSchema>;
 export type SessionAnchor = z.infer<typeof sessionAnchorSchema>;
 export type SessionMeta = z.infer<typeof sessionMetaSchema>;
@@ -552,6 +654,10 @@ export type ReportExport = z.infer<typeof reportExportSchema>;
 export type ReportProgress = z.infer<typeof reportProgressSchema>;
 export type ReportExportResult = z.infer<typeof reportExportResultSchema>;
 export type SessionDeleteResult = z.infer<typeof sessionDeleteResultSchema>;
+export type SessionSummary = z.infer<typeof sessionSummarySchema>;
+export type SessionListResult = z.infer<typeof sessionListResultSchema>;
+export type SessionReportError = z.infer<typeof sessionReportErrorSchema>;
+export type SessionOpenResult = z.infer<typeof sessionOpenResultSchema>;
 export type PasteGameSummary = z.infer<typeof pasteGameSummarySchema>;
 export type PasteSlot = z.infer<typeof pasteSlotSchema>;
 export type PasteState = z.infer<typeof pasteStateSchema>;
@@ -561,6 +667,7 @@ export type SdkError = z.infer<typeof sdkErrorSchema>;
 export type DiagnosticsResult = z.infer<typeof diagnosticsResultSchema>;
 export type SessionEndReason = z.infer<typeof sessionEndReasonSchema>;
 export type SessionEnded = z.infer<typeof sessionEndedSchema>;
+export type SessionStarted = z.infer<typeof sessionStartedSchema>;
 export type CoachMessage = z.infer<typeof coachMessageSchema>;
 export type AiProvider = z.infer<typeof aiProviderSchema>;
 export type InsightRequest = z.infer<typeof insightRequestSchema>;

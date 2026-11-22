@@ -1,0 +1,147 @@
+// What: the stored-session rows shared by Home and the Sessions screen.
+// Why: opening, exporting, and deleting must be one set of controls, with the same labels and guards.
+// Removed: history would be a dead list, and delete/export would have no confirmation.
+import { useId, useState } from 'react';
+import type { SessionSummary } from '../shared/contracts.js';
+import {
+  coverageLabel,
+  formatSessionDate,
+  formatSessionDuration,
+  reportPresenceLabel,
+} from '../shared/session-list.js';
+
+export interface SessionListProps {
+  sessions: SessionSummary[];
+  emptyMessage: string;
+  unreadable?: number;
+  onOpen(sessionId: string): void;
+  onDelete(sessionId: string): void;
+  onExport(sessionId: string): void;
+  heading?: string;
+}
+
+export function SessionList({
+  sessions,
+  emptyMessage,
+  unreadable = 0,
+  onOpen,
+  onDelete,
+  onExport,
+  heading = 'Saved sessions',
+}: SessionListProps) {
+  const [confirmation, setConfirmation] = useState<{
+    id: string;
+    kind: 'delete' | 'export';
+  } | null>(null);
+
+  if (sessions.length === 0 && unreadable === 0) {
+    return <p className="session-empty">{emptyMessage}</p>;
+  }
+
+  return (
+    <section className="session-list-section" aria-label={heading}>
+      {unreadable > 0 ? (
+        <p className="session-unreadable" role="status">
+          {unreadable} saved {unreadable === 1 ? 'session' : 'sessions'} could not be read.
+        </p>
+      ) : null}
+      <ol className="session-list">
+        {sessions.map((session) => (
+          <SessionRow
+            key={session.id}
+            session={session}
+            confirmation={confirmation?.id === session.id ? confirmation.kind : null}
+            onOpen={() => onOpen(session.id)}
+            onDelete={() => {
+              setConfirmation(null);
+              onDelete(session.id);
+            }}
+            onExport={() => {
+              setConfirmation(null);
+              onExport(session.id);
+            }}
+            onRequestDelete={() => setConfirmation({ id: session.id, kind: 'delete' })}
+            onRequestExport={() => setConfirmation({ id: session.id, kind: 'export' })}
+            onCancel={() => setConfirmation(null)}
+          />
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function SessionRow({
+  session,
+  confirmation,
+  onOpen,
+  onDelete,
+  onExport,
+  onRequestDelete,
+  onRequestExport,
+  onCancel,
+}: {
+  session: SessionSummary;
+  confirmation: 'delete' | 'export' | null;
+  onOpen(): void;
+  onDelete(): void;
+  onExport(): void;
+  onRequestDelete(): void;
+  onRequestExport(): void;
+  onCancel(): void;
+}) {
+  const titleId = useId();
+  const date = new Date(session.startedAtEpochMs);
+  const dateTime = Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+
+  return (
+    <li className="session-row">
+      <div className="session-row-main">
+        <time className="session-date" dateTime={dateTime}>
+          {formatSessionDate(session.startedAtEpochMs)}
+        </time>
+        <span className="session-detail">{formatSessionDuration(session.durationMs)}</span>
+        <span className="session-detail">{coverageLabel(session.coveragePct)}</span>
+        <span className={session.hasReport ? 'session-report' : 'session-report muted'}>
+          {reportPresenceLabel(session.hasReport)}
+        </span>
+      </div>
+
+      {confirmation ? (
+        <div className="session-confirm" role="group" aria-labelledby={titleId}>
+          <p id={titleId}>
+            {confirmation === 'delete'
+              ? 'Delete this session? This cannot be undone.'
+              : 'Export this report? The file contains no pulse samples.'}
+          </p>
+          <div className="actions">
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={confirmation === 'delete' ? onDelete : onExport}
+            >
+              {confirmation === 'delete' ? 'Delete' : 'Export'}
+            </button>
+            <button type="button" onClick={onCancel}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="session-actions">
+          <button type="button" onClick={onOpen}>
+            Open
+          </button>
+          <button type="button" disabled={!session.hasReport} onClick={onRequestExport}>
+            Export
+          </button>
+          <button type="button" onClick={onRequestDelete}>
+            Delete
+          </button>
+          {!session.hasReport ? (
+            <span className="session-detail">Export is available after a report is built.</span>
+          ) : null}
+        </div>
+      )}
+    </li>
+  );
+}
