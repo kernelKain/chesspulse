@@ -304,6 +304,32 @@ describe('alignGames from player marks', () => {
     assert.equal(aligned.moveTimes[3]?.tUs, null);
   });
 
+  it('leaves a move and the ones after it untimed when a clock goes forwards', () => {
+    const aligned = alignGames(
+      [
+        game({
+          index: 0,
+          moves: [
+            { san: 'e4', clockSec: 50 },
+            { san: 'e5', clockSec: 40 },
+            { san: 'Nf3', clockSec: 70 },
+            { san: 'Nc6', clockSec: 30 },
+          ],
+        }),
+      ],
+      withStop(120 * SEC),
+      [],
+      marksFor([60 * SEC], []),
+    );
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    assert.equal(aligned.moveTimes[0]?.tUs, 10 * SEC);
+    assert.equal(aligned.moveTimes[1]?.tUs, 30 * SEC);
+    // White's clock went forwards, so move 3 and every move after it have no time.
+    assert.equal(aligned.moveTimes[2]?.tUs, null);
+    assert.equal(aligned.moveTimes[3]?.tUs, null);
+  });
+
   it('reports a trace gap when no usable sample covers part of a game', () => {
     const samples: PulseSample[] = [
       { tUs: 1 * SEC, bpm: 80, confidence: 95, stable: true },

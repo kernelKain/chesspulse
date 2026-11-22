@@ -30,6 +30,7 @@ export function CameraPreview({
   const bridge = window.chesspulse;
   // The frame callback is registered once; a ref keeps it from resubscribing on every render.
   const lightHandler = useRef(onLight);
+  const staleRef = useRef(false);
   useEffect(() => {
     lightHandler.current = onLight;
   });
@@ -58,11 +59,20 @@ export function CameraPreview({
 
   useEffect(() => {
     if (!active) {
+      staleRef.current = false;
       setStale(false);
       return undefined;
     }
     const timer = window.setInterval(() => {
-      setStale(Date.now() - lastFrameAt.current > STALE_MS);
+      const next = Date.now() - lastFrameAt.current > STALE_MS;
+      const wasStale = staleRef.current;
+      staleRef.current = next;
+      setStale(next);
+      // A stopped camera must not leave the last brightness standing in the Setup meter.
+      if (next && !wasStale) {
+        setLight(null);
+        lightHandler.current?.(null);
+      }
     }, 500);
     return () => window.clearInterval(timer);
   }, [active]);

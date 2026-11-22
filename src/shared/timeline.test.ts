@@ -99,6 +99,17 @@ function baseReport(overrides: Partial<Report> = {}): Report {
 }
 
 describe('splitPulseRuns', () => {
+  it('treats an occluded sample as a hole, not as measured time', () => {
+    const samples: PulseSample[] = [
+      sample(0, 70),
+      { ...sample(1, 70), occluded: true },
+      sample(2, 70),
+    ];
+    const { usableRuns, weakSamples } = splitPulseRuns(samples);
+    assert.equal(weakSamples.length, 1);
+    assert.equal(usableRuns.length, 2);
+  });
+
   it('breaks runs across gaps and weak samples and separates elevated stretches', () => {
     const samples = [
       sample(0, 70),

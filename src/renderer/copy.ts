@@ -80,6 +80,11 @@ export const COPY = {
     previewFailed: 'The camera preview could not start.',
     previewStarting: 'Starting the camera preview…',
     lightMeterLabel: 'Light level',
+    lightStatus: {
+      dark: 'The room is too dark for the measurement.',
+      dim: 'The room is dim. A lamp in front of you will help.',
+      ok: 'The light is enough for the measurement.',
+    },
     lightWaiting: 'The light meter starts with the preview.',
     timeControlLabel: 'Time control',
     checks: {
@@ -216,6 +221,8 @@ export const COPY = {
     kindEnd: 'Game ended',
     kindNext: 'Next game started',
     order: 'Each game needs a later mark than the game before it.',
+    tooFew:
+      'This session recorded fewer marks than the pasted games, so the games cannot be placed. Paste fewer games, or start a new session and mark each game end.',
     build: 'Build the report',
     cancel: 'Back to the games',
   },
@@ -248,9 +255,9 @@ export const COPY = {
   },
   verdict: {
     occluded: (seconds: number) => {
-      if (seconds < 60) return 'Hand or object over face for under a minute.';
+      if (seconds < 60) return 'Face or motion checks excluded under a minute of readings.';
       const minutes = Math.round(seconds / 60);
-      return `Hand or object over face for ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`;
+      return `Face or motion checks excluded ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} of readings.`;
     },
     label: 'Session verdict',
     meta: (baseline: string, threshold: string, coverage: number) =>

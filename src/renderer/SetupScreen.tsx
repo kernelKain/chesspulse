@@ -202,6 +202,8 @@ function LightMeter({ light }: { light: number | null }) {
     );
   }
   const pct = Math.round(Math.max(0, Math.min(1, light)) * 100);
+  // One sentence per band, so a screen reader hears a change of verdict, not every percentage.
+  const band = light < DARK_LIGHT ? 'dark' : light < DIM_LIGHT ? 'dim' : 'ok';
   return (
     <div className="light-meter">
       <span className="light-meter-label">{COPY.setup.lightMeterLabel}</span>
@@ -219,6 +221,9 @@ function LightMeter({ light }: { light: number | null }) {
         <span className="light-tick" style={{ left: `${DIM_LIGHT * 100}%` }} aria-hidden="true" />
       </div>
       <p className="light-note">{lightNote(light)}</p>
+      <p className="sr-only" role="status" aria-live="polite">
+        {COPY.setup.lightStatus[band]}
+      </p>
     </div>
   );
 }

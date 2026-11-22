@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { markChoiceNeeded, picksAreOrdered } from './marks.js';
+import { markChoiceNeeded, picksAreOrdered, tooFewMarks } from './marks.js';
 
 const end = { kind: 'end' as const };
 const next = { kind: 'next' as const };
@@ -25,6 +25,14 @@ describe('mark choice', () => {
   it('does not ask when the session has no marks at all', () => {
     assert.equal(markChoiceNeeded([], 3), false);
     assert.equal(markChoiceNeeded([end], 0), false);
+  });
+});
+
+describe('too few marks', () => {
+  it('is true only when the session has fewer marks than games', () => {
+    assert.equal(tooFewMarks([end, next], 3), true);
+    assert.equal(tooFewMarks([end, next, end], 3), false);
+    assert.equal(tooFewMarks([], 1), true);
   });
 });
 

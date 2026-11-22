@@ -15,7 +15,10 @@ export function ReviewStages({
   return (
     <section className="stages" aria-label={COPY.stages.label}>
       {stages.map((stage) => {
-        const body = stage.state === 'disabled' ? null : bodies[stage.id];
+        // Only Stage 1 can block the later stages. The reading panel keeps its provider selector
+        // and retry controls even when it is disabled, so its body is never suppressed.
+        const body =
+          stage.id !== 'reading' && stage.state === 'disabled' ? null : bodies[stage.id];
         return (
           <section key={stage.id} className="stage" data-state={stage.state} aria-labelledby={`stage-${stage.id}`}>
             <header className="stage-head">
@@ -26,7 +29,7 @@ export function ReviewStages({
             </header>
             {body ? <div className="stage-body">{body}</div> : null}
             {!body && stage.reason ? (
-              <p className="stage-reason">{COPY.stages.reasons[stage.reason]}</p>
+              <p className="stage-reason">{stage.detail ?? COPY.stages.reasons[stage.reason]}</p>
             ) : null}
           </section>
         );

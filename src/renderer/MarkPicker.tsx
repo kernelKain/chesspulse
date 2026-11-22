@@ -20,8 +20,11 @@ export function MarkPicker({
 }) {
   const baseId = useId();
   const [picks, setPicks] = useState<(number | null)[]>(() => Array.from({ length: gameCount }, () => null));
+  const answered = picks.every((pick) => pick !== null);
   const ordered = picksAreOrdered(picks);
-  const ready = ordered && picks.every((pick) => pick !== null);
+  // Nothing is wrong until the player has answered every question.
+  const outOfOrder = answered && !ordered;
+  const ready = answered && ordered;
 
   function pick(index: number, value: string): void {
     const next = picks.map((item, at) => (at === index ? (value === '' ? null : Number(value)) : item));
@@ -58,11 +61,11 @@ export function MarkPicker({
           );
         })}
       </ol>
-      {ordered ? null : (
+      {outOfOrder ? (
         <p className="mark-order" role="alert">
           {COPY.markChoice.order}
         </p>
-      )}
+      ) : null}
       <div className="actions">
         <button
           type="button"

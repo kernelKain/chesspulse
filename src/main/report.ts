@@ -214,7 +214,7 @@ export async function buildReport(
       gapClause: gapClause(aligned.gaps),
     });
     const coverage = coverageFromSamples(samples, meta.startAnchor.monoUs, stop.monoUs);
-    const occludedSec = Math.round(occludedUs(samples) / 1_000_000);
+    const occludedSec = Math.round(occludedUs(samples, stop.monoUs) / 1_000_000);
     const first = aligned.games[0];
     const alignedIndices = new Set(aligned.games.map((entry) => entry.game.index));
     const blundersByGame = new Map<number, number>();

@@ -37,7 +37,7 @@ describe('ReviewStages markup', () => {
     assert.deepEqual([...order].sort((left, right) => left - right), order);
   });
 
-  it('shows a disabled reading with its reason and no body', () => {
+  it('keeps the reading panel and its controls when the reading is disabled', () => {
     const html = renderToStaticMarkup(
       createElement(ReviewStages, {
         stages: [
@@ -45,11 +45,28 @@ describe('ReviewStages markup', () => {
           stage(2, 'engine', 'ready', null),
           stage(3, 'reading', 'disabled', 'no_key'),
         ],
-        bodies: { pulse: 'trace', engine: 'bands', reading: 'reading' },
+        bodies: { pulse: 'trace', engine: 'bands', reading: 'selector' },
       }),
     );
-    assert.match(html, new RegExp(COPY.stages.reasons.no_key));
-    assert.equal(html.includes('>reading<'), false);
+    assert.match(html, />selector</);
+    assert.match(html, /Disabled/);
+    // The panel says why it is disabled; the generic line would repeat it badly.
+    assert.equal(html.includes(COPY.stages.reasons.no_key), false);
+  });
+
+  it('shows the service detail instead of the generic reason when there is no body', () => {
+    const html = renderToStaticMarkup(
+      createElement(ReviewStages, {
+        stages: [
+          stage(1, 'pulse', 'ready', null),
+          stage(2, 'engine', 'ready', null),
+          { ...stage(3, 'reading', 'disabled', 'no_key'), detail: 'The custom endpoint is missing.' },
+        ],
+        bodies: { pulse: 'trace', engine: 'bands' },
+      }),
+    );
+    assert.match(html, /The custom endpoint is missing\./);
+    assert.equal(html.includes(COPY.stages.reasons.no_key), false);
   });
 
   it('names Stage 1 as the reason the later stages are blocked', () => {

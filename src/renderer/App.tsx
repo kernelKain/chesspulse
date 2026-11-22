@@ -64,7 +64,7 @@ import { openKeyboardHelp } from './KeyboardHelp';
 import { MarkPicker } from './MarkPicker';
 import { ReviewStages } from './ReviewStages';
 import { readIpcError } from './ipc-error';
-import { markChoiceNeeded } from '../shared/marks';
+import { markChoiceNeeded, tooFewMarks } from '../shared/marks';
 import { reviewStages } from '../shared/stages';
 import { PasteScreen } from './PasteScreen';
 import { RefusalPanel } from './RefusalPanel';
@@ -474,7 +474,9 @@ export function App() {
     if (!heading) return;
     heading.tabIndex = -1;
     heading.focus();
-  }, [flow.screen, flow.explainerSeen, flow.review?.building]);
+    // The mark question replaces the loading view without changing screen or building, so its
+    // arrival and its removal both move focus to the heading that now stands in its place.
+  }, [flow.screen, flow.explainerSeen, flow.review?.building, Boolean(markChoice)]);
 
   const sessionId = currentSessionId(flow);
   const framing = validation ? framingFromValidation(validation.code) : UNKNOWN_FRAMING;
@@ -673,6 +675,10 @@ export function App() {
         if (seq !== reportRequestSeq.current) return;
         if (!answers.success) {
           dispatch({ type: 'reportFailed', message: COPY.errors.reportUnexpected, sessionId });
+          return;
+        }
+        if (tooFewMarks(answers.data.marks, pgns.length)) {
+          dispatch({ type: 'reportFailed', message: COPY.markChoice.tooFew, sessionId });
           return;
         }
         if (markChoiceNeeded(answers.data.marks, pgns.length)) {
@@ -1043,6 +1049,13 @@ export function App() {
       building: Boolean(review?.building),
       failed: Boolean(review?.error),
       reading: insightState.status,
+      // The service's own reason distinguishes a missing model from a missing key.
+      readingDetail:
+        insightState.status === 'disabled'
+          ? insightState.reason
+          : insightState.status === 'error'
+            ? insightState.message
+            : undefined,
     });
     const bodies = result?.ok
       ? {

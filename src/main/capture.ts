@@ -204,8 +204,17 @@ export function startCapture(input: {
     validationHistory.push({ fromUs, code });
     if (validationHistory.length > 512) validationHistory.shift();
     const cutoff = fromUs - HISTORY_US;
-    while (validationHistory.length > 1 && (validationHistory[0]?.fromUs ?? 0) < cutoff) {
-      validationHistory.shift();
+    // Keep everything inside the window plus the last interval that started before it, so a late
+    // reading older than the window still finds the code that was in force at its own timestamp.
+    let baseline: ValidationInterval | null = null;
+    for (const entry of validationHistory) {
+      if (entry.fromUs < cutoff) baseline = entry;
+    }
+    if (baseline) {
+      const kept = validationHistory.filter((entry) => entry.fromUs >= cutoff);
+      kept.unshift(baseline);
+      validationHistory.length = 0;
+      validationHistory.push(...kept);
     }
   }
   /** A transition with no usable SDK timestamp still ends the previous interval; use now. */

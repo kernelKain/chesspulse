@@ -215,7 +215,7 @@ export function splitPulseRuns(
   let lastUsable: PulseSample | null = null;
 
   for (const sample of ordered) {
-    const usable = sample.stable && sample.confidence >= CONFIDENCE_FLOOR;
+    const usable = sample.occluded !== true && sample.stable && sample.confidence >= CONFIDENCE_FLOOR;
     if (!usable) {
       weakSamples.push(sample);
       current = null;
@@ -313,7 +313,7 @@ export function sampleTableRows(view: TimelineViewModel): TimelineSampleRow[] {
     const prev = index > 0 ? view.samples[index - 1] : undefined;
     const deltaUs = prev ? sample.tUs - prev.tUs : 0;
     const gapBeforeSec = deltaUs > SAMPLE_HOLD_US ? Math.round((deltaUs / 1_000_000) * 10) / 10 : null;
-    const usable = sample.stable && sample.confidence >= CONFIDENCE_FLOOR;
+    const usable = sample.occluded !== true && sample.stable && sample.confidence >= CONFIDENCE_FLOOR;
     let status: string;
     if (!usable) {
       status = 'Low confidence';

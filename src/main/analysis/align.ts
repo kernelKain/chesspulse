@@ -202,7 +202,8 @@ function moveTimesFor(game: AlignedGame): MoveTime[] {
   let timed = true;
   return game.game.moves.map((_move, moveIndex) => {
     const think = thinks[moveIndex];
-    if (think === null || think === undefined || !timed) {
+    // A clock that moves forwards would put this move before the last one; that is not a time.
+    if (think === null || think === undefined || think < 0 || !timed) {
       timed = false;
       return { gameIndex: game.game.index, moveIndex, tUs: null };
     }

@@ -39,7 +39,7 @@ const report: Report = {
 describe('VerdictLine markup', () => {
   it('states the time the face was covered when the session recorded it', () => {
     const html = renderToStaticMarkup(createElement(VerdictLine, { report: { ...report, occludedSec: 120 } }));
-    assert.match(html, /Hand or object over face for 2 minutes\./);
+    assert.match(html, /Face or motion checks excluded 2 minutes of readings\./);
   });
 
   it('opens Review with the verdict, coverage, and the number of unscored positions', () => {

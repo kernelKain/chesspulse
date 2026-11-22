@@ -26,6 +26,8 @@ export interface StageView {
   readonly state: StageState;
   /** Why the stage is not ready. Null when it is. */
   readonly reason: StageReason | null;
+  /** The service's own explanation, when it has one that is more specific than the reason code. */
+  readonly detail?: string;
 }
 
 /** The reading panel's own state, passed in as a plain status so this module stays renderer-free. */
@@ -36,12 +38,19 @@ export interface StageInput {
   readonly building: boolean;
   readonly failed: boolean;
   readonly reading: ReadingStatus;
+  /** The reading panel's own reason or message, when it has one. */
+  readonly readingDetail?: string;
 }
 
 /**
  * What: the three stages in the order the player reads them.
  * Why: the order is the product's argument — the trace, then the moves, then what a model inferred.
  */
+function detail(input: StageInput): { detail: string } | null {
+  const text = input.readingDetail?.trim();
+  return text ? { detail: text } : null;
+}
+
 export function reviewStages(input: StageInput): readonly [StageView, StageView, StageView] {
   const stage = (
     index: 1 | 2 | 3,
@@ -78,9 +87,9 @@ export function reviewStages(input: StageInput): readonly [StageView, StageView,
 
   const reading =
     input.reading === 'disabled'
-      ? stage(3, 'reading', 'disabled', 'no_key')
+      ? { ...stage(3, 'reading', 'disabled', 'no_key'), ...(detail(input) ?? {}) }
       : input.reading === 'error'
-        ? stage(3, 'reading', 'unavailable', 'ai_error')
+        ? { ...stage(3, 'reading', 'unavailable', 'ai_error'), ...(detail(input) ?? {}) }
         : input.reading === 'loading'
           ? stage(3, 'reading', 'empty', 'writing')
           : input.reading === 'idle'
