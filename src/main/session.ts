@@ -271,6 +271,10 @@ export function activeTimeControl(root: string): string | undefined {
   return active.get(path.resolve(root))?.timeControl;
 }
 
+export function hasActiveSession(root: string): boolean {
+  return active.has(path.resolve(root));
+}
+
 function reserve(
   anchor: SessionAnchor,
   timeControl: string,

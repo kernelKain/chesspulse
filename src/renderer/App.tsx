@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   coachMessageSchema,
   insightResultSchema,
+  reportProgressSchema,
   reportResultSchema,
   sampleBatchSchema,
   sessionEndedSchema,
@@ -37,6 +38,8 @@ export function App() {
   const [reportResult, setReportResult] = useState<ReportResult | null>(null);
   const [reportBuilding, setReportBuilding] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [reportProgress, setReportProgress] = useState<{ scored: number; total: number } | null>(null);
+  const [reportCancelling, setReportCancelling] = useState(false);
   const [samples, setSamples] = useState<PulseSample[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [validation, setValidation] = useState<ValidationMessage | null>(null);
@@ -54,6 +57,7 @@ export function App() {
   const reportRequestSeq = useRef(0);
   const insightRequestSeq = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
+  const terminalSessionRef = useRef<string | null>(null);
 
   function resetInsight(): void {
     insightRequestSeq.current += 1;
@@ -67,6 +71,7 @@ export function App() {
     setCoachMessage(null);
     if (sessionIdRef.current === nextId) return;
     sessionIdRef.current = nextId;
+    terminalSessionRef.current = null;
     reportRequestSeq.current += 1;
     setSessionId(nextId);
     setError(null);
@@ -74,6 +79,8 @@ export function App() {
     setReportResult(null);
     setReportBuilding(false);
     setReportError(null);
+    setReportProgress(null);
+    setReportCancelling(false);
     setSamples([]);
     setSelectedIndex(null);
     setValidation(null);
@@ -135,9 +142,19 @@ export function App() {
       const parsed = sessionEndedSchema.safeParse(event);
       if (!parsed.success) return;
       adoptSession(parsed.data.sessionId);
+      terminalSessionRef.current = parsed.data.sessionId;
       setPhase('stopped');
       setNote(parsed.data.message);
       setError(null);
+    });
+  }, [bridge]);
+
+  useEffect(() => {
+    if (!bridge) return undefined;
+    return bridge.onReportProgress((progress) => {
+      const parsed = reportProgressSchema.safeParse(progress);
+      if (!parsed.success || parsed.data.sessionId !== sessionIdRef.current) return;
+      setReportProgress({ scored: parsed.data.scored, total: parsed.data.total });
     });
   }, [bridge]);
 
@@ -185,6 +202,8 @@ export function App() {
     try {
       const started = await bridge.startSession(timeControl);
       adoptSession(started.sessionId);
+      // A terminal event may have arrived before the start response completed.
+      if (terminalSessionRef.current === started.sessionId) return;
       if (revokedDuringStart.current || !grantedNow.current) {
         try {
           const meta = await bridge.stopSession();
@@ -279,6 +298,8 @@ export function App() {
     setPasteSlots(pgns);
     setReportError(null);
     setReportResult(null);
+    setReportProgress(null);
+    setReportCancelling(false);
     setPhase('report');
     if (!bridge || !sessionId) {
       setReportError('No stored session is available for this report.');
@@ -296,9 +317,29 @@ export function App() {
       setReportResult(parsed.data);
     } catch (caught: unknown) {
       if (seq !== reportRequestSeq.current) return;
-      setReportError(caught instanceof Error ? caught.message : 'The report could not be built.');
+      const cancelled =
+        caught instanceof Error && (caught.name === 'AbortError' || /cancel/i.test(caught.message));
+      setReportError(
+        cancelled
+          ? 'Report build cancelled. No report was saved.'
+          : caught instanceof Error
+            ? caught.message
+            : 'The report could not be built.',
+      );
     } finally {
       if (seq === reportRequestSeq.current) setReportBuilding(false);
+    }
+  }
+
+  async function onCancelReport(): Promise<void> {
+    if (!bridge || !sessionId || reportCancelling) return;
+    setReportCancelling(true);
+    try {
+      const result = await bridge.cancelReport(sessionId);
+      if (!result.cancelled) setReportCancelling(false);
+    } catch {
+      // Let the player retry if the cancel request never reached main.
+      setReportCancelling(false);
     }
   }
 
@@ -327,7 +368,14 @@ export function App() {
         {reportBuilding ? (
           <>
             <h1>Building report.</h1>
-            <p aria-live="polite">Scoring positions locally with Stockfish…</p>
+            <p aria-live="polite">
+              {reportProgress && reportProgress.total > 0
+                ? `Scored ${reportProgress.scored} of ${reportProgress.total} positions…`
+                : 'Scoring positions locally with Stockfish…'}
+            </p>
+            <button type="button" onClick={() => void onCancelReport()} disabled={reportCancelling}>
+              {reportCancelling ? 'Cancelling…' : 'Cancel report'}
+            </button>
           </>
         ) : reportError ? (
           <>

@@ -45,12 +45,12 @@ describe('provider adapters', () => {
       assert.equal(JSON.stringify(body).includes(INPUT), true);
       assert.equal(JSON.stringify(body).includes('untrusted data'), true);
       assert.equal(request.init.redirect, 'error');
-      if (provider === 'custom') {
-        assert.equal(body.max_tokens, 500);
-        assert.equal(body.max_completion_tokens, undefined);
-      } else if (provider === 'openai' || provider === 'opencode') {
+      if (provider === 'openai') {
         assert.equal(body.max_completion_tokens, 500);
         assert.equal(body.max_tokens, undefined);
+      } else if (provider === 'opencode' || provider === 'custom') {
+        assert.equal(body.max_tokens, 500);
+        assert.equal(body.max_completion_tokens, undefined);
       }
 
       if (provider === 'anthropic') {
@@ -111,6 +111,21 @@ describe('provider adapters', () => {
       assert.equal(String(error).includes('unexpected'), false);
       return true;
     });
+  });
+
+  it('reports a reasoning-only reply as an explicit error, not an unreadable response', async () => {
+    const bodies = [
+      { choices: [{ message: { content: null, reasoning: 'thought' } }] },
+      { choices: [{ message: { content: null, reasoning_content: 'thought' } }] },
+      { choices: [{ message: { content: '   ', reasoning_content: 'thought' } }] },
+    ];
+    for (const body of bodies) {
+      const fetchStub: typeof fetch = async () => new Response(JSON.stringify(body), { status: 200 });
+      await assert.rejects(
+        callProvider(configuration('openai'), INPUT, fetchStub),
+        /reasoning but no final answer/,
+      );
+    }
   });
 });
 

@@ -12,16 +12,31 @@ export interface ShutdownDependencies {
 }
 
 export interface ShutdownHooks {
+  beginStart(): void;
+  captureAllowed(): boolean;
   onWindowAllClosed(): void;
   onConsentRevoked(): void;
   onBeforeQuit(event: ShutdownEvent): void;
 }
 
 export function createShutdownHooks(deps: ShutdownDependencies): ShutdownHooks {
+  let captureDesired = false;
   let quitting = false;
-  const beginStop = (): Promise<unknown> => deps.stop().catch(() => undefined);
+  let exitAllowed = false;
+  const beginStop = (): Promise<unknown> => {
+    captureDesired = false;
+    return deps.stop().catch(() => undefined);
+  };
 
   return {
+    beginStart() {
+      if (quitting) return;
+      captureDesired = true;
+      exitAllowed = false;
+    },
+    captureAllowed() {
+      return captureDesired;
+    },
     onWindowAllClosed() {
       void beginStop();
     },
@@ -29,10 +44,18 @@ export function createShutdownHooks(deps: ShutdownDependencies): ShutdownHooks {
       void beginStop();
     },
     onBeforeQuit(event) {
-      if (quitting || !deps.hasActive()) return;
+      if (exitAllowed) return;
+      if (!deps.hasActive()) {
+        exitAllowed = true;
+        return;
+      }
       event.preventDefault();
+      if (quitting) return;
       quitting = true;
-      void beginStop().finally(() => deps.quit());
+      void beginStop().finally(() => {
+        exitAllowed = true;
+        deps.quit();
+      });
     },
   };
 }

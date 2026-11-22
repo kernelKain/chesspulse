@@ -11,6 +11,7 @@
     "build": "tsc -p tsconfig.electron.json && vite build",
     "dev": "node scripts/dev.mjs",
     "report": "tsc -p tsconfig.electron.json && node dist-electron/main/report.js",
+    "bench:depth": "tsc -p tsconfig.electron.json && node scripts/engine-depth-bench.mjs",
     "start": "electron ."
   },
   "build": {

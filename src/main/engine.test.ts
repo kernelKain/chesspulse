@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import { Worker } from 'node:worker_threads';
 import { Chess } from 'chess.js';
@@ -52,6 +53,44 @@ describe('createEngine', { concurrency: false }, () => {
     }
   });
 
+  it('restarts a crashed worker once and retries the same position', async () => {
+    let spawned = 0;
+    const spawnWorker = (): Worker => {
+      spawned += 1;
+      if (spawned === 1) {
+        return new Worker(
+          "require('node:worker_threads').parentPort.on('message', () => { throw new Error('worker crashed'); });",
+          { eval: true },
+        );
+      }
+      return new Worker(path.join(process.cwd(), 'dist-electron/main/engine-worker.js'));
+    };
+    const engine = createEngine({ depth: 4, spawnWorker });
+    try {
+      const result = await engine.evaluate(START_FEN);
+      assert.equal(result.evalFailed, false);
+      assert.equal(spawned, 2);
+    } finally {
+      await engine.close();
+    }
+  });
+
+  it('cancels an in-flight search and reports it', async () => {
+    const worker = new Worker('setInterval(() => {}, 1000);', { eval: true });
+    const controller = new AbortController();
+    const engine = createEngine({ worker, timeoutMs: 60_000, signal: controller.signal });
+    try {
+      const pending = engine.evaluate(START_FEN);
+      setTimeout(() => controller.abort(), 20);
+      const result = await pending;
+      assert.equal(result.evalFailed, true);
+      assert.equal(result.reason, 'cancelled');
+    } finally {
+      await engine.close();
+      await worker.terminate();
+    }
+  });
+
   it('scores the start and repeats that score', async () => {
     const engine = createEngine({ depth: ENGINE_DEPTH });
     try {
@@ -67,8 +106,8 @@ describe('createEngine', { concurrency: false }, () => {
     }
   });
 
-  it('evaluates 60 positions at depth 8 inside the proof bound', async () => {
-    const engine = createEngine({ depth: ENGINE_DEPTH });
+  it('evaluates 60 positions at depth 8 inside the P3 proof bound', async () => {
+    const engine = createEngine({ depth: 8 });
     const fens = sixtyPositions();
     try {
       await engine.evaluate(fens[0] ?? START_FEN);

@@ -18,6 +18,17 @@ function undated(pgn: string): string {
   return pgn.replace(/\[(EndDate|EndTime|UTCDate|UTCTime)\s+"[^"]*"\]\r?\n/g, '');
 }
 
+function illegalGame(): string {
+  const shuffles = Array.from({ length: 11 }, () => 'Nf3 Nf6 Ng1 Ng8').join(' ');
+  return `[Event "Live Chess"]
+[White "Ada"]
+[Black "Nim"]
+[Result "1-0"]
+
+1. ${shuffles} 23. e5 1-0
+`;
+}
+
 describe('validatePasteBatch', () => {
   it('returns the empty state when all slots are blank', () => {
     const result = validatePasteBatch(['', '   ', '\n']);
@@ -115,6 +126,21 @@ describe('validatePasteBatch', () => {
     assert.equal(result.state, 'valid');
     assert.equal(result.canBuild, false);
     assert.match(result.message, /Add a finished game/);
+  });
+
+  it('finds an illegal move at paste time and names the game and move', async () => {
+    const result = validatePasteBatch([await fixture('checkmate.pgn'), illegalGame()]);
+    assert.equal(result.state, 'invalid');
+    assert.equal(result.canBuild, false);
+    assert.equal(result.summary.total, 1);
+    assert.equal(result.slots[0]?.status, 'valid');
+    assert.equal(result.slots[1]?.status, 'invalid');
+    if (result.slots[1]?.status === 'invalid') {
+      assert.equal(
+        result.slots[1].message,
+        'Game 2, move 23 (e5) is not legal from this position. Check that the PGN came from chess.com.',
+      );
+    }
   });
 
   it('keeps valid ticks on good slots while naming the broken slot', async () => {

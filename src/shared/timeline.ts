@@ -110,6 +110,25 @@ export function alignmentConfidenceLabel(report: Pick<Report, 'alignmentMode' | 
   return `Inferred from paste order (±${tolerance})`;
 }
 
+export function engineCalibrationNote(engine: Report['engine']): string {
+  return `Engine depth ${engine.depth}. Speed is checked on fixtures; move accuracy is not calibrated against your games.`;
+}
+
+export function engineFailureNote(engine: Report['engine']): string | null {
+  if (engine.failed === 0) return null;
+  const positions = (count: number): string => `${count} ${count === 1 ? 'position' : 'positions'}`;
+  const parts: string[] = [];
+  if (engine.reasons.timeout > 0) parts.push(`${positions(engine.reasons.timeout)} timed out`);
+  if (engine.reasons.crash > 0) parts.push(`${positions(engine.reasons.crash)} crashed the engine`);
+  if (engine.reasons.engine > 0) parts.push(`${positions(engine.reasons.engine)} hit an engine error`);
+  if (engine.reasons.budget > 0) parts.push(`${positions(engine.reasons.budget)} ran out of the time budget`);
+  if (parts.length === 0) return `${positions(engine.failed)} could not be scored.`;
+  if (parts.length === 1) {
+    return `${parts[0]} and ${engine.failed === 1 ? 'was' : 'were'} left out.`;
+  }
+  return `${parts.join(', ')}; ${positions(engine.failed)} ${engine.failed === 1 ? 'was' : 'were'} left out.`;
+}
+
 export function buildTimelineView(result: Report | Refusal | null): TimelineViewModel {
   if (!result) return emptyView();
   if (!result.ok) {
@@ -260,9 +279,9 @@ export function moveTableRows(view: TimelineViewModel): TimelineMoveRow[] {
       san: move.san,
       pulseBpm: pulse ? `${formatNumber(pulse.bpm)} bpm` : '—',
       band: move.band === 'elevated' ? 'Elevated' : move.band === 'settled' ? 'Settled' : 'No reading',
-      cpl: move.cpl === null ? 'Unscored' : `${Math.round(move.cpl)} cp`,
+      cpl: move.mate ? 'Mate' : move.cpl === null ? 'Unscored' : `${Math.round(move.cpl)} cp`,
       think: move.thinkSec === null ? '—' : `${formatNumber(move.thinkSec)} s`,
-      note: move.blunder ? 'Blunder' : move.cpl === null ? 'Mate or unscored' : '',
+      note: move.blunder ? 'Blunder' : move.mate ? 'Mate' : move.cpl === null ? 'Unscored' : '',
     };
   });
 }
@@ -466,7 +485,7 @@ function nearestMoveTo(moves: readonly TimelineMove[], tUs: number): TimelineMov
 }
 
 function formatMoveReadout(move: TimelineMove): string {
-  const cpl = move.cpl === null ? 'unscored' : `${Math.round(move.cpl)} cpl`;
+  const cpl = move.mate ? 'mate' : move.cpl === null ? 'unscored' : `${Math.round(move.cpl)} cpl`;
   const think = move.thinkSec === null ? '' : `, ${formatNumber(move.thinkSec)} s think`;
   const blunder = move.blunder ? ', blunder' : '';
   return ` · ${move.san} (${cpl}${think}${blunder})`;

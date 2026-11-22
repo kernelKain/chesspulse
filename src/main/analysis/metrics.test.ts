@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { bandFor } from './bands.js';
-import { analyseMoves, scoreMove, verdictLine, type MoveMetric } from './metrics.js';
+import { analyseMoves, mateToCp, scoreMove, verdictLine, type MoveMetric } from './metrics.js';
 
 const ok = (scoreCp: number) => ({ evalFailed: false, scoreCp });
 const failed = { evalFailed: true };
@@ -12,6 +12,7 @@ function counted(partial: Partial<MoveMetric> & Pick<MoveMetric, 'band'>): MoveM
     cpl: partial.cpl ?? 0,
     accuracy: partial.accuracy ?? 80,
     blunder: partial.blunder ?? false,
+    mate: partial.mate ?? false,
     band: partial.band,
     includeInStats: partial.includeInStats ?? true,
   };
@@ -39,19 +40,56 @@ describe('scoreMove', () => {
     assert.equal(move.cpl, 0);
     assert.equal(move.accuracy, 100);
     assert.equal(move.blunder, false);
+    assert.equal(move.mate, false);
   });
 
-  it('marks a large win-chance drop as a blunder and does not invent a mate loss', () => {
+  it('marks a large win-chance drop as a blunder and leaves a failed eval unscored', () => {
     const blunder = scoreMove(ok(0), ok(500), 'elevated', true);
     assert.equal(blunder.cpl, 500);
     assert.ok(blunder.accuracy !== null && Math.abs(blunder.accuracy - 19.062376700446695) < 1e-9);
     assert.equal(blunder.blunder, true);
-    const mate = scoreMove({ evalFailed: false, mate: 1 }, ok(-100), 'settled', true);
+    const thrown = scoreMove({ evalFailed: false, mate: 1 }, ok(-100), 'settled', true);
+    assert.equal(thrown.mate, true);
+    assert.equal(thrown.cpl, null);
+    assert.equal(thrown.blunder, true);
     const missing = scoreMove(failed, ok(-20), 'settled', true);
-    assert.equal(mate.cpl, null);
-    assert.equal(mate.blunder, false);
     assert.equal(missing.cpl, null);
     assert.equal(missing.accuracy, null);
+    assert.equal(missing.mate, false);
+  });
+
+  it('counts a move into forced mate as a blunder without a centipawn value', () => {
+    const move = scoreMove(ok(50), { evalFailed: false, mate: 1 }, 'elevated', true);
+    assert.equal(move.mate, true);
+    assert.equal(move.cpl, null);
+    assert.equal(move.blunder, true);
+    assert.ok(move.accuracy !== null && move.accuracy < 20);
+  });
+
+  it('does not penalise a mating move and gives it full accuracy', () => {
+    const move = scoreMove(ok(50), { evalFailed: false, terminal: 'checkmate' }, 'settled', true);
+    assert.equal(move.mate, true);
+    assert.equal(move.cpl, null);
+    assert.equal(move.blunder, false);
+    assert.equal(move.accuracy, 100);
+  });
+
+  it('counts a move into stalemate from a won position as a blunder', () => {
+    const move = scoreMove(ok(1000), { evalFailed: false, terminal: 'stalemate' }, 'settled', true);
+    assert.equal(move.mate, false);
+    assert.equal(move.cpl, 1000);
+    assert.equal(move.blunder, true);
+    assert.ok(move.accuracy !== null && move.accuracy < 50);
+  });
+});
+
+describe('mateToCp', () => {
+  it('orders mates above any centipawn advantage and keeps distance monotonic', () => {
+    assert.equal(mateToCp(1), 9900);
+    assert.equal(mateToCp(-1), -9900);
+    assert.ok(mateToCp(1) > mateToCp(2));
+    assert.ok(mateToCp(2) > 1000);
+    assert.ok(mateToCp(1) > 0);
   });
 });
 
@@ -122,7 +160,7 @@ describe('verdictLine', () => {
       /in the 1 minute your pulse was elevated, peaking 12 bpm above baseline/,
     );
     const mate = analyseMoves([
-      { cpl: null, accuracy: null, blunder: false, band: 'settled', includeInStats: true },
+      { cpl: null, accuracy: null, blunder: false, mate: false, band: 'settled', includeInStats: true },
     ]);
     assert.equal(mate.unscored, 1);
     assert.equal(mate.blunders, 0);

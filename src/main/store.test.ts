@@ -55,6 +55,13 @@ function reportFor(sessionId: string, pgns: readonly string[]): Report {
     verdict: 'Accuracy 71% settled.',
     settled: { band: 'settled', moves: 5, status: 'ok', accuracy: 71 },
     elevated: { band: 'elevated', moves: 0, status: 'insufficient' },
+    engine: {
+      depth: 12,
+      positions: 0,
+      scored: 0,
+      failed: 0,
+      reasons: { timeout: 0, crash: 0, engine: 0, budget: 0 },
+    },
     alignmentMode: 'endtime',
     toleranceSec: 1,
     games: [],

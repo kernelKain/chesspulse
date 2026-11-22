@@ -5,8 +5,31 @@ const NUMBER = /(?<![\d.])[-+]?(?:\d[\d,]*(?:\.\d*)?|\.\d[\d,]*)(?:[eE][-+]?\d+)
 const VALID_COMMA_NUMBER = /^[-+]?(?:\d+(?:,\d{3})*(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/;
 const UNICODE_NEGATIVE_NUMBER = /[\u2212\uFE63\uFF0D]\s*\p{Nd}/u;
 
+/**
+ * A fixed, deliberately narrow list. It catches diagnostic vocabulary and direct claims about the
+ * player's mind or body; it does not try to police tone, and measured pulse language stays allowed.
+ */
+const CLAIM_PATTERNS: readonly RegExp[] = [
+  /\bdiagnos(?:e|ed|es|ing|is|tic)\b/i,
+  /\b(?:medical|clinical|clinically)\b/i,
+  /\b(?:disorder|syndrome|disease|illness|symptom|symptoms)\b/i,
+  /\b(?:therapy|treatment|medication|medications|prescription|prescriptions)\b/i,
+  /\b(?:hypertension|arrhythmia|cardiac|cardiovascular)\b/i,
+  /\b(?:heart rate|heart disease|blood pressure|stress response)\b/i,
+  /\b(?:cortisol|adrenaline|adrenal|fight or flight)\b/i,
+  /\bmental health\b/i,
+  /\b(?:anxiety|anxious|depression|depressed|panic attack|ptsd|adhd|autism)\b/i,
+  /\byou (?:were|felt|seemed|looked|appeared|got|became|stayed|remained|sounded) (?:anxious|nervous|stressed|panicked|panicking|afraid|scared|angry|frustrated|upset|overwhelmed|tilted|calm|relaxed|focused|distracted|tired|exhausted)\b/i,
+  /\byou (?:must|might|may) have (?:been|felt) (?:anxious|nervous|stressed|panicked|overwhelmed|tilted|calm|relaxed)\b/i,
+  /\byou (?:were|felt|seemed|looked|appeared) (?:in|under) (?:stress|pressure|distress)\b/i,
+  /\byou (?:panicked|tilted|choked|froze)\b/i,
+  /\byour (?:anxiety|stress|nerves|emotions|emotional state|mental state|physical state|mood|frame of mind|brain|body|nervous system)\b/i,
+  /\b(?:felt|feeling) (?:anxious|nervous|stressed|panicked|overwhelmed|tilted)\b/i,
+];
+
 export function groundInsight(stats: unknown, output: string): string {
   assertSupportedNotation(output);
+  assertNoClaims(output);
   for (const match of output.matchAll(NUMBER)) {
     const token = withoutSentencePunctuation(match[0]);
     if (token.includes(',') && !VALID_COMMA_NUMBER.test(token)) {
@@ -30,6 +53,14 @@ function assertSupportedNotation(text: string): void {
   const unsupported = unicodeNegative?.[0] ?? unicodeDigit;
   if (unsupported) {
     throw new Error(`The AI response used unsupported numeric notation: ${unsupported}. Nothing in the report changed.`);
+  }
+}
+
+function assertNoClaims(text: string): void {
+  for (const pattern of CLAIM_PATTERNS) {
+    if (pattern.test(text)) {
+      throw new Error('The AI response made a diagnostic or mental-state claim. Nothing in the report changed.');
+    }
   }
 }
 

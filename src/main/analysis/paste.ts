@@ -9,6 +9,7 @@ import {
   type PgnGame,
 } from '../../shared/contracts.js';
 import { parsePgn, parsePgnBatch } from './pgn.js';
+import { firstIllegalMove, illegalMoveMessage } from './positions.js';
 
 const MAX_GAMES = 20;
 const PASTE_BYTE_LIMIT = 2_000_000;
@@ -79,11 +80,21 @@ export function validatePasteBatch(slots: readonly string[]): PasteValidation {
     else invalidBySlot.set(entry.slotIndex, parsed.message);
   }
 
-  const validGames = [...parsedBySlot.values()];
+  const illegalBySlot = new Map<number, string>();
+  for (const [slotIndex, game] of parsedBySlot) {
+    const illegal = firstIllegalMove(game.moves.map((move) => move.san));
+    if (illegal) illegalBySlot.set(slotIndex, illegalMoveMessage(slotIndex + 1, illegal));
+  }
+
+  const validGames = [...parsedBySlot.entries()]
+    .filter(([slotIndex]) => !illegalBySlot.has(slotIndex))
+    .map(([, game]) => game);
   const validSummary = summarizeBatch(validGames);
 
-  if (invalidBySlot.size > 0) {
-    const invalidLabels = [...invalidBySlot.keys()]
+  const problemBySlot = new Map<number, string>([...invalidBySlot, ...illegalBySlot]);
+
+  if (problemBySlot.size > 0) {
+    const invalidLabels = [...problemBySlot.keys()]
       .sort((left, right) => left - right)
       .map((slotIndex) => slotIndex + 1);
     const target =
@@ -96,7 +107,7 @@ export function validatePasteBatch(slots: readonly string[]): PasteValidation {
       message: `Fix ${target} before continuing.`,
       summary: validSummary,
       slots: slots.map((_text, slotIndex): PasteSlot => {
-        const error = invalidBySlot.get(slotIndex);
+        const error = problemBySlot.get(slotIndex);
         if (error !== undefined) return { slotIndex, status: 'invalid', message: error };
         const game = parsedBySlot.get(slotIndex);
         if (game) return { slotIndex, status: 'valid', game: summarizeGame(game) };

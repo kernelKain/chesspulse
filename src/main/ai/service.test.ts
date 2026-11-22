@@ -23,6 +23,13 @@ const REPORT: Report = {
   verdict: 'Accuracy 71% settled.',
   settled: { band: 'settled', moves: 5, status: 'ok', accuracy: 71 },
   elevated: { band: 'elevated', moves: 0, status: 'insufficient' },
+  engine: {
+    depth: 12,
+    positions: 0,
+    scored: 0,
+    failed: 0,
+    reasons: { timeout: 0, crash: 0, engine: 0, budget: 0 },
+  },
   alignmentMode: 'endtime',
   toleranceSec: 1,
   games: [],
@@ -191,6 +198,23 @@ describe('requestInsight', () => {
       /introduced a number/,
     );
     assert.equal(groundingCalls, 1);
+  });
+
+  it('surfaces a reasoning-only reply as an explicit error without retrying', async () => {
+    let calls = 0;
+    await assert.rejects(
+      requestInsight(REQUEST, REPORT, [PGN], ENV, {
+        fetch: async () => {
+          calls += 1;
+          return new Response(
+            JSON.stringify({ choices: [{ message: { content: null, reasoning_content: 'thought' } }] }),
+            { status: 200 },
+          );
+        },
+      }),
+      /reasoning but no final answer/,
+    );
+    assert.equal(calls, 1);
   });
 
   it('does not repeat a call whose headers time out', async () => {

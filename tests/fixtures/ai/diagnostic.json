@@ -1,0 +1,6 @@
+{
+  "name": "diagnostic mental-state claim",
+  "stats": { "baselineBpm": 70, "elevatedMinutes": 11 },
+  "response": "You were anxious, and your heart rate suggests a stress response.",
+  "expected": "reject_claim"
+}

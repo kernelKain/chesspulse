@@ -529,6 +529,21 @@ textarea {
   max-width: 44rem;
 }
 
+.verdict-note {
+  margin: 10px 0 0;
+  color: var(--warn);
+  font-size: 14px;
+  max-width: 44rem;
+}
+
+.verdict-note + .verdict-note {
+  margin-top: 4px;
+}
+
+.verdict-engine {
+  color: var(--muted);
+}
+
 .band-bars {
   margin-top: 32px;
 }

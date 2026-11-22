@@ -99,8 +99,8 @@ function providerRequest(config: AiConfiguration, prompt: string, signal?: Abort
     headers.Authorization = `Bearer ${config.key}`;
     body = {
       model: config.model,
-      // Ollama's OpenAI-compatible custom endpoint documents max_tokens, not the newer native field.
-      ...(config.provider === 'custom' ? { max_tokens: 500 } : { max_completion_tokens: 500 }),
+      // OpenAI recommends max_completion_tokens; OpenCode's OpenAI-compatible examples use max_tokens.
+      ...(config.provider === 'openai' ? { max_completion_tokens: 500 } : { max_tokens: 500 }),
       stream: false,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
@@ -111,10 +111,14 @@ function providerRequest(config: AiConfiguration, prompt: string, signal?: Abort
   return { url, init: { method: 'POST', headers, body: JSON.stringify(body), signal, redirect: 'error' } };
 }
 
+const openAiMessage = z.object({
+  content: z.string().nullable().optional(),
+  reasoning: z.unknown().optional(),
+  reasoning_content: z.unknown().optional(),
+  refusal: z.string().nullable().optional(),
+});
 const openAiResponse = z.object({
-  choices: z.array(
-    z.object({ message: z.object({ content: z.string().min(1) }) }),
-  ).min(1),
+  choices: z.array(z.object({ message: openAiMessage })).min(1),
 });
 const textBlock = z.object({ type: z.literal('text'), text: z.string().min(1) });
 const anthropicResponse = z.object({ content: z.array(z.unknown()) });
@@ -145,7 +149,22 @@ function parseProviderText(provider: AiProvider, value: unknown): string {
     }
   } else {
     const parsed = openAiResponse.safeParse(value);
-    if (parsed.success) text = parsed.data.choices[0].message.content;
+    if (parsed.success) {
+      const message = parsed.data.choices[0]?.message;
+      if (message?.content && message.content.trim().length > 0) {
+        text = message.content;
+      } else if (message && (message.reasoning !== undefined || message.reasoning_content !== undefined)) {
+        throw new AiProviderError(
+          'The AI provider returned reasoning but no final answer. Try a different model.',
+          false,
+        );
+      } else if (message?.refusal && message.refusal.trim().length > 0) {
+        throw new AiProviderError(
+          'The AI provider refused the request. Nothing in this report depends on it.',
+          false,
+        );
+      }
+    }
   }
   if (!text.trim()) throw new AiProviderError('The AI provider returned an unreadable response.', false);
   return text;

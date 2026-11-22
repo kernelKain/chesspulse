@@ -251,6 +251,20 @@ describe('session controller', () => {
     }
   });
 
+  it('recovers the ingest tail after a rejected append and finalizes a storage stop', async () => {
+    const root = useRoot();
+    const started = await startSession(root, anchor, '3+2');
+    const broken = [{ ...sample(0, 70), confidence: 'high' }] as unknown as PulseSample[];
+    await assert.rejects(() => ingestSamples(root, broken), /not a pulse sample/);
+    await ingestSamples(root, [sample(1_000_000, 74)]);
+
+    const stopped = await stopSession(root, { monoUs: 2_000_000, epochMs: anchor.epochMs + 2_000 }, 'storage');
+
+    assert.equal(stopped.id, started.id);
+    assert.equal(stopped.stopReason, 'storage');
+    assert.deepEqual(await readSamples(root, started.id), [sample(1_000_000, 74)]);
+  });
+
   it('does not accept samples while the sample file needs repair', async () => {
     const root = useRoot();
     const started = await startSession(root, anchor, '3+2');

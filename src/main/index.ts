@@ -32,6 +32,7 @@ import { registerPasteHandler } from './paste.js';
 import { registerReportHandler } from './report-ipc.js';
 import { grantsMediaPermission } from './permission.js';
 import {
+  hasActiveSession,
   ingestSamples,
   recoverInterruptedSessions,
   setSampleSink,
@@ -161,17 +162,26 @@ function registerSessionHandlers(): void {
     const parsed = sessionStartRequestSchema.safeParse(payload);
     if (!parsed.success) throw new Error('Choose a time control before starting.');
     if (capture) throw new Error('A session is already running.');
+    shutdownHooks.beginStart();
     // A previous stop may still be draining the camera; the SDK is process-global.
     if (stoppingSession) await stoppingSession.catch(() => undefined);
+    if (!shutdownHooks.captureAllowed()) {
+      throw new Error('Sensing was cancelled before it started.');
+    }
     const apiKey = readSensingKey(process.env);
     if (!apiKey) throw new Error('The SmartSpectra key is missing. Add SMARTSPECTRA_API_KEY to .env.');
     const anchor = currentAnchor();
     lastValidationCode = null;
+    if (!hasActiveSession(defaultDataRoot())) sessionStopper.beginSession();
     const meta = await startSession(defaultDataRoot(), anchor, parsed.data.timeControl, {
       onLimit: () => {
         void stopEverything('limit').catch(() => undefined);
       },
     });
+    if (!shutdownHooks.captureAllowed()) {
+      await stopEverything('user').catch(() => undefined);
+      throw new Error('Sensing was cancelled before the camera opened.');
+    }
     coach = new BetweenGamesCoach(meta.startAnchor.monoUs);
     // Consent can be withdrawn while the header is written. Checked again immediately before the
     // camera opens, with no await in between, so a revocation cannot slip through.

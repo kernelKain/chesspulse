@@ -15,21 +15,36 @@ function meta(reason: NonNullable<SessionMeta['stopReason']>): SessionMeta {
   };
 }
 
-function harness(captureReason?: SessionEndReason) {
+function harness(
+  captureReason?: SessionEndReason,
+  options: { failFirstFinalize?: boolean; failFirstPublish?: boolean; captureOnce?: boolean } = {},
+) {
   const publishes: SessionEnded[] = [];
   const stopReasons: SessionStopReason[] = [];
   let releaseCapture: () => void = () => undefined;
   let waitForCapture = false;
+  let captures = 0;
+  let finalizations = 0;
+  let publishAttempts = 0;
   const stopper = createSessionStopper({
     stopCapture: async () => {
       if (waitForCapture) await new Promise<void>((resolve) => { releaseCapture = resolve; });
-      return captureReason;
+      captures += 1;
+      return options.captureOnce && captures > 1 ? undefined : captureReason;
     },
     stopSession: async (reason) => {
       stopReasons.push(reason);
+      finalizations += 1;
+      if (options.failFirstFinalize && finalizations === 1) {
+        throw new Error('injected finalize failure');
+      }
       return meta(reason);
     },
     publish: (event) => {
+      publishAttempts += 1;
+      if (options.failFirstPublish && publishAttempts === 1) {
+        throw new Error('injected publish failure');
+      }
       publishes.push(event);
     },
   });
@@ -68,6 +83,43 @@ describe('session stop orchestration', () => {
     await manual.stopper.stop('user');
     assert.deepEqual(manual.stopReasons, ['user']);
     assert.deepEqual(manual.publishes, []);
+  });
+
+  it('reuses a storage reason after finalization fails and publishes once on retry', async () => {
+    const test = harness('storage', { failFirstFinalize: true, captureOnce: true });
+
+    await assert.rejects(test.stopper.stop('user'), /finalize failure/);
+    assert.deepEqual(test.stopReasons, ['storage']);
+    assert.equal(test.publishes.length, 0);
+
+    const stopped = await test.stopper.stop('user');
+
+    assert.equal(stopped.stopReason, 'storage');
+    assert.deepEqual(test.stopReasons, ['storage', 'storage']);
+    assert.deepEqual(test.publishes.map((event) => event.reason), ['storage']);
+  });
+
+  it('clears a pending automatic reason before a later session', async () => {
+    const test = harness('storage', { failFirstFinalize: true, captureOnce: true });
+    await assert.rejects(test.stopper.stop('user'), /finalize failure/);
+
+    test.stopper.beginSession();
+    const stopped = await test.stopper.stop('user');
+
+    assert.equal(stopped.stopReason, 'user');
+    assert.deepEqual(test.stopReasons, ['storage', 'user']);
+    assert.equal(test.publishes.length, 0);
+  });
+
+  it('clears a pending reason after finalization succeeds even if publication fails', async () => {
+    const test = harness('storage', { failFirstPublish: true, captureOnce: true });
+
+    await assert.rejects(test.stopper.stop('user'), /publish failure/);
+    const stopped = await test.stopper.stop('user');
+
+    assert.equal(stopped.stopReason, 'user');
+    assert.deepEqual(test.stopReasons, ['storage', 'user']);
+    assert.equal(test.publishes.length, 0);
   });
 
   it('shares one finalization and publication across concurrent stop requests', async () => {

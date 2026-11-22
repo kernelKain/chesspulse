@@ -6,8 +6,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import type { PulseSample } from '../shared/contracts.js';
-import { SAMPLE_HOLD_US } from '../shared/sensing.js';
-import { bandAt, buildReport, COVERAGE_GATE_PCT, elevatedClaim, formatResult } from './report.js';
+import { CONFIDENCE_FLOOR, SAMPLE_HOLD_US } from '../shared/sensing.js';
+import { bandFor } from './analysis/bands.js';
+import { createBandLookup, buildReport, COVERAGE_GATE_PCT, elevatedClaim, formatResult } from './report.js';
+import { positionsFromMoves } from './analysis/positions.js';
+import { ENGINE_DEPTH } from './engine.js';
 import { requestInsight } from './ai/service.js';
 import { ingestSamples, startSession, stopSession } from './session.js';
 import { digestGames, readGames, readReport } from './store.js';
@@ -29,10 +32,15 @@ function sample(tUs: number, bpm = 70): PulseSample {
   return { tUs, bpm, confidence: 80, stable: true };
 }
 
-async function session(root: string, samples: PulseSample[], stopUs: number): Promise<string> {
-  const started = await startSession(root, { monoUs: 0, epochMs: EPOCH }, '60');
+async function session(
+  root: string,
+  samples: PulseSample[],
+  stopUs: number,
+  startEpoch = EPOCH,
+): Promise<string> {
+  const started = await startSession(root, { monoUs: 0, epochMs: startEpoch }, '60');
   await ingestSamples(root, samples);
-  await stopSession(root, { monoUs: stopUs, epochMs: EPOCH + stopUs / 1000 }, 'user');
+  await stopSession(root, { monoUs: stopUs, epochMs: startEpoch + stopUs / 1000 }, 'user');
   return started.id;
 }
 
@@ -54,6 +62,42 @@ function pgnAt(endEpochMs: number): string {
 `;
 }
 
+function illegalPgnAt(endEpochMs: number): string {
+  const shuffles = Array.from({ length: 11 }, () => 'Nf3 Nf6 Ng1 Ng8').join(' ');
+  return pgnAt(endEpochMs).replace('1. e4 {[%clk 0:00:50]} 1-0', `1. ${shuffles} 23. e5 1-0`);
+}
+
+function clockText(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  return `${hours}:${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`;
+}
+
+function longPgnAt(endEpochMs: number): string {
+  const end = new Date(endEpochMs);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const date = `${end.getUTCFullYear()}.${pad(end.getUTCMonth() + 1)}.${pad(end.getUTCDate())}`;
+  const time = `${pad(end.getUTCHours())}:${pad(end.getUTCMinutes())}:${pad(end.getUTCSeconds())}`;
+  const moves: string[] = [];
+  for (let full = 0; full < 80; full += 1) {
+    const pair = full % 2 === 0 ? ['Nf3', 'Nf6'] : ['Ng1', 'Ng8'];
+    const seconds = 5399 - full;
+    moves.push(`${full + 1}. ${pair[0]} {[%clk ${clockText(seconds)}]} ${pair[1]} {[%clk ${clockText(seconds)}]}`);
+  }
+  return `[Event "Live Chess"]
+[White "Ada"]
+[Black "Nim"]
+[Result "1-0"]
+[TimeControl "5400"]
+[Termination "Ada won by resignation"]
+[EndDate "${date}"]
+[EndTime "${time}"]
+
+${moves.join(' ')} 1-0
+`;
+}
+
 function evaluator() {
   return {
     async evaluate(fen: string) {
@@ -63,14 +107,45 @@ function evaluator() {
   };
 }
 
-describe('bandAt', () => {
+function linearBandAt(
+  samples: readonly PulseSample[],
+  tUs: number,
+  baseline: number,
+): ReturnType<typeof bandFor> {
+  let latest: PulseSample | undefined;
+  for (const entry of samples) {
+    if (entry.tUs <= tUs && (!latest || entry.tUs >= latest.tUs)) latest = entry;
+  }
+  if (!latest || !latest.stable || latest.confidence < CONFIDENCE_FLOOR) return null;
+  if (tUs > latest.tUs + SAMPLE_HOLD_US) return null;
+  return bandFor(latest.bpm, baseline);
+}
+
+describe('band lookup', () => {
   it('uses the latest sample before the move and does not skip a weak one', () => {
     const earlier = sample(0, 90);
     const weak = { tUs: 500_000, bpm: 60, confidence: 10, stable: true };
-    assert.equal(bandAt([earlier, weak], 500_000, 70), null);
-    assert.equal(bandAt([earlier], 500_000, 70), 'elevated');
-    assert.equal(bandAt([earlier], earlier.tUs + SAMPLE_HOLD_US, 70), 'elevated');
-    assert.equal(bandAt([earlier], earlier.tUs + SAMPLE_HOLD_US + 1, 70), null);
+    const withWeak = createBandLookup([earlier, weak], 70);
+    const alone = createBandLookup([earlier], 70);
+    assert.equal(withWeak(500_000), null);
+    assert.equal(alone(500_000), 'elevated');
+    assert.equal(alone(earlier.tUs + SAMPLE_HOLD_US), 'elevated');
+    assert.equal(alone(earlier.tUs + SAMPLE_HOLD_US + 1), null);
+  });
+
+  it('matches the old linear lookup on unsorted, gapped, and weak samples', () => {
+    const samples: PulseSample[] = [
+      sample(9_000_000, 95),
+      sample(1_000_000, 72),
+      { tUs: 4_000_000, bpm: 60, confidence: 10, stable: true },
+      sample(4_000_000, 90),
+      sample(0, 70),
+      sample(2_000_000, 84),
+    ];
+    const lookup = createBandLookup(samples, 70);
+    for (const tUs of [0, 500_000, 1_000_000, 2_500_000, 4_000_000, 5_000_000, 6_000_000, 9_000_000, 12_000_000]) {
+      assert.equal(lookup(tUs), linearBandAt(samples, tUs, 70), `lookup differs at ${tUs}`);
+    }
   });
 
   it('omits a pooled duration when elevated blunders fall in separate stretches', () => {
@@ -190,6 +265,166 @@ describe('buildReport', () => {
     assert.equal(withBanner, `${first.verdict}\nNo EndTime in this paste.\n`);
   });
 
+  it('skips the engine at checkmate and marks the mating move', async () => {
+    const root = useRoot();
+    const endEpoch = Date.UTC(2026, 10, 20, 12, 10, 0);
+    const startEpoch = endEpoch - 30_000;
+    const samples = Array.from({ length: 46 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 45_000_000, startEpoch);
+    const pgn = await readFile('tests/fixtures/pgn/checkmate.pgn', 'utf8');
+    const calls: string[] = [];
+    const result = await buildReport(root, id, [pgn], {
+      async evaluate(fen: string) {
+        calls.push(fen);
+        return { fen, depth: 8, evalFailed: false, scoreCp: 30, bestmove: 'e7e5' };
+      },
+      async close() {},
+    });
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const last = result.timeline.moves.at(-1);
+    assert.equal(last?.san, 'Qxf7#');
+    assert.equal(last?.mate, true);
+    assert.equal(last?.cpl, null);
+    assert.equal(last?.blunder, false);
+    const terminal = positionsFromMoves(['e4', 'e5', 'Qh5', 'Nc6', 'Bc4', 'Nf6', 'Qxf7#']).at(-1)?.fenAfter;
+    assert.ok(terminal);
+    assert.equal(calls.includes(terminal), false);
+  });
+
+  it('refuses a batch with an illegal move before the engine runs', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 46 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 45_000_000);
+    let calls = 0;
+    const result = await buildReport(root, id, [pgnAt(EPOCH + 10_000), illegalPgnAt(EPOCH + 20_000)], {
+      async evaluate(fen: string) {
+        calls += 1;
+        return { fen, depth: 8, evalFailed: false, scoreCp: 12, bestmove: 'e7e5' };
+      },
+      async close() {},
+    });
+
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.reason, 'illegal_move');
+    assert.match(result.remedy, /Game 2, move 23 \(e5\) is not legal from this position/);
+    assert.equal(calls, 0);
+  });
+
+  it('counts positions that time out and states how many were left out', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 21 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 20_000_000);
+    const result = await buildReport(root, id, [pgnAt(EPOCH + 10_000)], {
+      async evaluate(fen: string) {
+        return { fen, depth: 8, evalFailed: true, reason: 'timeout' as const };
+      },
+      async close() {},
+    });
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.engine.depth, ENGINE_DEPTH);
+    assert.equal(result.engine.positions, 2);
+    assert.equal(result.engine.scored, 0);
+    assert.equal(result.engine.failed, 2);
+    assert.equal(result.engine.reasons.timeout, 2);
+    assert.equal(result.engine.reasons.crash, 0);
+  });
+
+  it('counts distinct engine failure reasons instead of collapsing them', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 21 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 20_000_000);
+    let call = 0;
+    const result = await buildReport(root, id, [pgnAt(EPOCH + 10_000)], {
+      async evaluate(fen: string) {
+        call += 1;
+        const reason = call === 1 ? ('timeout' as const) : ('crash' as const);
+        return { fen, depth: 8, evalFailed: true, reason };
+      },
+      async close() {},
+    });
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.engine.positions, 2);
+    assert.equal(result.engine.failed, 2);
+    assert.deepEqual(result.engine.reasons, { timeout: 1, crash: 1, engine: 0, budget: 0 });
+  });
+
+  it('reports scored progress from zero to the position total', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 21 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 20_000_000);
+    const progress: { scored: number; total: number }[] = [];
+    const result = await buildReport(root, id, [pgnAt(EPOCH + 10_000)], evaluator(), {
+      onProgress: (entry) => progress.push(entry),
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(progress[0], { scored: 0, total: 2 });
+    assert.deepEqual(progress.at(-1), { scored: 2, total: 2 });
+    assert.ok(progress.every((entry) => entry.total === 2));
+  });
+
+  it('cancels a rebuild without touching the previous artifacts', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 21 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 20_000_000);
+    const pgn = pgnAt(EPOCH + 10_000);
+    assert.equal((await buildReport(root, id, [pgn], evaluator())).ok, true);
+    const reportFile = path.join(root, 'sessions', id, 'report.json');
+    const gamesFile = path.join(root, 'sessions', id, 'games.json');
+    const reportBefore = await readFile(reportFile, 'utf8');
+    const gamesBefore = await readFile(gamesFile, 'utf8');
+    const controller = new AbortController();
+    let calls = 0;
+
+    const result = await buildReport(
+      root,
+      id,
+      [pgn],
+      {
+        async evaluate(fen: string) {
+          calls += 1;
+          controller.abort();
+          return { fen, depth: 8, evalFailed: false, scoreCp: 12, bestmove: 'e7e5' };
+        },
+        async close() {},
+      },
+      { signal: controller.signal },
+    );
+
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.reason, 'cancelled');
+    assert.ok(calls > 0);
+    assert.equal(await readFile(reportFile, 'utf8'), reportBefore);
+    assert.equal(await readFile(gamesFile, 'utf8'), gamesBefore);
+  });
+
+  it('builds a 90-minute synthetic session inside the stated time bound', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 5401 }, (_unused, index) =>
+      sample(index * 1_000_000, 70 + (index % 10)),
+    );
+    const id = await session(root, samples, 5_400_000_000);
+    const started = process.hrtime.bigint();
+    const result = await buildReport(root, id, [longPgnAt(EPOCH + 5_400_000)], evaluator());
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.timeline.moves.length, 160);
+    assert.ok(elapsedMs < 1500, `90-minute synthetic build took ${elapsedMs.toFixed(0)} ms`);
+    console.log(
+      `90-minute synthetic build: ${elapsedMs.toFixed(0)} ms, ${samples.length} samples, ${result.timeline.moves.length} plies`,
+    );
+  });
+
   it('replaces both artifacts with matching digests after a different PGN rebuild', async () => {
     const root = useRoot();
     const samples = Array.from({ length: 10 }, (_unused, index) => sample(index * 1_000_000));
@@ -206,6 +441,42 @@ describe('buildReport', () => {
     const storedReport = await readReport(root, id);
     assert.equal(storedReport.gamesDigest, digestGames(await readGames(root, id)));
     assert.equal(storedReport.games[0]?.white, 'Grace');
+  });
+
+  it('uses one PGN snapshot for parsing, digest, and the saved batch', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 10 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 10_000_000);
+    const pgn = pgnAt(EPOCH + 10_000);
+    const submitted = [pgn];
+    let releaseEvaluation: () => void = () => undefined;
+    let markEvaluation: () => void = () => undefined;
+    const evaluationGate = new Promise<void>((resolve) => {
+      releaseEvaluation = resolve;
+    });
+    const evaluationStarted = new Promise<void>((resolve) => {
+      markEvaluation = resolve;
+    });
+    const evaluator = {
+      async evaluate(fen: string) {
+        markEvaluation();
+        await evaluationGate;
+        return { fen, depth: 8, evalFailed: false, scoreCp: 12, bestmove: 'e7e5' };
+      },
+      async close() {},
+    };
+
+    const building = buildReport(root, id, submitted, evaluator);
+    await evaluationStarted;
+    submitted.push(pgn.replace('[White "Ada"]', '[White "Late"]'));
+    releaseEvaluation();
+    const result = await building;
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(await readGames(root, id), [pgn]);
+    assert.equal(result.gamesDigest, digestGames([pgn]));
+    assert.equal(result.games[0]?.white, 'Ada');
   });
 
   it('rejects a hand-edited stored PGN batch before any provider call', async () => {

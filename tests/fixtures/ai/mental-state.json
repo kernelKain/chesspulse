@@ -1,0 +1,6 @@
+{
+  "name": "mental-state claim",
+  "stats": { "blunders": 8 },
+  "response": "You felt overwhelmed after the blunder, and you were tilted.",
+  "expected": "reject_claim"
+}

@@ -29,6 +29,17 @@ export interface MoveTime {
   tUs: number | null;
 }
 
+export function moveTimeKey(gameIndex: number, moveIndex: number): string {
+  return `${gameIndex}:${moveIndex}`;
+}
+
+/** One lookup per report replaces a linear find inside the move loop. */
+export function buildMoveTimeIndex(moveTimes: readonly MoveTime[]): Map<string, MoveTime> {
+  return new Map(
+    moveTimes.map((entry) => [moveTimeKey(entry.gameIndex, entry.moveIndex), entry]),
+  );
+}
+
 export interface BetweenGameGap {
   afterIndex: number;
   beforeIndex: number;

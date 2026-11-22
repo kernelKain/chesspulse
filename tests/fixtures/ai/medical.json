@@ -1,0 +1,6 @@
+{
+  "name": "medical diagnosis",
+  "stats": { "baselineBpm": 70 },
+  "response": "This looks like a cardiac condition. Consider medical advice.",
+  "expected": "reject_claim"
+}

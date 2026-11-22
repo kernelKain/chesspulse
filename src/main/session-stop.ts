@@ -13,6 +13,7 @@ export interface SessionStopSeams {
 }
 
 export interface SessionStopper {
+  beginSession(): void;
   stop(reason: SessionStopReason): Promise<SessionMeta>;
   active(): boolean;
 }
@@ -27,14 +28,22 @@ const SESSION_ENDED_COPY: Record<SessionEndReason, string> = {
 // Removed: a second caller could finalize again or publish a different terminal reason.
 export function createSessionStopper(seams: SessionStopSeams): SessionStopper {
   let inFlight: Promise<SessionMeta> | null = null;
+  let pendingReason: SessionEndReason | undefined;
 
   return {
+    beginSession() {
+      pendingReason = undefined;
+    },
     stop(reason) {
       if (inFlight) return inFlight;
       const run = (async () => {
         const captureReason = await seams.stopCapture();
-        const effectiveReason = captureReason ?? reason;
+        const effectiveReason = captureReason ?? pendingReason ?? reason;
+        if (effectiveReason === 'storage' || effectiveReason === 'limit') {
+          pendingReason = effectiveReason;
+        }
         const meta = await seams.stopSession(effectiveReason);
+        pendingReason = undefined;
         if (effectiveReason === 'storage' || effectiveReason === 'limit') {
           seams.publish(
             sessionEndedSchema.parse({

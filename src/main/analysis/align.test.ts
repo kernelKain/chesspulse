@@ -4,11 +4,14 @@ import type { PgnGame, PulseSample } from '../../shared/contracts.js';
 import { SAMPLE_HOLD_US } from '../../shared/sensing.js';
 import {
   alignGames,
+  buildMoveTimeIndex,
   ENDTIME_TOLERANCE_SEC,
   epochMsFromMonoUs,
   monoUsFromEpochMs,
+  moveTimeKey,
   STARTTIME_BANNER,
   STARTTIME_TOLERANCE_SEC,
+  type MoveTime,
   type SessionClock,
 } from './align.js';
 
@@ -269,5 +272,23 @@ describe('alignGames', () => {
     if (!unknown.ok) return;
     assert.equal(unknown.games[0]?.alignment.toleranceSec, STARTTIME_TOLERANCE_SEC);
     assert.equal(unknown.moveTimes.length, 0);
+  });
+});
+
+describe('move time index', () => {
+  it('matches a linear find for every aligned move and misses unknown keys', () => {
+    const aligned = alignGames([game({ index: 0, endTimeEpochMs: EPOCH + 120_000 })], clock);
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    const index = buildMoveTimeIndex(aligned.moveTimes);
+    for (const move of aligned.moveTimes) {
+      const linear: MoveTime | undefined = aligned.moveTimes.find(
+        (entry) => entry.gameIndex === move.gameIndex && entry.moveIndex === move.moveIndex,
+      );
+      const keyed = index.get(moveTimeKey(move.gameIndex, move.moveIndex));
+      assert.deepEqual(keyed, linear);
+      assert.deepEqual(keyed, move);
+    }
+    assert.equal(index.get(moveTimeKey(99, 99)), undefined);
   });
 });

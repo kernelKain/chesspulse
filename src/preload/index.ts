@@ -12,6 +12,8 @@ const SDK_ERROR_CHANNEL = 'cp:sdk:error';
 const PREVIEW_CHANNEL = 'cp:preview';
 const PASTE_VALIDATE_CHANNEL = 'cp:pgn:validate';
 const REPORT_BUILD_CHANNEL = 'cp:report:build';
+const REPORT_PROGRESS_CHANNEL = 'cp:report:progress';
+const REPORT_CANCEL_CHANNEL = 'cp:report:cancel';
 const COACH_GAP_CHANNEL = 'cp:coach:gap';
 const COACH_MESSAGE_CHANNEL = 'cp:coach:message';
 const SESSION_ENDED_CHANNEL = 'cp:session:ended';
@@ -53,6 +55,12 @@ interface SessionEnded {
   sessionId: string;
   reason: 'storage' | 'limit';
   message: string;
+}
+
+interface ReportProgress {
+  sessionId: string;
+  scored: number;
+  total: number;
 }
 
 function readConsentState(value: unknown): ConsentState {
@@ -193,6 +201,19 @@ contextBridge.exposeInMainWorld('chesspulse', {
       ipcRenderer.removeListener(SESSION_ENDED_CHANNEL, handler);
     };
   },
+  onReportProgress(listener: (progress: ReportProgress) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      try {
+        listener(readReportProgress(value));
+      } catch {
+        // A malformed progress event is dropped. The build still resolves or rejects.
+      }
+    };
+    ipcRenderer.on(REPORT_PROGRESS_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(REPORT_PROGRESS_CHANNEL, handler);
+    };
+  },
   requestInsight(request: unknown): Promise<unknown> {
     if (typeof request !== 'object' || request === null) {
       return Promise.reject(new Error('The AI reading needs a session, provider, and question.'));
@@ -246,6 +267,17 @@ contextBridge.exposeInMainWorld('chesspulse', {
         throw new Error('The window returned an unexpected report.');
       }
       return value;
+    });
+  },
+  cancelReport(sessionId: unknown): Promise<{ cancelled: boolean }> {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      return Promise.reject(new Error('Choose a session to cancel.'));
+    }
+    return ipcRenderer.invoke(REPORT_CANCEL_CHANNEL, { sessionId }).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('cancelled' in value) || typeof value.cancelled !== 'boolean') {
+        throw new Error('The window returned an unexpected cancellation.');
+      }
+      return { cancelled: value.cancelled };
     });
   },
 });
@@ -316,8 +348,7 @@ function readCoachMessage(value: unknown): CoachMessage {
   };
 }
 
-function readSessionEnded(value: unknown): SessionEnded {
-  if (typeof value !== 'object' || value === null) {
+function readSessionEnded(value: unknown): SessionEnded {  if (typeof value !== 'object' || value === null) {
     throw new Error('The window returned an unexpected session end.');
   }
   const record = value as { sessionId?: unknown; reason?: unknown; message?: unknown };
@@ -329,6 +360,21 @@ function readSessionEnded(value: unknown): SessionEnded {
     throw new Error('The window returned an unexpected session end.');
   }
   return { sessionId: record.sessionId, reason: record.reason, message: record.message };
+}
+
+function readReportProgress(value: unknown): ReportProgress {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('The window returned unexpected report progress.');
+  }
+  const record = value as { sessionId?: unknown; scored?: unknown; total?: unknown };
+  if (
+    typeof record.sessionId !== 'string' ||
+    typeof record.scored !== 'number' ||
+    typeof record.total !== 'number'
+  ) {
+    throw new Error('The window returned unexpected report progress.');
+  }
+  return { sessionId: record.sessionId, scored: record.scored, total: record.total };
 }
 
 function readSdkError(value: unknown): SdkError {

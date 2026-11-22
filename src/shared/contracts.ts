@@ -115,7 +115,7 @@ export const lowCoverageTraceSchema = z
 export const refusalSchema = z
   .object({
     ok: z.literal(false),
-    reason: z.enum(['low_coverage', 'order', 'no_trace', 'no_games']),
+    reason: z.enum(['low_coverage', 'order', 'no_trace', 'no_games', 'illegal_move', 'cancelled']),
     measured: z.number().finite().optional(),
     threshold: z.number().finite().optional(),
     remedy: z.string().min(1),
@@ -145,6 +145,7 @@ export const timelineMoveSchema = z
     cpl: z.number().finite().nonnegative().nullable(),
     thinkSec: z.number().finite().nonnegative().nullable(),
     blunder: z.boolean(),
+    mate: z.boolean(),
     band: z.enum(['settled', 'elevated']).nullable(),
   })
   .strict();
@@ -205,6 +206,22 @@ export const reportSchema = z
     verdict: z.string().min(1),
     settled: bandSummarySchema,
     elevated: bandSummarySchema,
+    engine: z
+      .object({
+        depth: z.number().int().positive(),
+        positions: z.number().int().nonnegative(),
+        scored: z.number().int().nonnegative(),
+        failed: z.number().int().nonnegative(),
+        reasons: z
+          .object({
+            timeout: z.number().int().nonnegative(),
+            crash: z.number().int().nonnegative(),
+            engine: z.number().int().nonnegative(),
+            budget: z.number().int().nonnegative(),
+          })
+          .strict(),
+      })
+      .strict(),
     alignmentMode: alignmentModeSchema,
     toleranceSec: z.number().finite().nonnegative(),
     banner: z.string().min(1).optional(),
@@ -308,6 +325,26 @@ export const reportBuildRequestSchema = z
     (value) => new TextEncoder().encode(value.pgns.join('\n')).length <= PASTE_BYTE_LIMIT,
     { message: 'PGN paste exceeds 2 MB' },
   );
+
+export const reportProgressSchema = z
+  .object({
+    sessionId: z.string().min(1),
+    scored: z.number().int().nonnegative(),
+    total: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const reportCancelRequestSchema = z
+  .object({
+    sessionId: z.string().min(1),
+  })
+  .strict();
+
+export const reportCancelResultSchema = z
+  .object({
+    cancelled: z.boolean(),
+  })
+  .strict();
 
 export const insightRequestSchema = z
   .object({
@@ -453,6 +490,7 @@ export type TimelineData = z.infer<typeof timelineDataSchema>;
 export type ReportGame = z.infer<typeof reportGameSchema>;
 export type Report = z.infer<typeof reportSchema>;
 export type ReportResult = z.infer<typeof reportResultSchema>;
+export type ReportProgress = z.infer<typeof reportProgressSchema>;
 export type PasteGameSummary = z.infer<typeof pasteGameSummarySchema>;
 export type PasteSlot = z.infer<typeof pasteSlotSchema>;
 export type PasteState = z.infer<typeof pasteStateSchema>;

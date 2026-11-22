@@ -8,6 +8,7 @@ import type {
   PasteValidation,
   PreviewFrame,
   PulseSample,
+  ReportProgress,
   ReportResult,
   SdkError,
   SessionEnded,
@@ -34,7 +35,9 @@ export interface ChessPulseBridge {
   requestInsight(request: InsightRequest): Promise<InsightResult>;
   cancelInsight(sessionId: string): Promise<{ cancelled: boolean }>;
   validatePgns(slots: string[]): Promise<PasteValidation>;
+  onReportProgress(listener: (progress: ReportProgress) => void): () => void;
   buildReport(sessionId: string, pgns: string[]): Promise<ReportResult>;
+  cancelReport(sessionId: string): Promise<{ cancelled: boolean }>;
 }
 
 declare global {

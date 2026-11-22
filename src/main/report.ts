@@ -4,11 +4,11 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { bandFor, ELEVATED_MARGIN_BPM } from './analysis/bands.js';
-import { alignGames } from './analysis/align.js';
-import { analyseMoves, scoreMove, verdictLine, type MoveMetric } from './analysis/metrics.js';
+import { alignGames, buildMoveTimeIndex, moveTimeKey } from './analysis/align.js';
+import { analyseMoves, scoreMove, verdictLine, type MoveMetric, type Score } from './analysis/metrics.js';
 import { parsePgnBatch, thinkTimeSec } from './analysis/pgn.js';
-import { positionsFromMoves } from './analysis/positions.js';
-import { createEngine, type PositionEval } from './engine.js';
+import { firstIllegalMove, illegalMoveMessage, positionsFromMoves, type MovePosition } from './analysis/positions.js';
+import { createEngine, ENGINE_DEPTH, type PositionEval } from './engine.js';
 import { baselineFromSamples, coverageFromSamples, isUsableSample } from './session.js';
 import { defaultDataRoot, digestGames, readMeta, readSamples, saveReportArtifacts } from './store.js';
 import {
@@ -30,18 +30,56 @@ interface Evaluator {
   close(): Promise<void>;
 }
 
+export interface ReportBuildControl {
+  /** Aborts the in-flight engine search; no artifact is written after cancellation. */
+  signal?: AbortSignal;
+  onProgress?: (progress: { scored: number; total: number }) => void;
+}
+
+interface EngineStats {
+  positions: number;
+  scored: number;
+  failed: number;
+  reasons: {
+    timeout: number;
+    crash: number;
+    engine: number;
+    budget: number;
+  };
+}
+
+type ScoreOutcome =
+  | { cancelled: true }
+  | {
+      cancelled: false;
+      metrics: MoveMetric[];
+      elevatedBlunderTimes: (number | null)[];
+      timelineMoves: TimelineMove[];
+      engine: EngineStats;
+    };
+
+const CANCELLED_REFUSAL: Refusal = {
+  ok: false,
+  reason: 'cancelled',
+  remedy: 'Report build cancelled. No report was saved.',
+};
+
 export async function buildReport(
   root: string,
   sessionId: string,
   pgns: readonly string[],
   engine?: Evaluator,
+  control: ReportBuildControl = {},
 ): Promise<Report | Refusal> {
+  if (control.signal?.aborted) return CANCELLED_REFUSAL;
+  // The caller owns this array; scoring awaits the engine, so every later read uses one snapshot.
+  const pgnBatch = [...pgns];
   const meta = await readMeta(root, sessionId);
   const samples = await readSamples(root, sessionId);
-  const refusal = gate(meta, samples, pgns);
+  const refusal = gate(meta, samples, pgnBatch);
   if (refusal) return refusal;
 
-  const parsed = parsePgnBatch(pgns);
+  const parsed = parsePgnBatch(pgnBatch);
   if (!parsed.ok) {
     if (parsed.reason === 'order') {
       return { ok: false, reason: 'order', remedy: parsed.remedy };
@@ -50,6 +88,13 @@ export async function buildReport(
       return { ok: false, reason: 'no_games', remedy: parsed.remedy };
     }
     throw new Error(parsed.message);
+  }
+
+  for (const game of parsed.games) {
+    const illegal = firstIllegalMove(game.moves.map((move) => move.san));
+    if (illegal) {
+      return { ok: false, reason: 'illegal_move', remedy: illegalMoveMessage(game.index + 1, illegal) };
+    }
   }
 
   const stop = meta.stopAnchor;
@@ -63,9 +108,17 @@ export async function buildReport(
   if (baseline === undefined) throw new Error('No baseline was recorded, so bands were not computed.');
 
   const owned = engine === undefined;
-  const scorer = engine ?? createEngine();
+  const scorer = engine ?? createEngine({ signal: control.signal });
   try {
-    const scoredMoves = await scoreAlignedMoves(aligned.games, aligned.moveTimes, samples, baseline, scorer);
+    const scoredMoves = await scoreAlignedMoves(
+      aligned.games,
+      aligned.moveTimes,
+      samples,
+      baseline,
+      scorer,
+      control,
+    );
+    if (scoredMoves.cancelled) return CANCELLED_REFUSAL;
     const summary = analyseMoves(scoredMoves.metrics);
     const claim = elevatedClaim(
       samples,
@@ -89,12 +142,13 @@ export async function buildReport(
     const report = reportSchema.parse({
       ok: true,
       sessionId,
-      gamesDigest: digestGames(pgns),
+      gamesDigest: digestGames(pgnBatch),
       coveragePct: coverage.pct,
       baselineBpm: baseline,
       verdict,
       settled: summary.settled,
       elevated: summary.elevated,
+      engine: { depth: ENGINE_DEPTH, ...scoredMoves.engine },
       alignmentMode: first?.alignment.mode ?? 'inferred',
       toleranceSec: first?.alignment.toleranceSec ?? 0,
       ...(aligned.banner ? { banner: aligned.banner } : {}),
@@ -131,7 +185,8 @@ export async function buildReport(
         moves: scoredMoves.timelineMoves,
       },
     });
-    await saveReportArtifacts(root, sessionId, JSON.stringify(report, null, 2) + '\n', pgns);
+    if (control.signal?.aborted) return CANCELLED_REFUSAL;
+    await saveReportArtifacts(root, sessionId, JSON.stringify(report, null, 2) + '\n', pgnBatch);
     return report;
   } finally {
     if (owned) await scorer.close();
@@ -224,57 +279,84 @@ async function scoreAlignedMoves(
   samples: readonly PulseSample[],
   baseline: number,
   engine: Evaluator,
-): Promise<{
-  metrics: MoveMetric[];
-  elevatedBlunderTimes: (number | null)[];
-  timelineMoves: TimelineMove[];
-}> {
+  control: ReportBuildControl,
+): Promise<ScoreOutcome> {
+  const planned = games
+    .filter((entry) => entry.game.includeInStats)
+    .map((entry) => {
+      const sans = entry.game.moves.map((move) => move.san);
+      return {
+        aligned: entry,
+        sans,
+        thinks: thinkTimeSec(entry.game),
+        positions: positionsFromMoves(sans),
+      };
+    });
+
+  const total = countPositions(planned);
   const cache = new Map<string, Promise<PositionEval>>();
+  const moveTimeIndex = buildMoveTimeIndex(moveTimes);
+  const bandLookup = createBandLookup(samples, baseline);
+  const counted = new Set<string>();
+  const reasons = { timeout: 0, crash: 0, engine: 0, budget: 0 };
+  let scoredPositions = 0;
+
   const evaluate = (fen: string): Promise<PositionEval> => {
     const cached = cache.get(fen);
     if (cached) return cached;
-    const pending = engine.evaluate(fen);
+    const pending = engine.evaluate(fen).then((result) => {
+      if (!counted.has(fen)) {
+        counted.add(fen);
+        if (result.evalFailed) {
+          if (result.reason === 'timeout') reasons.timeout += 1;
+          else if (result.reason === 'crash') reasons.crash += 1;
+          else if (result.reason === 'budget') reasons.budget += 1;
+          else reasons.engine += 1;
+        } else {
+          scoredPositions += 1;
+        }
+        control.onProgress?.({ scored: scoredPositions, total });
+      }
+      return result;
+    });
     cache.set(fen, pending);
     return pending;
   };
+
+  control.onProgress?.({ scored: 0, total });
+
   const metrics: MoveMetric[] = [];
   const elevatedBlunderTimes: (number | null)[] = [];
   const timelineMoves: TimelineMove[] = [];
-  for (const aligned of games) {
-    if (!aligned.game.includeInStats) continue;
-    const sans = aligned.game.moves.map((move) => move.san);
-    const thinks = thinkTimeSec(aligned.game);
-    const positions = positionsFromMoves(sans);
+
+  for (const { aligned, sans, thinks, positions } of planned) {
     for (let moveIndex = 0; moveIndex < sans.length; moveIndex += 1) {
       const position = positions[moveIndex];
       if (!position || position.illegal || !position.fenAfter) {
-        for (let rest = moveIndex; rest < sans.length; rest += 1) {
-          const when = moveTimes.find((time) => time.gameIndex === aligned.game.index && time.moveIndex === rest);
-          const rawThink = thinks[rest] ?? null;
-          metrics.push({
-            cpl: null,
-            accuracy: null,
-            blunder: false,
-            band: null,
-            includeInStats: true,
-          });
-          timelineMoves.push({
-            gameIndex: aligned.game.index,
-            moveIndex: rest,
-            san: sans[rest] ?? '',
-            tUs: when?.tUs ?? null,
-            cpl: null,
-            thinkSec: rawThink !== null && rawThink >= 0 ? rawThink : null,
-            blunder: false,
-            band: null,
-          });
-        }
-        break;
+        // buildReport rejects an illegal batch before scoring; reaching here is an internal invariant break.
+        const illegal = firstIllegalMove(sans);
+        throw new Error(
+          illegal
+            ? illegalMoveMessage(aligned.game.index + 1, illegal)
+            : `Game ${aligned.game.index + 1} could not be replayed, so it was not scored.`,
+        );
       }
-      const when = moveTimes.find((time) => time.gameIndex === aligned.game.index && time.moveIndex === moveIndex);
+      if (control.signal?.aborted) return { cancelled: true };
+      const when = moveTimeIndex.get(moveTimeKey(aligned.game.index, moveIndex));
       const before = await evaluate(position.fenBefore);
-      const after = await evaluate(position.fenAfter);
-      const band = when?.tUs === undefined || when.tUs === null ? null : bandAt(samples, when.tUs, baseline);
+      if (before.reason === 'cancelled' || control.signal?.aborted) return { cancelled: true };
+
+      let after: Score;
+      if (position.terminalAfter) {
+        // A terminal after-position is scored locally; sending checkmate or stalemate to Stockfish is wasted work.
+        after = { evalFailed: false, terminal: position.terminalAfter };
+      } else {
+        const evaluated = await evaluate(position.fenAfter);
+        if (evaluated.reason === 'cancelled' || control.signal?.aborted) return { cancelled: true };
+        after = evaluated;
+      }
+
+      const band = when?.tUs === undefined || when.tUs === null ? null : bandLookup(when.tUs);
       const metric = scoreMove(before, after, band, aligned.game.includeInStats);
       if (metric.blunder && metric.band === 'elevated') elevatedBlunderTimes.push(when?.tUs ?? null);
       metrics.push(metric);
@@ -287,21 +369,58 @@ async function scoreAlignedMoves(
         cpl: metric.cpl,
         thinkSec: rawThink !== null && rawThink >= 0 ? rawThink : null,
         blunder: metric.blunder,
+        mate: metric.mate,
         band: metric.band,
       });
     }
   }
-  return { metrics, elevatedBlunderTimes, timelineMoves };
+
+  const failed = reasons.timeout + reasons.crash + reasons.engine + reasons.budget;
+  return {
+    cancelled: false,
+    metrics,
+    elevatedBlunderTimes,
+    timelineMoves,
+    engine: { positions: total, scored: scoredPositions, failed, reasons },
+  };
 }
 
-export function bandAt(samples: readonly PulseSample[], tUs: number, baseline: number): ReturnType<typeof bandFor> {
-  let latest: PulseSample | undefined;
-  for (const sample of samples) {
-    if (sample.tUs <= tUs && (!latest || sample.tUs >= latest.tUs)) latest = sample;
+function countPositions(planned: readonly { positions: readonly MovePosition[] }[]): number {
+  const fens = new Set<string>();
+  for (const { positions } of planned) {
+    for (const position of positions) {
+      if (!position || position.illegal || !position.fenAfter) continue;
+      fens.add(position.fenBefore);
+      if (!position.terminalAfter) fens.add(position.fenAfter);
+    }
   }
-  if (!latest || !isUsableSample(latest, CONFIDENCE_FLOOR)) return null;
-  if (tUs > latest.tUs + SAMPLE_HOLD_US) return null;
-  return bandFor(latest.bpm, baseline);
+  return fens.size;
+}
+
+export function createBandLookup(
+  samples: readonly PulseSample[],
+  baseline: number,
+): (tUs: number) => ReturnType<typeof bandFor> {
+  const ordered = [...samples].sort((left, right) => left.tUs - right.tUs);
+  return (tUs: number) => {
+    let low = 0;
+    let high = ordered.length - 1;
+    let latest: PulseSample | undefined;
+    while (low <= high) {
+      const middle = (low + high) >>> 1;
+      const candidate = ordered[middle];
+      if (!candidate) break;
+      if (candidate.tUs <= tUs) {
+        latest = candidate;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    if (!latest || !isUsableSample(latest, CONFIDENCE_FLOOR)) return null;
+    if (tUs > latest.tUs + SAMPLE_HOLD_US) return null;
+    return bandFor(latest.bpm, baseline);
+  };
 }
 
 export function elevatedClaim(
