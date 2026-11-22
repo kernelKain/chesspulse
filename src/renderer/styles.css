@@ -59,6 +59,12 @@ button:disabled {
   color: var(--muted);
 }
 
+/* Screen changes move focus to the heading for assistive tech; a heading is not a control, so the
+   platform focus ring should not paint a box around the first paint. */
+main h1:focus {
+  outline: none;
+}
+
 button:focus-visible,
 textarea:focus-visible,
 select:focus-visible,

@@ -15,6 +15,7 @@ describe('session row labels', () => {
 
   it('formats coverage and treats a missing value honestly', () => {
     assert.equal(coverageLabel(75.4), '75% coverage');
+    assert.equal(coverageLabel(17.93), '17% coverage');
     assert.equal(coverageLabel(0), '0% coverage');
     assert.equal(coverageLabel(null), 'No coverage');
   });

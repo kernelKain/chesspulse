@@ -1,6 +1,6 @@
-// What: a test-only TypeScript project for renderer markup checks.
-// Why: H-19 asserts heading order and list semantics, and `react-dom/server` is already a dependency.
-// Removed: those checks would stay code-reviewed until S57 brings a DOM runner.
+// What: a test-only TypeScript project for renderer markup and DOM interaction checks.
+// Why: markup tests use `react-dom/server`; S57 added jsdom for focus, keyboard, and click behaviour.
+// Removed: those checks would stay code-reviewed only.
 {
   "compilerOptions": {
     "target": "ES2022",
@@ -26,6 +26,9 @@
     "src/renderer/SetupScreen.test.ts",
     "src/renderer/SensingControls.tsx",
     "src/renderer/SensingControls.test.ts",
+    "src/renderer/SensingControls.dom.test.tsx",
+    "src/renderer/SessionList.dom.test.tsx",
+    "src/renderer/dom-harness.ts",
     "src/renderer/CameraOpenIndicator.tsx",
     "src/renderer/CameraOpenIndicator.test.ts",
     "src/renderer/SessionList.tsx",

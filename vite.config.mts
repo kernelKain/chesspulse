@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import { contentSecurityPolicy } from './src/shared/security.mjs';
+import { contentSecurityPolicy } from './src/shared/security.ts';
 
 function chesspulseCsp(development: boolean): Plugin {
   const policy = contentSecurityPolicy(development);

@@ -6,7 +6,11 @@
   "main": "dist-electron/main/index.js",
   "scripts": {
     "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.node.json && tsc -p tsconfig.renderer-test.json && node --test dist-electron/shared/contracts.test.js dist-electron/shared/errors.test.js dist-electron/shared/security.test.js dist-electron/shared/sensing.test.js dist-electron/shared/timeline.test.js dist-electron/shared/preview.test.js dist-electron/shared/flow.test.js dist-electron/shared/onboarding.test.js dist-electron/shared/framing.test.js dist-electron/shared/setup.test.js dist-electron/shared/session-list.test.js dist-renderer-test/renderer/Explainer.test.js dist-renderer-test/renderer/SetupScreen.test.js dist-renderer-test/renderer/SensingControls.test.js dist-renderer-test/renderer/CameraOpenIndicator.test.js dist-renderer-test/renderer/SessionList.test.js dist-renderer-test/renderer/ReviewProgress.test.js dist-renderer-test/renderer/VerdictLine.test.js dist-renderer-test/renderer/RefusalPanel.test.js dist-renderer-test/renderer/PasteValidation.test.js dist-electron/main/navigation.test.js dist-electron/main/preview.test.js dist-electron/main/setup-ipc.test.js dist-electron/main/session-library.test.js dist-electron/main/app-state.test.js dist-electron/main/env.test.js dist-electron/main/log.test.js dist-electron/main/log-file.test.js dist-electron/main/diagnostics.test.js dist-electron/main/doctor.test.js dist-electron/main/ipc-guard.test.js dist-electron/main/ipc-contract.test.js dist-electron/main/permission.test.js dist-electron/main/store.test.js dist-electron/main/session.test.js dist-electron/main/session-stop.test.js dist-electron/main/shutdown.test.js dist-electron/main/coach.test.js dist-electron/main/ai/grounding.test.js dist-electron/main/ai/providers.test.js dist-electron/main/ai/service.test.js dist-electron/main/capture-samples.test.js dist-electron/main/capture.test.js dist-electron/main/analysis/pgn.test.js dist-electron/main/analysis/paste.test.js dist-electron/main/analysis/positions.test.js dist-electron/main/analysis/metrics.test.js dist-electron/main/analysis/align.test.js dist-electron/main/engine.test.js dist-electron/main/report.test.js dist-electron/main/report-lock.test.js dist-electron/main/report-export.test.js scripts/vite-ready.test.mjs",
+    "test": "tsc -p tsconfig.node.json && tsc -p tsconfig.renderer-test.json && node scripts/run-tests.mjs",
+    "test:e2e": "npm run build && node --test scripts/e2e/electron.test.mjs",
+    "test:bash": "npm run build && node --test scripts/e2e/bug-bash.mjs",
+    "evidence:collect": "node scripts/evidence/collect.mjs",
+    "evidence:limit-build": "node scripts/evidence/limit-build.mjs",
     "test:consent": "npm run build && electron scripts/consent-bridge.mjs",
     "build": "tsc -p tsconfig.electron.json && vite build && vite build --config vite.preload.mts",
     "dist": "npm run build && electron-builder --linux AppImage",
@@ -69,12 +73,15 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
     "electron": "^45.4.1",
     "electron-builder": "^26.18.0",
+    "jsdom": "^29.1.1",
+    "playwright-core": "^1.65.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.8"
   }

@@ -18,7 +18,8 @@ export function formatSessionDuration(ms: number | null): string {
 }
 
 export function coverageLabel(pct: number | null): string {
-  return pct === null ? 'No coverage' : `${Math.round(pct)}% coverage`;
+  // Floor, so the list and the refusal's measured percentage cannot say 18% and 17%.
+  return pct === null ? 'No coverage' : `${Math.floor(pct)}% coverage`;
 }
 
 export function reportPresenceLabel(hasReport: boolean): string {
