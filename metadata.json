@@ -1,0 +1,62 @@
+{
+  "cli_version": "0.12.3-nightly.202610310614.54b6a5cac",
+  "checkpoint_id": "01M81K43DKA3SV2H0GTF9ZFD7V",
+  "strategy": "manual-commit",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "src/main/ai/grounding.test.ts",
+    "src/main/ai/grounding.ts",
+    "src/main/analysis/metrics.test.ts",
+    "src/main/analysis/metrics.ts",
+    "src/main/engine.test.ts",
+    "src/main/engine.ts",
+    "src/main/index.ts",
+    "src/main/library-ipc.ts",
+    "src/main/log-file.test.ts",
+    "src/main/log.ts",
+    "src/main/preview.test.ts",
+    "src/main/preview.ts",
+    "src/main/report-ipc.ts",
+    "src/renderer/App.tsx",
+    "src/renderer/Explainer.test.ts",
+    "src/renderer/Explainer.tsx",
+    "src/renderer/SessionList.tsx",
+    "src/renderer/styles.css",
+    "src/shared/flow.test.ts",
+    "src/shared/flow.ts",
+    "src/shared/onboarding.test.ts",
+    "src/shared/onboarding.ts",
+    "src/shared/session-list.test.ts",
+    "src/shared/session-list.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 101198,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 34695168,
+    "output_tokens": 20782,
+    "api_call_count": 72
+  },
+  "redaction": {
+    "replacements": 4,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 4,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
