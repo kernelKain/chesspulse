@@ -1,0 +1,50 @@
+when i paste this:[Event "Live Chess"]
+[Site "Chess.com"]
+[Date "2026.11.22"]
+[Round "?"]
+[White "Oikawa9999"]
+[Black "BlackPeter02"]
+[Result "0-1"]
+[TimeControl "60"]
+[WhiteElo "309"]
+[BlackElo "348"]
+[Termination "BlackPeter02 won on time"]
+[ECO "A40"]
+[EndTime "18:51:25 GMT+0000"]
+[Link "https://www.chess.com/game/live/187786294540?username=oikawa9999&move=0"]
+
+1. d4 {[%clk 0:00:59][%timestamp 10]} 1... e5 {[%clk 0:00:59.8][%timestamp 2]}
+2. dxe5 {[%clk 0:00:57.5][%timestamp 15]} 2... Bc5 {[%clk 0:00:57.9][%timestamp
+19]} 3. Bf4 {[%clk 0:00:56.8][%timestamp 7]} 3... Qh4 {[%clk
+0:00:56.4][%timestamp 15]} 4. e3 {[%clk 0:00:55][%timestamp 18]} 4... g5 {[%clk
+0:00:51.6][%timestamp 48]} 5. Bg3 {[%clk 0:00:53.6][%timestamp 14]} 5... Qh6
+{[%clk 0:00:48.2][%timestamp 34]} 6. Bc4 {[%clk 0:00:50.7][%timestamp 29]} 6...
+f6 {[%clk 0:00:47][%timestamp 12]} 7. exf6 {[%clk 0:00:48.7][%timestamp 20]}
+7... Nxf6 {[%clk 0:00:45.4][%timestamp 16]} 8. Nc3 {[%clk 0:00:48][%timestamp
+7]} 8... d6 {[%clk 0:00:44.2][%timestamp 12]} 9. Qe2 {[%clk
+0:00:41.6][%timestamp 64]} 9... Bb4 {[%clk 0:00:42.6][%timestamp 16]} 10. a3
+{[%clk 0:00:39.4][%timestamp 22]} 10... Bxc3+ {[%clk 0:00:41.6][%timestamp 10]}
+11. bxc3 {[%clk 0:00:39.2][%timestamp 2]} 11... Bd7 {[%clk 0:00:39][%timestamp
+26]} 12. Nf3 {[%clk 0:00:36.8][%timestamp 24]} 12... Nc6 {[%clk
+0:00:38.3][%timestamp 7]} 13. Nd4 {[%clk 0:00:32.9][%timestamp 39]} 13... Nxd4
+{[%clk 0:00:36.4][%timestamp 19]} 14. cxd4 {[%clk 0:00:31.2][%timestamp 17]}
+14... O-O-O {[%clk 0:00:35.4][%timestamp 10]} 15. Rb1 {[%clk
+0:00:26.3][%timestamp 49]} 15... Qh5 {[%clk 0:00:32.7][%timestamp 27]} 16. Qxh5
+{[%clk 0:00:22.7][%timestamp 36]} 16... Nxh5 {[%clk 0:00:29.6][%timestamp 31]}
+17. h3 {[%clk 0:00:18.8][%timestamp 39]} 17... Nxg3 {[%clk 0:00:28.5][%timestamp
+11]} 18. fxg3 {[%clk 0:00:18.5][%timestamp 3]} 18... Rdf8 {[%clk
+0:00:25.6][%timestamp 29]} 19. g4 {[%clk 0:00:17.3][%timestamp 12]} 19... h6
+{[%clk 0:00:24][%timestamp 16]} 20. Rf1 {[%clk 0:00:13.6][%timestamp 37]} 20...
+Rxf1+ {[%clk 0:00:22.4][%timestamp 16]} 21. Kxf1 {[%clk 0:00:13.5][%timestamp
+1]} 21... Ba4 {[%clk 0:00:19][%timestamp 34]} 22. Bb3 {[%clk
+0:00:08.3][%timestamp 52]} 22... Bxb3 {[%clk 0:00:17.8][%timestamp 12]} 23. cxb3
+{[%clk 0:00:08.2][%timestamp 1]} 23... Rf8+ {[%clk 0:00:16.7][%timestamp 11]}
+24. Kg1 {[%clk 0:00:07.5][%timestamp 7]} 24... c6 {[%clk 0:00:14.7][%timestamp
+20]} 25. b4 {[%clk 0:00:06.9][%timestamp 6]} 25... c5 {[%clk
+0:00:13.7][%timestamp 10]} 26. bxc5 {[%clk 0:00:04.6][%timestamp 23]} 26... dxc5
+{[%clk 0:00:12.3][%timestamp 14]} 27. dxc5 {[%clk 0:00:03.8][%timestamp 8]}
+27... b6 {[%clk 0:00:11.5][%timestamp 8]} 28. cxb6 {[%clk 0:00:02.1][%timestamp
+17]} 28... axb6 {[%clk 0:00:10.3][%timestamp 12]} 29. Rxb6 {[%clk
+0:00:01.7][%timestamp 4]} 29... Re8 {[%clk 0:00:09.3][%timestamp 10]} 30. Rxh6
+{[%clk 0:00:00.5][%timestamp 12]} 30... Rxe3 {[%clk 0:00:08.1][%timestamp 12]}
+0-1;; i get this error: EndDate and EndTime are not a complete UTC time., resolve this issue peopel from differnt counrties will have this diffrenct so change intenal acepetable and udneratnd all of these from diffeet tmezone in anayslis
