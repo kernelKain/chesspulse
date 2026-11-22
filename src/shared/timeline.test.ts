@@ -16,6 +16,7 @@ import {
   sampleReadout,
   sampleStatusText,
   sampleTableRows,
+  spaceEndingLabels,
   splitPulseRuns,
   THINK_CAP_SEC,
   thinkTimeRatio,
@@ -412,5 +413,24 @@ describe('refusalHeading', () => {
     assert.match(refusalHeading('illegal_move'), /illegal/);
     assert.match(refusalHeading('cancelled'), /cancelled/);
     assert.match(refusalHeading('no_trace'), /pulse trace/);
+  });
+});
+
+describe('spaceEndingLabels', () => {
+  it('pushes a close run right and keeps it inside the plot', () => {
+    assert.deepEqual(spaceEndingLabels([100, 110, 120], 0, 500), [100, 152, 204]);
+  });
+
+  it('pulls a run left when it would overflow the right edge', () => {
+    assert.deepEqual(spaceEndingLabels([400, 410, 420], 0, 430, 52), [326, 378, 430]);
+  });
+
+  it('distributes evenly when the plot cannot fit the spacing', () => {
+    assert.deepEqual(spaceEndingLabels([10, 20, 30], 0, 60, 52), [0, 30, 60]);
+  });
+
+  it('leaves an empty or single label alone', () => {
+    assert.deepEqual(spaceEndingLabels([], 0, 100), []);
+    assert.deepEqual(spaceEndingLabels([84], 0, 100), [84]);
   });
 });

@@ -5,6 +5,7 @@ import { useId } from 'react';
 import {
   EXPLAINER_AI_NOTE,
   EXPLAINER_INTRO,
+  EXPLAINER_LABEL,
   EXPLAINER_NEVERS,
   EXPLAINER_STEPS,
   EXPLAINER_TITLE,
@@ -22,7 +23,7 @@ export function Explainer({
   const neverId = `${baseId}-never`;
 
   return (
-    <section className="explainer" aria-label="How ChessPulse works">
+    <section className="explainer" aria-label={EXPLAINER_LABEL}>
       {headingLevel === 1 ? (
         <h1 className="explainer-title">{EXPLAINER_TITLE}</h1>
       ) : (

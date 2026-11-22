@@ -1,6 +1,8 @@
 // What: the build progress and Cancel control for Review.
 // Why: scoring can take minutes and must never be an unresponsive screen.
 // Removed: the player could not tell whether the build was moving or how to stop it.
+import { COPY } from './copy';
+
 export function ReviewProgress({
   progress,
   cancelling,
@@ -15,20 +17,18 @@ export function ReviewProgress({
   return (
     <>
       <p aria-live="polite">
-        {total > 0
-          ? `Scored ${scored} of ${total} positions…`
-          : 'Scoring positions locally with Stockfish…'}
+        {total > 0 ? COPY.review.scored(scored, total) : COPY.review.scoring}
       </p>
       {total > 0 ? (
         <progress
           className="report-progress"
-          aria-label="Positions scored"
+          aria-label={COPY.review.positionsScored}
           value={scored}
           max={total}
         />
       ) : null}
-      <button type="button" onClick={onCancel} disabled={cancelling}>
-        {cancelling ? 'Cancelling…' : 'Cancel report'}
+      <button type="button" onClick={onCancel} disabled={cancelling} className="btn btn-secondary">
+        {cancelling ? COPY.review.cancelling : COPY.review.cancelReport}
       </button>
     </>
   );

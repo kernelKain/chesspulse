@@ -74,19 +74,6 @@ select:focus-visible,
   outline-offset: 2px;
 }
 
-.primary-btn {
-  border-color: var(--text);
-}
-
-.primary-btn:disabled {
-  border-color: var(--line);
-}
-
-.small-btn {
-  padding: 4px 10px;
-  font-size: 12px;
-}
-
 .paste-banner {
   margin-top: 24px;
   padding: 16px;
@@ -111,7 +98,7 @@ select:focus-visible,
   margin-bottom: 8px;
 }
 
-.state-tag,
+.status-pill,
 .slot-badge {
   display: inline-flex;
   align-items: center;
@@ -125,20 +112,26 @@ select:focus-visible,
   color: var(--muted);
 }
 
-.state-tag.tone-ok,
+.status-pill.tone-ok,
 .slot-badge.tone-ok {
   border-color: var(--ok);
   color: var(--text);
 }
 
-.state-tag.tone-ok svg,
+.status-pill.tone-ok svg,
 .slot-badge.tone-ok svg {
   color: var(--ok);
 }
 
-.state-tag.tone-warn,
+.status-pill.tone-warn,
 .slot-badge.tone-warn {
   border-color: var(--warn);
+  color: var(--text);
+}
+
+.status-pill.tone-danger,
+.slot-badge.tone-danger {
+  border-color: var(--danger);
   color: var(--text);
 }
 
@@ -1453,9 +1446,8 @@ textarea {
 }
 
 .session-unreadable,
-.session-empty {
+.session-list-section .empty-state {
   margin-top: 16px;
-  color: var(--text);
 }
 
 /* ---- Component system (W5 S53) ---- */
@@ -1476,8 +1468,8 @@ textarea {
 }
 .btn-primary {
   border-color: var(--text);
-  background: var(--text);
-  color: var(--bg);
+  background: var(--surface);
+  color: var(--text);
 }
 .btn-secondary {
   border-color: var(--line);
@@ -1493,6 +1485,10 @@ textarea {
   border-color: var(--danger);
   background: var(--danger);
   color: var(--bg);
+}
+.btn-small {
+  padding: var(--sp-1) 10px;
+  font-size: var(--fs-xs);
 }
 .btn:disabled {
   opacity: 0.5;
@@ -1538,4 +1534,116 @@ textarea {
   border-radius: var(--r-panel);
   background: var(--surface);
   color: var(--text);
+}
+
+/* Keyboard map (W5 S55). */
+.keyboard-help-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  z-index: 20;
+}
+
+.keyboard-help {
+  width: min(32rem, 100%);
+  max-height: 80vh;
+  overflow: auto;
+}
+
+.keyboard-help h2 {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-md);
+  font-weight: 560;
+}
+
+.keyboard-keys {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-4);
+}
+
+.keyboard-row {
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  gap: var(--sp-3);
+  align-items: baseline;
+}
+
+.keyboard-row dt,
+.keyboard-row dd {
+  margin: 0;
+}
+
+.keyboard-row dd {
+  color: var(--muted);
+}
+
+kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  border: var(--border-w) solid var(--line);
+  border-radius: var(--r-control);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+.timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  margin: 0 0 var(--sp-3);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.timeline-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.timeline-legend i {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  font-style: normal;
+  line-height: 10px;
+}
+
+.legend-line {
+  border-top: 2px solid var(--text);
+}
+
+.legend-cpl {
+  background: var(--text);
+  width: 3px;
+  height: 12px;
+}
+
+.legend-think {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text);
+}
+
+.legend-hatch {
+  border: var(--border-w) solid var(--accent);
+  background: repeating-linear-gradient(
+    45deg,
+    var(--accent) 0,
+    var(--accent) 1px,
+    transparent 1px,
+    transparent 4px
+  );
+}
+
+.legend-ending {
+  color: var(--text);
+  text-align: center;
 }

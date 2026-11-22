@@ -2,6 +2,8 @@
 // Why: the player must learn the limits before the camera opens, and must not meet the explainer twice.
 // Removed: the first screen would be a wall of controls, and the fair-play line would live only in the README.
 
+export const EXPLAINER_LABEL = 'How ChessPulse works';
+
 export const EXPLAINER_TITLE = 'ChessPulse reviews your chess session after you play.';
 
 export const EXPLAINER_INTRO =

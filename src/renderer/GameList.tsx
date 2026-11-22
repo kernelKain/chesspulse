@@ -3,6 +3,7 @@
 // Removed: games would appear only as narrow timeline bands and 40-character usernames could overflow or truncate.
 import type { Report, ReportGame } from '../shared/contracts';
 import { endingMark } from '../shared/timeline';
+import { COPY } from './copy';
 
 export function GameList({ report }: { report: Report }) {
   if (report.games.length === 0) return null;
@@ -12,17 +13,17 @@ export function GameList({ report }: { report: Report }) {
   const abandoned = report.games.filter((game) => game.ending === 'abandoned').length;
 
   const summaryParts = [
-    `${report.games.length} ${report.games.length === 1 ? 'game' : 'games'}`,
-    `${included} in accuracy`,
+    COPY.gamesList.games(report.games.length),
+    COPY.gamesList.inAccuracy(included),
   ];
-  if (aborted > 0) summaryParts.push(`${aborted} aborted`);
-  if (abandoned > 0) summaryParts.push(`${abandoned} abandoned`);
+  if (aborted > 0) summaryParts.push(COPY.gamesList.aborted(aborted));
+  if (abandoned > 0) summaryParts.push(COPY.gamesList.abandoned(abandoned));
 
   return (
-    <section className="game-list-section" aria-label="Session games">
+    <section className="game-list-section" aria-label={COPY.gamesList.label}>
       <div className="game-list-header">
-        <span className="timeline-title">Games</span>
-        <span className="band-note">{summaryParts.join(' · ')}</span>
+        <span className="timeline-title">{COPY.gamesList.title}</span>
+        <span className="band-note">{COPY.gamesList.summary(summaryParts)}</span>
       </div>
       <ol className="game-list">
         {report.games.map((game) => (
@@ -37,10 +38,8 @@ function GameRow({ game }: { game: ReportGame }) {
   const mark = endingMark(game.ending);
   const players =
     game.white || game.black
-      ? `${game.white || 'Unknown'} vs ${game.black || 'Unknown'}`
-      : 'Players unnamed';
-  const moveWord = game.moveCount === 1 ? 'ply' : 'plies';
-  const blunderWord = game.blunders === 1 ? 'blunder' : 'blunders';
+      ? `${game.white || COPY.gamesList.unknown} vs ${game.black || COPY.gamesList.unknown}`
+      : COPY.gamesList.unnamed;
 
   return (
     <li className={game.includeInStats ? 'game-row' : 'game-row game-row-excluded'}>
@@ -55,16 +54,16 @@ function GameRow({ game }: { game: ReportGame }) {
         </span>
         {game.timeControl ? <span className="game-detail">{game.timeControl}</span> : null}
         <span className="game-detail">
-          {game.moveCount} {moveWord}
+          {COPY.gamesList.ply(game.moveCount)}
         </span>
         {game.includeInStats ? (
           <span className="game-detail">
-            {game.blunders} {blunderWord}
+            {COPY.gamesList.blunder(game.blunders)}
           </span>
         ) : (
-          <span className="meta-excluded">Excluded from accuracy</span>
+          <span className="meta-excluded">{COPY.gamesList.excluded}</span>
         )}
-        {!game.aligned ? <span className="meta-excluded">Not placed on timeline</span> : null}
+        {!game.aligned ? <span className="meta-excluded">{COPY.gamesList.notPlaced}</span> : null}
       </div>
     </li>
   );

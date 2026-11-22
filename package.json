@@ -9,6 +9,7 @@
     "test": "tsc -p tsconfig.node.json && tsc -p tsconfig.renderer-test.json && node scripts/run-tests.mjs",
     "test:e2e": "npm run build && node --test scripts/e2e/electron.test.mjs",
     "test:bash": "npm run build && node --test scripts/e2e/bug-bash.mjs",
+    "test:layout": "npm run build && node --test scripts/e2e/layout.test.mjs",
     "evidence:collect": "node scripts/evidence/collect.mjs",
     "evidence:limit-build": "node scripts/evidence/limit-build.mjs",
     "test:consent": "npm run build && electron scripts/consent-bridge.mjs",
@@ -19,7 +20,8 @@
     "doctor": "tsc -p tsconfig.node.json && node dist-electron/main/doctor-cli.js",
     "bench:depth": "tsc -p tsconfig.node.json && node scripts/engine-depth-bench.mjs",
     "start": "electron .",
-    "check:contrast": "node scripts/contrast-check.mjs"
+    "check:contrast": "node scripts/contrast-check.mjs",
+    "check:copy": "node scripts/copy-check.mjs"
   },
   "build": {
     "appId": "local.chesspulse.app",

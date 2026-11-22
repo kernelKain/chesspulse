@@ -8,6 +8,7 @@ import {
   type FramingChecks,
 } from '../shared/framing.js';
 import type { KeyStatus, PreviewStatus, SetupGate } from '../shared/setup.js';
+import { COPY } from './copy';
 export interface SetupScreenProps {
   consent: boolean;
   keyStatus: KeyStatus;
@@ -54,77 +55,71 @@ export function SetupScreen({
   const ready = framingReady(framing);
   const hint =
     ready
-      ? 'Framing looks good.'
-      : framingHint ?? 'Waiting for the camera to report framing.';
+      ? COPY.setup.framingGood
+      : framingHint ?? COPY.setup.framingWaiting;
   const keyText =
     keyStatus === 'present'
-      ? 'Present (value not shown).'
+      ? COPY.setup.keyPresent
       : keyStatus === 'loading'
-        ? 'Checking…'
+        ? COPY.setup.checkingKey
         : keyDetail;
   const previewNote =
     preview === 'error'
-      ? previewError ?? 'The camera preview could not start.'
+      ? previewError ?? COPY.setup.previewFailed
       : preview === 'starting'
-        ? 'Starting the camera preview…'
+        ? COPY.setup.previewStarting
         : null;
 
   return (
     <section className="setup-screen">
-      <p className="label">ChessPulse · Setup</p>
-      <h1>Set up your session.</h1>
+      <p className="label">{COPY.common.screenLabels.setup}</p>
+      <h1>{COPY.setup.heading}</h1>
       <p>
-        ChessPulse checks your consent, the SmartSpectra key, your framing, and the time control
-        before a session. Nothing is recorded; only pulse numbers are stored on this computer.
+        {COPY.setup.intro}
       </p>
       {alert}
 
       <section className="setup-section" aria-labelledby="setup-consent">
-        <h2 id="setup-consent">1. Consent and key</h2>
+        <h2 id="setup-consent">{COPY.setup.consentHeading}</h2>
         <p>
-          {consent
-            ? 'Revoking consent releases the camera and stops an open session.'
-            : 'The camera stays off until you press Allow the camera. Nothing is recorded.'}
+          {consent ? COPY.setup.consentOn : COPY.setup.consentOff}
         </p>
-        <button type="button" aria-pressed={consent} onClick={onConsent}>
-          {consent ? 'Revoke camera consent' : 'Allow the camera'}
+        <button type="button" aria-pressed={consent} onClick={onConsent} className="btn btn-secondary">
+          {consent ? COPY.setup.revokeCamera : COPY.setup.allowCamera}
         </button>
         <p className="setup-key">
-          <strong>SmartSpectra key:</strong> <span>{keyText}</span>
+          <strong>{COPY.setup.keyLabel}</strong> <span>{keyText}</span>
         </p>
       </section>
 
       <section className="setup-section" aria-labelledby="setup-framing">
-        <h2 id="setup-framing">2. Framing</h2>
-        <p>
-          Sit so you are the only face in view and your upper chest is visible. A lamp in front of
-          you is the usual fix for a dark room.
-        </p>
+        <h2 id="setup-framing">{COPY.setup.framingHeading}</h2>
+        <p>{COPY.setup.framingBody}</p>
         {previewSlot}
         {previewNote ? <p className="framing-note">{previewNote}</p> : null}
         {preview === 'error' ? (
-          <button type="button" onClick={onRetryPreview}>
-            Try the preview again
+          <button type="button" onClick={onRetryPreview} className="btn btn-secondary">
+            {COPY.setup.framingRetry}
           </button>
         ) : null}
         <ul className="framing-checks">
-          <FramingRow label="One face in view" state={framing.face} />
-          <FramingRow label="Upper chest visible" state={framing.chest} />
-          <FramingRow label="Enough light" state={framing.light} />
+          <FramingRow label={COPY.setup.checks.face} state={framing.face} />
+          <FramingRow label={COPY.setup.checks.chest} state={framing.chest} />
+          <FramingRow label={COPY.setup.checks.light} state={framing.light} />
         </ul>
         <p className="framing-hint">{hint}</p>
       </section>
 
       <section className="setup-section" aria-labelledby="setup-time">
-        <h2 id="setup-time">3. Time control</h2>
-        <div className="choices" role="group" aria-label="Time control">
+        <h2 id="setup-time">{COPY.setup.timeHeading}</h2>
+        <div className="choices" role="group" aria-label={COPY.setup.timeControlLabel}>
           {timeControls.map((control) => (
             <button
               key={control}
               type="button"
               aria-pressed={control === timeControl}
               onClick={() => onTimeControl(control)}
-            >
+             className="btn btn-secondary">
               {control}
             </button>
           ))}
@@ -134,16 +129,16 @@ export function SetupScreen({
       <div className="setup-start">
         <button
           type="button"
-          className="primary-btn"
+          className="btn btn-primary"
           disabled={!gate.canStart || starting}
           onClick={onStart}
         >
-          {starting ? 'Starting…' : 'Start sensing'}
+          {starting ? COPY.setup.starting : COPY.setup.start}
         </button>
         {starting ? (
-          <p className="setup-ready">Starting the session…</p>
+          <p className="setup-ready">{COPY.setup.startingNote}</p>
         ) : gate.canStart ? (
-          <p className="setup-ready">All checks pass. Start when you are ready.</p>
+          <p className="setup-ready">{COPY.setup.ready}</p>
         ) : (
           <ul className="setup-reasons" aria-live="polite">
             {gate.reasons.map((reason) => (
@@ -154,11 +149,11 @@ export function SetupScreen({
       </div>
 
       <div className="actions">
-        <button type="button" onClick={onBack}>
-          Back to Home
+        <button type="button" onClick={onBack} className="btn btn-secondary">
+          {COPY.common.actions.backToHome}
         </button>
-        <button type="button" onClick={onHelp}>
-          Help
+        <button type="button" onClick={onHelp} className="btn btn-secondary">
+          {COPY.common.actions.help}
         </button>
       </div>
     </section>

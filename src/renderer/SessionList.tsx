@@ -3,6 +3,7 @@
 // Removed: history would be a dead list, and delete/export would have no confirmation.
 import { useEffect, useId, useRef, useState } from 'react';
 import type { SessionSummary } from '../shared/contracts.js';
+import { COPY } from './copy';
 import {
   coverageLabel,
   formatSessionDate,
@@ -27,7 +28,7 @@ export function SessionList({
   onOpen,
   onDelete,
   onExport,
-  heading = 'Saved sessions',
+  heading = COPY.sessions.listHeading,
 }: SessionListProps) {
   const [confirmation, setConfirmation] = useState<{
     id: string;
@@ -35,14 +36,14 @@ export function SessionList({
   } | null>(null);
 
   if (sessions.length === 0 && unreadable === 0) {
-    return <p className="session-empty">{emptyMessage}</p>;
+    return <p className="empty-state">{emptyMessage}</p>;
   }
 
   return (
     <section className="session-list-section" aria-label={heading}>
       {unreadable > 0 ? (
         <p className="session-unreadable" role="status">
-          {unreadable} saved {unreadable === 1 ? 'session' : 'sessions'} could not be read.
+          {COPY.sessions.unreadable(unreadable)}
         </p>
       ) : null}
       <ol className="session-list">
@@ -110,7 +111,7 @@ function SessionRow({
   }, [confirmation]);
 
   return (
-    <li className="session-row">
+    <li className="session-row card">
       <div className="session-row-main">
         <time className="session-date" dateTime={dateTime}>
           {formatSessionDate(session.startedAtEpochMs)}
@@ -126,35 +127,35 @@ function SessionRow({
         <div className="session-confirm" role="group" aria-labelledby={titleId}>
           <p id={titleId}>
             {confirmation === 'delete'
-              ? 'Delete this session? This cannot be undone.'
-              : 'Export this report? The file contains no pulse samples.'}
+              ? COPY.sessions.deleteQuestion
+              : COPY.sessions.exportQuestion}
           </p>
           <div className="actions">
             <button
               type="button"
-              className="primary-btn"
+              className={confirmation === 'delete' ? 'btn btn-danger' : 'btn btn-primary'}
               onClick={confirmation === 'delete' ? onDelete : onExport}
             >
-              {confirmation === 'delete' ? 'Delete' : 'Export'}
+              {confirmation === 'delete' ? COPY.sessions.delete : COPY.sessions.export}
             </button>
-            <button type="button" ref={cancelRef} onClick={onCancel}>
-              Cancel
+            <button type="button" ref={cancelRef} onClick={onCancel} className="btn btn-secondary">
+              {COPY.common.actions.cancel}
             </button>
           </div>
         </div>
       ) : (
         <div className="session-actions">
-          <button type="button" onClick={onOpen}>
-            Open
+          <button type="button" onClick={onOpen} className="btn btn-secondary">
+            {COPY.sessions.open}
           </button>
-          <button type="button" ref={exportRef} disabled={!session.hasReport} onClick={onRequestExport}>
-            Export
+          <button type="button" ref={exportRef} disabled={!session.hasReport} onClick={onRequestExport} className="btn btn-secondary">
+            {COPY.sessions.export}
           </button>
-          <button type="button" ref={deleteRef} onClick={onRequestDelete}>
-            Delete
+          <button type="button" ref={deleteRef} onClick={onRequestDelete} className="btn btn-secondary">
+            {COPY.sessions.delete}
           </button>
           {!session.hasReport ? (
-            <span className="session-detail">Export is available after a report is built.</span>
+            <span className="session-detail">{COPY.sessions.exportUnavailable}</span>
           ) : null}
         </div>
       )}

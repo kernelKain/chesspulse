@@ -515,3 +515,37 @@ function formatSeconds(sec: number): string {
 function formatNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
+
+/**
+ * Spaces game-ending labels so two can never sit on top of each other. A forward pass pushes each
+ * label past its predecessor; if that overflows the plot, a backward pass pulls the run indoors.
+ * When the plot cannot fit the labels at the requested spacing, they are distributed evenly.
+ */
+export function spaceEndingLabels(
+  rawPositions: readonly number[],
+  min: number,
+  max: number,
+  minSpacing = 52,
+): number[] {
+  if (rawPositions.length === 0) return [];
+  if (max < min) throw new Error('The label range is inverted.');
+  const positions = [...rawPositions]
+    .sort((left, right) => left - right)
+    .map((value) => Math.min(max, Math.max(min, value)));
+  const count = positions.length;
+  if (count === 1) return positions;
+  if (max - min < minSpacing * (count - 1)) {
+    return positions.map((_value, index) => min + ((max - min) * index) / (count - 1));
+  }
+  const spaced = [...positions];
+  for (let index = 1; index < count; index += 1) {
+    spaced[index] = Math.max(spaced[index], spaced[index - 1] + minSpacing);
+  }
+  if (spaced[count - 1] > max) {
+    spaced[count - 1] = max;
+    for (let index = count - 2; index >= 0; index -= 1) {
+      spaced[index] = Math.min(spaced[index], spaced[index + 1] - minSpacing);
+    }
+  }
+  return spaced;
+}

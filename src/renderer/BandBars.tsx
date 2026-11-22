@@ -3,6 +3,7 @@
 // Removed: the report would lack its core thesis comparison between settled and elevated play.
 import { useId } from 'react';
 import type { Report } from '../shared/contracts';
+import { COPY } from './copy';
 
 const BAR_WIDTH = 400;
 const BAR_HEIGHT = 24;
@@ -13,35 +14,34 @@ export function BandBars({ report }: { report: Report }) {
   const rows = [
     {
       key: 'settled' as const,
-      title: 'Settled',
-      range: `< ${threshold} bpm`,
+      title: COPY.bands.settled,
+      range: COPY.bands.below(threshold),
       summary: report.settled,
       elevated: false,
     },
     {
       key: 'elevated' as const,
-      title: 'Elevated',
-      range: `≥ ${threshold} bpm`,
+      title: COPY.bands.elevated,
+      range: COPY.bands.atLeast(threshold),
       summary: report.elevated,
       elevated: true,
     },
   ];
 
   return (
-    <section className="band-bars" aria-label="Accuracy by pulse band">
+    <section className="band-bars" aria-label={COPY.bands.label}>
       <div className="band-header">
-        <span className="timeline-title">Accuracy by band</span>
-        <span className="band-note">Minimum 5 scored moves per band</span>
+        <span className="timeline-title">{COPY.bands.title}</span>
+        <span className="band-note">{COPY.bands.note}</span>
       </div>
       <div className="band-grid">
         {rows.map((row) => {
           const accuracy = row.summary.status === 'ok' ? row.summary.accuracy : null;
           const isOk = accuracy !== null;
           const fillWidth = accuracy !== null ? Math.max(0, Math.min(100, accuracy)) * (BAR_WIDTH / 100) : 0;
-          const moveWord = row.summary.moves === 1 ? 'move' : 'moves';
           const barLabel = isOk
-            ? `${row.title} accuracy ${accuracy} percent across ${row.summary.moves} scored ${moveWord}`
-            : `${row.title} accuracy insufficient: ${row.summary.moves} scored ${moveWord}, minimum 5 required`;
+            ? COPY.bands.bar(row.title, accuracy, row.summary.moves)
+            : COPY.bands.insufficientBar(row.title, row.summary.moves);
 
           return (
             <div key={row.key} className={`band-row band-${row.key}`}>
@@ -54,11 +54,9 @@ export function BandBars({ report }: { report: Report }) {
                   {isOk ? (
                     <span className="band-value">{accuracy}%</span>
                   ) : (
-                    <span className="band-insufficient">Insufficient</span>
+                    <span className="band-insufficient">{COPY.bands.insufficient}</span>
                   )}
-                  <span className="band-count">
-                    {row.summary.moves} scored {moveWord}
-                  </span>
+                  <span className="band-count">{COPY.bands.moves(row.summary.moves)}</span>
                 </div>
               </div>
 

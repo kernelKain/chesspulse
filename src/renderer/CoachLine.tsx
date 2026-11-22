@@ -1,15 +1,16 @@
 import type { CoachMessage } from '../shared/contracts';
+import { COPY } from './copy';
 
 export function CoachLine({ message }: { message: CoachMessage | null }) {
   return (
-    <section className="coach-panel" aria-label="Between games">
-      <p className="label">Between games</p>
+    <section className="coach-panel" aria-label={COPY.coach.label}>
+      <p className="label">{COPY.coach.label}</p>
       <p className={message ? 'coach-message' : 'coach-quiet'} aria-live="polite">
-        {message?.text ?? 'Nothing to say yet.'}
+        {message?.text ?? COPY.coach.quiet}
       </p>
       {message ? (
         <p className="coach-numbers">
-          Baseline {formatNumber(message.baselineBpm)} bpm · Last-minute median {formatNumber(message.recentBpm)} bpm
+          {COPY.coach.numbers(formatNumber(message.baselineBpm), formatNumber(message.recentBpm))}
         </p>
       ) : null}
     </section>

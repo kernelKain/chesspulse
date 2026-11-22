@@ -50,12 +50,14 @@ import {
   type PreviewStatus,
 } from '../shared/setup';
 import { BandBars } from './BandBars';
+import { COPY } from './copy';
 import { CameraOpenIndicator } from './CameraOpenIndicator';
 import { CameraPreview } from './CameraPreview';
 import { CoachLine } from './CoachLine';
 import { Explainer } from './Explainer';
 import { GameList } from './GameList';
 import { InsightPanel, type InsightViewState } from './InsightPanel';
+import { openKeyboardHelp } from './KeyboardHelp';
 import { readIpcError } from './ipc-error';
 import { PasteScreen } from './PasteScreen';
 import { RefusalPanel } from './RefusalPanel';
@@ -91,7 +93,7 @@ export function App() {
   const [insightState, setInsightState] = useState<InsightViewState>({ status: 'idle' });
   const [setupKey, setSetupKey] = useState<{ status: KeyStatus; detail: string }>({
     status: 'loading',
-    detail: 'Checking…',
+    detail: COPY.setup.checkingKey,
   });
   const [preview, setPreview] = useState<PreviewStatus>('idle');
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -271,18 +273,18 @@ export function App() {
       setPreviewError(null);
       // Forget this visit's key result, so returning to Setup does not blink the camera
       // between a stale "present" and the fresh doctor answer.
-      setSetupKey({ status: 'loading', detail: 'Checking…' });
+      setSetupKey({ status: 'loading', detail: COPY.setup.checkingKey });
       return undefined;
     }
     if (!bridge) {
       setSetupKey({
         status: 'error',
-        detail: 'This page is open outside the ChessPulse window.',
+        detail: COPY.errors.outsideWindow,
       });
       return undefined;
     }
     let alive = true;
-    setSetupKey({ status: 'loading', detail: 'Checking…' });
+    setSetupKey({ status: 'loading', detail: COPY.setup.checkingKey });
     setPreview('idle');
     setPreviewError(null);
     setValidation(null);
@@ -292,13 +294,13 @@ export function App() {
         if (!alive) return;
         const parsed = setupStatusSchema.safeParse(raw);
         if (!parsed.success) {
-          setSetupKey({ status: 'error', detail: 'The key check returned an unexpected result.' });
+          setSetupKey({ status: 'error', detail: COPY.errors.keyUnexpected });
           return;
         }
         setSetupKey(keyStatusFromChecks(parsed.data.checks));
       })
       .catch(() => {
-        if (alive) setSetupKey({ status: 'error', detail: 'The key check could not run.' });
+        if (alive) setSetupKey({ status: 'error', detail: COPY.errors.keyCheckFailed });
       });
     return () => {
       alive = false;
@@ -383,7 +385,7 @@ export function App() {
               // instead of hiding a camera that may still be open.
               dispatch({
                 type: 'error',
-                message: 'The session could not be stopped. Try Stop again.',
+                message: COPY.errors.stopFailedRetry,
               });
             }
           })();
@@ -464,7 +466,7 @@ export function App() {
   const elapsedMs = flow.session ? Math.max(0, nowMs - flow.session.startedAtEpochMs) : 0;
   const quality = signalQuality(samples);
   const qualityLabel = signalStale(lastSampleAtMs, nowMs)
-    ? 'No recent signal — check the camera'
+    ? COPY.errors.noRecentSignal
     : quality.label;
   const status = statusFor({
     error: flow.error,
@@ -478,7 +480,7 @@ export function App() {
     if (!bridge) {
       dispatch({
         type: 'notice',
-        message: 'This page is open outside the ChessPulse window. The camera stays off.',
+        message: COPY.errors.outsideWindowCamera,
       });
       return Promise.resolve();
     }
@@ -496,7 +498,7 @@ export function App() {
           dispatch({ type: 'clearError' });
         } catch {
           stopFailed = true;
-          dispatch({ type: 'error', message: 'The session could not be stopped.' });
+          dispatch({ type: 'error', message: COPY.errors.stopFailed });
         }
       }
       try {
@@ -509,8 +511,8 @@ export function App() {
           type: 'error',
           message:
             stopSucceeded && !stopFailed
-              ? 'The session stopped, but the consent change was not saved.'
-              : 'Consent could not be saved. The camera state is unchanged.',
+              ? COPY.errors.consentChangeNotSaved
+              : COPY.errors.consentNotSaved,
         });
       }
     });
@@ -540,7 +542,7 @@ export function App() {
         } catch {
           // Consent revocation has normally finalized the session already, so stopSession
           // rejects. The screen must not keep claiming it is sensing a session that is gone.
-          settleSession(started.sessionId, 'The session stopped after consent was withdrawn.');
+          settleSession(started.sessionId, COPY.errors.stoppedAfterConsent);
         }
         return;
       }
@@ -566,7 +568,7 @@ export function App() {
       settleSession(meta.id, stoppedNote(meta));
       dispatch({ type: 'clearError' });
     } catch {
-      dispatch({ type: 'error', message: 'The session could not be stopped.' });
+      dispatch({ type: 'error', message: COPY.errors.stopFailed });
     }
   }
 
@@ -598,7 +600,7 @@ export function App() {
       if (!parsed.success) {
         setInsightState({
           status: 'error',
-          message: 'The reading returned an unexpected shape. The report is unchanged.',
+          message: COPY.errors.insightUnexpected,
         });
       } else if (parsed.data.disabled) {
         setInsightState({ status: 'disabled', reason: parsed.data.reason });
@@ -627,7 +629,7 @@ export function App() {
 
   async function onPasteContinue(pgns: string[], _validation: PasteValidation): Promise<void> {
     if (!sessionId) {
-      dispatch({ type: 'error', message: 'No stored session is available for this report.' });
+      dispatch({ type: 'error', message: COPY.errors.noStoredSession });
       return;
     }
     if (bridge) void bridge.cancelInsight(sessionId).catch(() => undefined);
@@ -635,7 +637,7 @@ export function App() {
     const seq = ++reportRequestSeq.current;
     dispatch({ type: 'reportStarted', sessionId, slots: pgns });
     if (!bridge) {
-      dispatch({ type: 'reportFailed', message: 'This page is open outside the ChessPulse window.', sessionId });
+      dispatch({ type: 'reportFailed', message: COPY.errors.outsideWindow, sessionId });
       return;
     }
     try {
@@ -643,7 +645,7 @@ export function App() {
       if (seq !== reportRequestSeq.current) return;
       const parsed = reportResultSchema.safeParse(raw);
       if (!parsed.success) {
-        dispatch({ type: 'reportFailed', message: 'The report returned an unexpected shape.', sessionId });
+        dispatch({ type: 'reportFailed', message: COPY.errors.reportUnexpected, sessionId });
         return;
       }
       dispatch({ type: 'reportReady', result: parsed.data });
@@ -671,7 +673,7 @@ export function App() {
     if (!bridge) {
       dispatch({
         type: 'notice',
-        message: 'This page is open outside the ChessPulse window. Diagnostics are unavailable.',
+        message: COPY.errors.diagnosticsUnavailable,
       });
       return;
     }
@@ -680,7 +682,7 @@ export function App() {
       dispatch({ type: 'clearError' });
       dispatch({
         type: 'notice',
-        message: 'Diagnostics copied. They contain no games, pulse samples, or keys.',
+        message: COPY.errors.diagnosticsCopied,
       });
     } catch (caught: unknown) {
       dispatch({ type: 'error', message: readIpcError(caught, 'internal') });
@@ -690,7 +692,7 @@ export function App() {
   async function onOpenSession(sessionId: string): Promise<void> {
     if (!bridge) return;
     if (flow.session) {
-      dispatch({ type: 'error', message: 'Stop the current session before opening another.' });
+      dispatch({ type: 'error', message: COPY.errors.stopBeforeOpening });
       return;
     }
     const seq = ++openSessionSeq.current;
@@ -699,7 +701,7 @@ export function App() {
       if (seq !== openSessionSeq.current) return;
       const parsed = sessionOpenResultSchema.safeParse(raw);
       if (!parsed.success) {
-        dispatch({ type: 'error', message: 'The saved session returned an unexpected shape.' });
+        dispatch({ type: 'error', message: COPY.errors.unexpectedSession });
         return;
       }
       // A build from the previous review must not land on the newly opened session.
@@ -736,7 +738,7 @@ export function App() {
       dispatch({ type: 'sessionDeleted', sessionId });
       dispatch({
         type: 'notice',
-        message: result.deleted ? 'Session deleted.' : 'That session was already gone.',
+        message: result.deleted ? COPY.common.notices.sessionDeleted : COPY.common.notices.sessionGone,
       });
       setLibraryNonce((nonce) => nonce + 1);
     } catch (caught: unknown) {
@@ -750,9 +752,7 @@ export function App() {
       const result = await bridge.exportReport(sessionId);
       dispatch({
         type: 'notice',
-        message: result.exported
-          ? `Report exported to ${result.path}. It contains no pulse samples.`
-          : 'Export cancelled. Nothing was written.',
+        message: result.exported ? COPY.common.notices.exported(result.path) : COPY.common.notices.exportCancelled,
       });
     } catch (caught: unknown) {
       dispatch({ type: 'error', message: readIpcError(caught, 'report_failed') });
@@ -762,16 +762,16 @@ export function App() {
   if (flow.screen === 'home' && !flow.explainerSeen) {
     return (
       <main>
-        <p className="label">ChessPulse</p>
-        {flow.session ? <p className="indicator">Sensing</p> : null}
+        <p className="label">{COPY.common.chessPulse}</p>
+        {flow.session ? <p className="indicator">{COPY.camera.sensing}</p> : null}
         <Explainer showProgress />
         <StatusRegion status={status} />
         <div className="actions">
-          <button type="button" className="primary-btn" onClick={() => dismissExplainer(true)}>
-            Start setup
+          <button type="button" className="btn btn-primary" onClick={() => dismissExplainer(true)}>
+            {COPY.common.actions.startSetup}
           </button>
-          <button type="button" onClick={() => dismissExplainer(false)}>
-            Skip for now
+          <button type="button" onClick={() => dismissExplainer(false)} className="btn btn-secondary">
+            {COPY.common.actions.skipForNow}
           </button>
         </div>
       </main>
@@ -783,16 +783,23 @@ export function App() {
       <>
         <CameraOpenIndicator sensing={Boolean(flow.session)} preview={false} />
         <main>
-          <p className="label">ChessPulse · Help</p>
-          <h1>Help</h1>
+          <p className="label">{COPY.common.screenLabels.help}</p>
+          <h1>{COPY.common.actions.help}</h1>
           <StatusRegion status={status} />
           <Explainer headingLevel={2} />
           <div className="actions">
-            <button type="button" className="primary-btn" onClick={() => void onCopyDiagnostics()}>
-              Copy diagnostics
+            <button type="button" className="btn btn-primary" onClick={() => void onCopyDiagnostics()}>
+              {COPY.common.actions.copyDiagnostics}
             </button>
-            <button type="button" onClick={() => dispatch({ type: 'closeHelp' })}>
-              Back
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => openKeyboardHelp()}
+            >
+              {COPY.common.actions.keyboardShortcuts}
+            </button>
+            <button type="button" onClick={() => dispatch({ type: 'closeHelp' })} className="btn btn-secondary">
+              {COPY.common.actions.back}
             </button>
           </div>
         </main>
@@ -803,44 +810,41 @@ export function App() {
   if (flow.screen === 'home') {
     return (
       <main>
-        <p className="label">ChessPulse</p>
-        <h1>Ready when you are.</h1>
+        <p className="label">{COPY.common.chessPulse}</p>
+        <h1>{COPY.home.heading}</h1>
         <StatusRegion status={status} />
-        <p>
-          Start a session, play on chess.com, then paste your games to see your pulse next to your
-          moves. Only numeric pulse samples are stored during play; no video or image is saved.
-        </p>
+        <p>{COPY.home.intro}</p>
         <div className="actions">
           <button
             type="button"
-            className="primary-btn"
+            className="btn btn-primary"
             onClick={() => dispatch({ type: 'openSetup' })}
           >
-            Start a session
+            {COPY.common.actions.startSession}
           </button>
-          <button type="button" onClick={() => dispatch({ type: 'openSessions' })}>
-            All sessions
+          <button type="button" onClick={() => dispatch({ type: 'openSessions' })} className="btn btn-secondary">
+            {COPY.common.actions.allSessions}
           </button>
-          <button type="button" onClick={() => dispatch({ type: 'openHelp' })}>
-            Help
+          <button type="button" onClick={() => dispatch({ type: 'openHelp' })} className="btn btn-secondary">
+            {COPY.common.actions.help}
           </button>
         </div>
         <section className="recent-sessions" aria-labelledby="recent-sessions-heading">
-          <h2 id="recent-sessions-heading">Recent sessions</h2>
+          <h2 id="recent-sessions-heading">{COPY.home.recentHeading}</h2>
           {library.status === 'idle' || library.status === 'loading' ? (
-            <p>Loading saved sessions…</p>
+            <p className="loading-state">{COPY.common.loading}</p>
           ) : library.status === 'error' ? (
             <>
-              <p>Saved sessions could not be read.</p>
-              <button type="button" onClick={() => setLibraryNonce((nonce) => nonce + 1)}>
-                Try again
+              <p>{COPY.common.readError}</p>
+              <button type="button" onClick={() => setLibraryNonce((nonce) => nonce + 1)} className="btn btn-secondary">
+                {COPY.common.actions.tryAgain}
               </button>
             </>
           ) : (
             <SessionList
               sessions={library.sessions.slice(0, 3)}
-              heading="Recent sessions"
-              emptyMessage="No saved sessions yet. Start one above."
+              heading={COPY.home.recentHeading}
+              emptyMessage={COPY.sessions.emptyRecent}
               unreadable={library.unreadable}
               onOpen={(id) => void onOpenSession(id)}
               onDelete={(id) => void onDeleteSession(id)}
@@ -855,23 +859,23 @@ export function App() {
   if (flow.screen === 'sessions') {
     return (
       <main>
-        <p className="label">ChessPulse · Sessions</p>
-        <h1>Sessions</h1>
+        <p className="label">{COPY.common.screenLabels.sessions}</p>
+        <h1>{COPY.sessions.heading}</h1>
         <StatusRegion status={status} />
         {library.status === 'idle' || library.status === 'loading' ? (
-          <p>Loading saved sessions…</p>
+          <p className="loading-state">{COPY.common.loading}</p>
         ) : library.status === 'error' ? (
           <>
-            <p>Saved sessions could not be read.</p>
-            <button type="button" onClick={() => setLibraryNonce((nonce) => nonce + 1)}>
-              Try again
+            <p>{COPY.common.readError}</p>
+            <button type="button" onClick={() => setLibraryNonce((nonce) => nonce + 1)} className="btn btn-secondary">
+              {COPY.common.actions.tryAgain}
             </button>
           </>
         ) : (
           <SessionList
             sessions={library.sessions}
-            heading="All sessions"
-            emptyMessage="No sessions yet. Start one from Home."
+            heading={COPY.common.actions.allSessions}
+            emptyMessage={COPY.sessions.empty}
             unreadable={library.unreadable}
             onOpen={(id) => void onOpenSession(id)}
             onDelete={(id) => void onDeleteSession(id)}
@@ -881,16 +885,16 @@ export function App() {
         <div className="actions">
           <button
             type="button"
-            className="primary-btn"
+            className="btn btn-primary"
             onClick={() => dispatch({ type: 'openSetup' })}
           >
-            Start a session
+            {COPY.common.actions.startSession}
           </button>
-          <button type="button" onClick={() => dispatch({ type: 'openHome' })}>
-            Back to Home
+          <button type="button" onClick={() => dispatch({ type: 'openHome' })} className="btn btn-secondary">
+            {COPY.common.actions.backToHome}
           </button>
-          <button type="button" onClick={() => dispatch({ type: 'openHelp' })}>
-            Help
+          <button type="button" onClick={() => dispatch({ type: 'openHelp' })} className="btn btn-secondary">
+            {COPY.common.actions.help}
           </button>
         </div>
       </main>
@@ -959,11 +963,11 @@ export function App() {
     const review = flow.review;
     return (
       <main>
-        <p className="label">ChessPulse · Report</p>
+        <p className="label">{COPY.common.screenLabels.report}</p>
         {status.tone === 'error' ? <StatusRegion status={status} /> : null}
         {review?.building ? (
           <>
-            <h1>Building report.</h1>
+            <h1>{COPY.review.building}</h1>
             <ReviewProgress
               progress={review.progress}
               cancelling={review.cancelling}
@@ -972,8 +976,8 @@ export function App() {
           </>
         ) : review?.error ? (
           <>
-            <h1>Report unavailable.</h1>
-            <div className="refusal-panel" role="alert">
+            <h1>{COPY.review.unavailable}</h1>
+            <div className="refusal-panel inline-alert" role="alert">
               <p>{review.error}</p>
             </div>
           </>
@@ -991,7 +995,7 @@ export function App() {
           </div>
         ) : (
           <>
-            <h1>{review?.result ? 'Review withheld.' : 'Session timeline.'}</h1>
+            <h1>{review?.result ? COPY.review.withheld : COPY.review.timelineOnly}</h1>
             {review?.result && !review.result.ok ? (
               <RefusalPanel refusal={review.result} />
             ) : null}
@@ -999,17 +1003,17 @@ export function App() {
           </>
         )}
         <div className="actions">
-          <button type="button" onClick={() => dispatch({ type: 'openGames' })}>
-            Edit pasted PGNs
+          <button type="button" onClick={() => dispatch({ type: 'openGames' })} className="btn btn-secondary">
+            {COPY.review.editGames}
           </button>
-          <button type="button" onClick={() => dispatch({ type: 'openStopped' })}>
-            Back to session
+          <button type="button" onClick={() => dispatch({ type: 'openStopped' })} className="btn btn-secondary">
+            {COPY.common.actions.backToSession}
           </button>
-          <button type="button" onClick={() => dispatch({ type: 'openHome' })}>
-            Home
+          <button type="button" onClick={() => dispatch({ type: 'openHome' })} className="btn btn-secondary">
+            {COPY.common.actions.home}
           </button>
-          <button type="button" onClick={() => dispatch({ type: 'openHelp' })}>
-            Help
+          <button type="button" onClick={() => dispatch({ type: 'openHelp' })} className="btn btn-secondary">
+            {COPY.common.actions.help}
           </button>
         </div>
       </main>
@@ -1021,8 +1025,8 @@ export function App() {
     <>
       <CameraOpenIndicator sensing={sensing} preview={false} />
       <main>
-        <p className="label">ChessPulse</p>
-        <h1>{sensing ? 'Sensing.' : 'Sensing stopped.'}</h1>
+        <p className="label">{COPY.common.chessPulse}</p>
+        <h1>{sensing ? COPY.sensing.heading : COPY.sensing.stoppedHeading}</h1>
         <StatusRegion status={status} />
         {sensing && flow.consent ? <CameraPreview active /> : null}
         <SensingStrip samples={samples} selectedIndex={selectedIndex} onSelect={setSelectedIndex} />
@@ -1047,20 +1051,20 @@ export function App() {
         ) : null}
         <div className="actions">
           {!sensing ? (
-            <button type="button" className="primary-btn" onClick={() => dispatch({ type: 'openGames' })}>
-              Paste PGNs
+            <button type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'openGames' })}>
+              {COPY.sensing.pastePgns}
             </button>
           ) : null}
           {!sensing ? (
-            <button type="button" onClick={() => dispatch({ type: 'openHome' })}>
-              Home
+            <button type="button" onClick={() => dispatch({ type: 'openHome' })} className="btn btn-secondary">
+              {COPY.common.actions.home}
             </button>
           ) : null}
-          <button type="button" aria-pressed={flow.consent} onClick={() => void onConsent()}>
-            {flow.consent ? 'Revoke camera consent' : 'Allow the camera'}
+          <button type="button" aria-pressed={flow.consent} onClick={() => void onConsent()} className="btn btn-secondary">
+            {flow.consent ? COPY.setup.revokeCamera : COPY.setup.allowCamera}
           </button>
-          <button type="button" onClick={() => dispatch({ type: 'openHelp' })}>
-            Help
+          <button type="button" onClick={() => dispatch({ type: 'openHelp' })} className="btn btn-secondary">
+            {COPY.common.actions.help}
           </button>
         </div>
       </main>
@@ -1071,7 +1075,7 @@ export function App() {
 function reportErrorCopy(kind: 'stale' | 'newer' | 'invalid'): string {
   if (kind === 'stale') return appErrorInfo('report_stale').message;
   if (kind === 'newer') return appErrorInfo('report_newer').message;
-  return 'The saved report is not valid. The games are open; build the report again.';
+  return COPY.errors.reportInvalid;
 }
 
 function StatusRegion({ status }: { status: StatusLine }) {
@@ -1085,8 +1089,14 @@ function StatusRegion({ status }: { status: StatusLine }) {
 }
 
 function stoppedNote(meta: SessionMeta): string {
-  const baseline = meta.baselineBpm === undefined ? 'No baseline.' : `Baseline ${formatNumber(meta.baselineBpm)} bpm.`;
-  const coverage = meta.coverage === undefined ? 'No coverage.' : `Coverage ${formatNumber(meta.coverage.pct)}%.`;
+  const baseline =
+    meta.baselineBpm === undefined
+      ? COPY.errors.noBaseline
+      : COPY.errors.baseline(formatNumber(meta.baselineBpm));
+  const coverage =
+    meta.coverage === undefined
+      ? COPY.errors.noCoverage
+      : COPY.errors.coverage(formatNumber(meta.coverage.pct));
   return `${baseline} ${coverage}`;
 }
 

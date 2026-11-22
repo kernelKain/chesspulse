@@ -4,15 +4,16 @@
 // Removed: the player would see no reason and no next action.
 import type { Refusal } from '../shared/contracts.js';
 import { refusalHeading } from '../shared/timeline.js';
+import { COPY } from './copy';
 
 export function RefusalPanel({ refusal }: { refusal: Refusal }) {
   const metrics =
     refusal.measured !== undefined && refusal.threshold !== undefined
-      ? `Coverage was ${refusal.measured}%; a review needs ${refusal.threshold}%.`
+      ? COPY.refusal.metrics(refusal.measured, refusal.threshold)
       : null;
 
   return (
-    <div className="refusal-panel" role="alert">
+    <div className="refusal-panel inline-alert" role="alert">
       <h2>{refusalHeading(refusal.reason)}</h2>
       {metrics ? <p className="refusal-metric">{metrics}</p> : null}
       <p>{refusal.remedy}</p>

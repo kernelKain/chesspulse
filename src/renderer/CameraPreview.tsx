@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PreviewFrame } from '../shared/contracts';
 import { lightNote, previewBoost } from '../shared/preview';
+import { COPY } from './copy';
 
 /** How long without a frame before the preview admits it is waiting. */
 const STALE_MS = 2_000;
@@ -62,7 +63,7 @@ export function CameraPreview({ active, guide = false }: { active: boolean; guid
           height={180}
           style={boost > 1 ? { filter: `brightness(${boost.toFixed(2)}) contrast(1.15)` } : undefined}
           role="img"
-          aria-label="Camera preview. Nothing is recorded."
+          aria-label={COPY.camera.previewAria}
         />
         {guide ? (
           <div className="framing-guide" aria-hidden="true">
@@ -73,9 +74,9 @@ export function CameraPreview({ active, guide = false }: { active: boolean; guid
       </div>
       <figcaption className="hint">
         {!active
-          ? 'The camera opens when you start sensing.'
+          ? COPY.camera.closed
           : !hasFrame || stale
-            ? 'Waiting for the camera…'
+            ? COPY.camera.waiting
             : lightNote(light)}
       </figcaption>
     </figure>

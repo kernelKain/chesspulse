@@ -248,7 +248,7 @@ test('seeded profile: stored session, paste validation, below-gate refusal', asy
 
     const gameOne = page.getByRole('textbox', { name: 'Game 1' });
     await gameOne.fill('this is not a pgn');
-    await page.locator('.state-tag', { hasText: 'Needs fix' }).waitFor();
+    await page.locator('.status-pill', { hasText: 'Needs fix' }).waitFor();
     assert.equal(await gameOne.getAttribute('aria-invalid'), 'true');
     assert.equal(await page.getByRole('button', { name: 'Continue to report' }).isDisabled(), true);
     await shot(page, '09-paste-invalid');
@@ -256,7 +256,7 @@ test('seeded profile: stored session, paste validation, below-gate refusal', asy
     await page.getByRole('button', { name: 'Clear game 1' }).click();
     const realPgn = readFileSync(path.join(ROOT, 'docs', 'proofs', 's4', '10+0.pgn'), 'utf8');
     await gameOne.fill(realPgn);
-    await page.locator('.state-tag', { hasText: 'Partial' }).waitFor();
+    await page.locator('.status-pill', { hasText: 'Partial' }).waitFor();
     assert.match(await page.locator('.banner-message').innerText(), /1 game validated\./);
     await page
       .getByText('No timestamps in these PGNs. Order follows the boxes below (oldest first).')
@@ -266,7 +266,7 @@ test('seeded profile: stored session, paste validation, below-gate refusal', asy
 
     const illegal = realPgn.replace('1. d4', '1. e5');
     await gameOne.fill(illegal);
-    await page.locator('.state-tag', { hasText: 'Needs fix' }).waitFor();
+    await page.locator('.status-pill', { hasText: 'Needs fix' }).waitFor();
     assert.match(
       await page.locator('.slot-error').first().innerText(),
       /Game 1, move 1 \(e5\) is not legal/,
@@ -274,7 +274,7 @@ test('seeded profile: stored session, paste validation, below-gate refusal', asy
     await shot(page, '11-paste-illegal');
 
     await gameOne.fill(realPgn);
-    await page.locator('.state-tag', { hasText: 'Partial' }).waitFor();
+    await page.locator('.status-pill', { hasText: 'Partial' }).waitFor();
     await page.getByRole('button', { name: 'Continue to report' }).click();
     await page.getByRole('heading', { name: 'Review withheld.' }).waitFor({ timeout: 20_000 });
     const refusal = await page.locator('.refusal-panel').innerText();

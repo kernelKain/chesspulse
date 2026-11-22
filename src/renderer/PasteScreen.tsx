@@ -9,6 +9,7 @@ import {
   type PasteState,
   type PasteValidation,
 } from '../shared/contracts';
+import { COPY } from './copy';
 import { readIpcError } from './ipc-error';
 import { SlotBadge, SlotError } from './PasteValidation';
 
@@ -16,21 +17,21 @@ const INITIAL_SLOTS = 3;
 const MAX_SLOTS = 20;
 
 const STATE_LABEL: Record<PasteState, string> = {
-  empty: 'Empty',
-  partial: 'Partial',
-  out_of_order: 'Out of order',
-  clockless: 'Clockless',
-  valid: 'All valid',
-  invalid: 'Needs fix',
+  empty: COPY.games.states.empty,
+  partial: COPY.games.states.partial,
+  out_of_order: COPY.games.states.out_of_order,
+  clockless: COPY.games.states.clockless,
+  valid: COPY.games.states.valid,
+  invalid: COPY.games.states.invalid,
 };
 
 const ENDING_LABEL: Record<PasteGameSummary['ending'], string> = {
-  checkmate: 'Checkmate',
-  resignation: 'Resignation',
-  timeout: 'Timeout',
-  abandoned: 'Abandoned',
-  aborted: 'Aborted',
-  unknown: 'Finished',
+  checkmate: COPY.games.endings.checkmate,
+  resignation: COPY.games.endings.resignation,
+  timeout: COPY.games.endings.timeout,
+  abandoned: COPY.games.endings.abandoned,
+  aborted: COPY.games.endings.aborted,
+  unknown: COPY.games.endings.unknown,
 };
 
 function emptyValidation(count: number): PasteValidation {
@@ -39,7 +40,7 @@ function emptyValidation(count: number): PasteValidation {
     order: 'none',
     clockless: false,
     canBuild: false,
-    message: 'Paste chess.com PGNs oldest first.',
+    message: COPY.games.emptyMessage,
     summary: { total: 0, includedInStats: 0, aborted: 0, abandoned: 0 },
     slots: Array.from({ length: count }, (_item, slotIndex) => ({
       slotIndex,
@@ -77,7 +78,7 @@ export function PasteScreen({
     const seq = ++requestSeq.current;
     if (!bridge) {
       setValidating(false);
-      setBridgeError('This page is open outside the ChessPulse window. Paste validation is unavailable.');
+      setBridgeError(COPY.games.unavailablePage);
       return;
     }
     if (slots.every((text) => text.trim().length === 0)) {
@@ -94,7 +95,7 @@ export function PasteScreen({
         if (seq !== requestSeq.current) return;
         const parsed = pasteValidationSchema.safeParse(raw);
         if (!parsed.success) {
-          setBridgeError('Validation returned an unexpected result.');
+          setBridgeError(COPY.games.unexpectedResult);
           return;
         }
         setValidation(parsed.data);
@@ -150,16 +151,16 @@ export function PasteScreen({
 
   return (
     <section className="paste-screen" aria-labelledby={`${baseId}-heading`}>
-      <p className="label">ChessPulse · Paste PGNs</p>
-      <h1 id={`${baseId}-heading`}>Paste your games in order.</h1>
+      <p className="label">{COPY.common.screenLabels.paste}</p>
+      <h1 id={`${baseId}-heading`}>{COPY.games.heading}</h1>
       <p>
-        Copy each game&apos;s PGN from chess.com oldest first, one game per box.
+        {COPY.games.intro}
       </p>
 
       <div className={`paste-banner tone-${bannerTone}`} role="status" aria-live="polite">
         <div className="banner-head">
-          <span className={`state-tag tone-${bannerTone}`}>
-            {validating ? 'Checking' : bridgeError ? 'Unavailable' : STATE_LABEL[validation.state]}
+          <span className={`status-pill tone-${bannerTone}`}>
+            {validating ? COPY.games.states.checking : bridgeError ? COPY.games.states.unavailable : STATE_LABEL[validation.state]}
           </span>
           {validation.summary.total > 0 && !bridgeError ? (
             <span className="banner-counts">{formatCounts(validation.summary)}</span>
@@ -167,9 +168,7 @@ export function PasteScreen({
         </div>
         <p className="banner-message">{bridgeError ?? validation.message}</p>
         {!bridgeError && validation.order === 'unverified' && validation.summary.total > 0 ? (
-          <p className="banner-sub">
-            No timestamps in these PGNs. Order follows the boxes below (oldest first).
-          </p>
+          <p className="banner-sub">{COPY.games.orderNote}</p>
         ) : null}
       </div>
 
@@ -184,46 +183,46 @@ export function PasteScreen({
             <li key={index} className={`paste-slot status-${slotInfo.status}`}>
               <div className="slot-header">
                 <div className="slot-title">
-                  <label htmlFor={fieldId}>Game {index + 1}</label>
+                  <label htmlFor={fieldId}>{COPY.games.game(index)}</label>
                   <SlotBadge slot={slotInfo} />
                 </div>
                 <div className="slot-controls">
                   <button
                     type="button"
-                    className="small-btn"
+                    className="btn btn-quiet btn-small"
                     disabled={index === 0}
-                    aria-label={`Move game ${index + 1} up`}
+                    aria-label={COPY.games.moveUp(index)}
                     onClick={() => moveSlot(index, -1)}
                   >
-                    Move up
+                    {COPY.games.moveUpShort}
                   </button>
                   <button
                     type="button"
-                    className="small-btn"
+                    className="btn btn-quiet btn-small"
                     disabled={index === slots.length - 1}
-                    aria-label={`Move game ${index + 1} down`}
+                    aria-label={COPY.games.moveDown(index)}
                     onClick={() => moveSlot(index, 1)}
                   >
-                    Move down
+                    {COPY.games.moveDownShort}
                   </button>
                   {text.length > 0 ? (
                     <button
                       type="button"
-                      className="small-btn"
-                      aria-label={`Clear game ${index + 1}`}
+                      className="btn btn-quiet btn-small"
+                      aria-label={COPY.games.clear(index)}
                       onClick={() => updateSlot(index, '')}
                     >
-                      Clear
+                      {COPY.games.clearShort}
                     </button>
                   ) : null}
                   <button
                     type="button"
-                    className="small-btn"
+                    className="btn btn-quiet btn-small"
                     disabled={slots.length <= 1}
-                    aria-label={`Remove game ${index + 1}`}
+                    aria-label={COPY.games.remove(index)}
                     onClick={() => removeSlot(index)}
                   >
-                    Remove
+                    {COPY.games.removeShort}
                   </button>
                 </div>
               </div>
@@ -236,7 +235,7 @@ export function PasteScreen({
                 id={fieldId}
                 rows={4}
                 spellCheck={false}
-                placeholder={`Paste Game ${index + 1} PGN here`}
+                placeholder={COPY.games.placeholder(index)}
                 value={text}
                 aria-invalid={hasError}
                 aria-describedby={hasError ? errorId : undefined}
@@ -250,18 +249,18 @@ export function PasteScreen({
       </ol>
 
       <div className="actions">
-        <button type="button" className="primary-btn" disabled={!canContinue} onClick={handleContinue}>
-          Continue to report
+        <button type="button" className="btn btn-primary" disabled={!canContinue} onClick={handleContinue}>
+          {COPY.games.continue}
         </button>
-        <button type="button" disabled={slots.length >= MAX_SLOTS} onClick={addSlot}>
-          Add game ({slots.length}/{MAX_SLOTS})
+        <button type="button" disabled={slots.length >= MAX_SLOTS} onClick={addSlot} className="btn btn-secondary">
+          {COPY.games.addGame(slots.length, MAX_SLOTS)}
         </button>
-        <button type="button" onClick={() => onBack(slots)}>
-          Back to session
+        <button type="button" onClick={() => onBack(slots)} className="btn btn-secondary">
+          {COPY.common.actions.backToSession}
         </button>
         {onHelp ? (
-          <button type="button" onClick={onHelp}>
-            Help
+          <button type="button" onClick={onHelp} className="btn btn-secondary">
+            {COPY.common.actions.help}
           </button>
         ) : null}
       </div>
@@ -271,17 +270,17 @@ export function PasteScreen({
 
 function GameSummaryRow({ game }: { game: PasteGameSummary }) {  const players =
     game.white || game.black
-      ? `${game.white || 'Unknown'} vs ${game.black || 'Unknown'}`
-      : 'Players unnamed';
-  const moves = `${game.moveCount} ${game.moveCount === 1 ? 'ply' : 'plies'}`;
+      ? `${game.white || COPY.gamesList.unknown} vs ${game.black || COPY.gamesList.unknown}`
+      : COPY.games.playersUnnamed;
+  const moves = COPY.gamesList.ply(game.moveCount);
   const clocks =
     game.moveCount === 0
-      ? 'No moves'
+      ? COPY.games.noMoves
       : !game.hasClocks
-        ? 'No clocks'
+        ? COPY.games.noClocks
         : game.partialClocks
-          ? 'Partial clocks'
-          : 'Clocks OK';
+          ? COPY.games.partialClocks
+          : COPY.games.clocksOk;
 
   return (
     <div className="slot-meta">
@@ -291,7 +290,7 @@ function GameSummaryRow({ game }: { game: PasteGameSummary }) {  const players =
         {game.timeControl ? ` · ${game.timeControl}` : ''}
       </span>
       {!game.includeInStats ? (
-        <span className="meta-excluded">Excluded from accuracy</span>
+        <span className="meta-excluded">{COPY.games.excluded}</span>
       ) : null}
     </div>
   );
@@ -299,12 +298,12 @@ function GameSummaryRow({ game }: { game: PasteGameSummary }) {  const players =
 
 function formatCounts(summary: PasteValidation['summary']): string {
   const parts = [
-    `${summary.total} ${summary.total === 1 ? 'game' : 'games'}`,
-    `${summary.includedInStats} in accuracy`,
+    COPY.games.counts.game(summary.total),
+    COPY.games.counts.inAccuracy(summary.includedInStats),
   ];
-  if (summary.aborted > 0) parts.push(`${summary.aborted} aborted`);
-  if (summary.abandoned > 0) parts.push(`${summary.abandoned} abandoned`);
-  return parts.join(' · ');
+  if (summary.aborted > 0) parts.push(COPY.games.counts.aborted(summary.aborted));
+  if (summary.abandoned > 0) parts.push(COPY.games.counts.abandoned(summary.abandoned));
+  return COPY.gamesList.summary(parts);
 }
 
 function toneFor(state: PasteState): 'neutral' | 'ok' | 'warn' {

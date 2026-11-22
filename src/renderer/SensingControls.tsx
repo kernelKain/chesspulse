@@ -3,6 +3,7 @@
 //      and a confirmation before an irreversible stop.
 // Removed: Stop would end a session on one mis-click, and the screen would show no time or quality.
 import { useEffect, useId, useRef, type KeyboardEvent } from 'react';
+import { COPY } from './copy';
 
 export interface SensingControlsProps {
   elapsedLabel: string;
@@ -35,7 +36,7 @@ export function SensingControls({
   const keepRef = useRef<HTMLButtonElement | null>(null);
   const stopButtonRef = useRef<HTMLButtonElement | null>(null);
   const wasConfirming = useRef(false);
-  const games = `${markedGames} ${markedGames === 1 ? 'game' : 'games'} marked`;
+  const games = COPY.sensing.marked(markedGames);
 
   useEffect(() => {
     if (confirmingStop) {
@@ -54,10 +55,10 @@ export function SensingControls({
   }
 
   return (
-    <section className="sensing-controls" aria-label="Sensing controls">
+    <section className="sensing-controls" aria-label={COPY.sensing.controlsLabel}>
       <div className="sensing-meta">
         <p className="sensing-clock">
-          <span className="clock-value">{elapsedLabel}</span> elapsed
+          <span className="clock-value">{elapsedLabel}</span> {COPY.sensing.elapsed}
         </p>
         <p className="signal-quality">{qualityLabel}</p>
       </div>
@@ -69,14 +70,14 @@ export function SensingControls({
 
       {confirmingStop ? (
         <div className="stop-confirm" role="group" aria-labelledby={titleId} onKeyDown={onKeyDown}>
-          <h2 id={titleId}>Stop this session?</h2>
-          <p>You can&apos;t add to it later.</p>
+          <h2 id={titleId}>{COPY.sensing.stopQuestion}</h2>
+          <p>{COPY.sensing.stopBody}</p>
           <div className="actions">
-            <button type="button" className="primary-btn" onClick={onConfirmStop}>
-              Stop
+            <button type="button" className="btn btn-primary" onClick={onConfirmStop}>
+              {COPY.sensing.stop}
             </button>
-            <button type="button" ref={keepRef} onClick={onKeepSensing}>
-              Keep sensing
+            <button type="button" ref={keepRef} onClick={onKeepSensing} className="btn btn-secondary">
+              {COPY.sensing.keepSensing}
             </button>
           </div>
         </div>
@@ -85,16 +86,16 @@ export function SensingControls({
           <div className="gap-row">
             <div>
               <p className="gap-state">
-                {betweenGames ? 'Game ended — waiting for the next game' : 'Playing'}
+                {betweenGames ? COPY.sensing.waiting : COPY.sensing.playing}
               </p>
               <p className="gap-count">{games}</p>
             </div>
-            <button type="button" disabled={gapPending} onClick={onGap}>
-              {betweenGames ? 'Next game started' : 'Game ended'}
+            <button type="button" disabled={gapPending} onClick={onGap} className="btn btn-secondary">
+              {betweenGames ? COPY.sensing.nextGame : COPY.sensing.gameEnded}
             </button>
           </div>
-          <button type="button" ref={stopButtonRef} onClick={onRequestStop}>
-            Stop sensing
+          <button type="button" ref={stopButtonRef} onClick={onRequestStop} className="btn btn-secondary">
+            {COPY.sensing.stopSensing}
           </button>
         </>
       )}

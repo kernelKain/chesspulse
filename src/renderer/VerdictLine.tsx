@@ -3,6 +3,7 @@
 // Removed: a player would have to read charts first instead of seeing the session verdict in three seconds.
 import type { Report } from '../shared/contracts';
 import { engineCalibrationNote, engineFailureNote } from '../shared/timeline';
+import { COPY } from './copy';
 
 export function VerdictLine({ report }: { report: Report }) {
   const baseline = formatNumber(report.baselineBpm);
@@ -11,10 +12,8 @@ export function VerdictLine({ report }: { report: Report }) {
   const engineNote = engineFailureNote(report.engine);
 
   return (
-    <section className="verdict-section" aria-label="Session verdict">
-      <p className="verdict-meta">
-        Baseline {baseline} bpm · Elevated ≥ {threshold} bpm · Coverage {coverage}%
-      </p>
+    <section className="verdict-section" aria-label={COPY.verdict.label}>
+      <p className="verdict-meta">{COPY.verdict.meta(baseline, threshold, coverage)}</p>
       <h1 className="verdict-line">{report.verdict}</h1>
       <p className="verdict-note verdict-engine">{engineCalibrationNote(report.engine)}</p>
       {engineNote ? <p className="verdict-note">{engineNote}</p> : null}
