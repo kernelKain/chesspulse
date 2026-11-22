@@ -79,7 +79,9 @@ export function startCapture(input: {
   events: CaptureEvents;
   sdk?: CaptureSdk;
   flushMs?: number;
+  drainTimeoutMs?: number;
 }): CaptureSession {
+  const drainTimeoutMs = input.drainTimeoutMs ?? DRAIN_TIMEOUT_MS;
   const sdk = input.sdk ?? (new SmartSpectraSDK({
     apiKey: input.apiKey,
     // The whole cardio bundle, deliberately. Requesting PULSE_RATE alone produced no metrics at
@@ -171,10 +173,13 @@ export function startCapture(input: {
         try {
           await beforeDeadline(
             Promise.allSettled([...writes]).then(() => undefined),
-            DRAIN_TIMEOUT_MS,
+            drainTimeoutMs,
           );
         } catch {
-          // A wedged write is abandoned; the samples already in the file stay valid.
+          // The write did not confirm before the deadline. Finalize as a storage failure so a
+          // late rejection cannot close the session with an earlier reason and lose the event.
+          storageFailed = true;
+          reportEnded('storage');
         }
       }
       return storageFailed ? 'storage' : undefined;

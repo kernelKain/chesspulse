@@ -334,6 +334,20 @@ describe('buildReport', () => {
     assert.equal(result.engine.reasons.crash, 0);
   });
 
+  it('uses the evaluator depth in the report metadata', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 21 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 20_000_000);
+    const result = await buildReport(root, id, [pgnAt(EPOCH + 10_000)], {
+      ...evaluator(),
+      depth: 6,
+    });
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.engine.depth, 6);
+  });
+
   it('counts distinct engine failure reasons instead of collapsing them', async () => {
     const root = useRoot();
     const samples = Array.from({ length: 21 }, (_unused, index) => sample(index * 1_000_000));
@@ -404,6 +418,22 @@ describe('buildReport', () => {
     assert.ok(calls > 0);
     assert.equal(await readFile(reportFile, 'utf8'), reportBefore);
     assert.equal(await readFile(gamesFile, 'utf8'), gamesBefore);
+  });
+
+  it('does not save when cancellation arrives at the commit boundary', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 21 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 20_000_000);
+    const controller = new AbortController();
+    const result = await buildReport(root, id, [pgnAt(EPOCH + 10_000)], evaluator(), {
+      signal: controller.signal,
+      onCommitStart: () => controller.abort(),
+    });
+
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.reason, 'cancelled');
+    await assert.rejects(readFile(path.join(root, 'sessions', id, 'report.json'), 'utf8'));
   });
 
   it('builds a 90-minute synthetic session inside the stated time bound', async () => {

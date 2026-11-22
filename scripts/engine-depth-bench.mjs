@@ -59,10 +59,11 @@ async function main() {
     `Fixtures: ${files.length} files, ${games.length} games, ${plies} plies, ${fens.length} unique positions`,
   );
   console.log('');
-  console.log('depth  mean ms   p95 ms   total s   failed');
+  console.log('depth  warm-up  mean ms   p95 ms   total s   failed');
   for (const entry of measured) {
+    const warmup = entry.warmupFailed ? `failed:${entry.warmupReason ?? 'unknown'}` : 'ok';
     console.log(
-      `${String(entry.depth).padEnd(6)} ${entry.meanMs.toFixed(1).padStart(7)} ${entry.p95Ms
+      `${String(entry.depth).padEnd(6)} ${warmup.padEnd(8)} ${entry.meanMs.toFixed(1).padStart(7)} ${entry.p95Ms
         .toFixed(1)
         .padStart(8)} ${(entry.totalMs / 1000).toFixed(2).padStart(8)} ${String(entry.failures).padStart(8)}`,
     );
@@ -76,7 +77,11 @@ async function main() {
   );
   console.log(`Current ENGINE_DEPTH: ${ENGINE_DEPTH}`);
   if (failures > 0) {
-    console.log(`Decision: INCONCLUSIVE (${failures} evaluations failed).`);
+    console.log(`Decision: INCONCLUSIVE (${failures} timed evaluations failed).`);
+  } else if (candidate.warmupFailed) {
+    console.log(
+      `Decision: INCONCLUSIVE (depth-${CANDIDATE_DEPTH} warm-up failed: ${candidate.warmupReason ?? 'unknown'}).`,
+    );
   } else if (passes) {
     console.log(`Decision: ${ENGINE_DEPTH === CANDIDATE_DEPTH ? `KEEP ${CANDIDATE_DEPTH}` : `RAISE TO ${CANDIDATE_DEPTH}`}`);
   } else {
@@ -115,8 +120,13 @@ async function measure(fens, depth) {
   const results = new Map();
   const times = [];
   let failures = 0;
+  let warmupFailed = false;
+  let warmupReason;
   try {
-    await engine.evaluate(fens[0]);
+    // The warm-up pays for worker startup and the UCI handshake; it is deliberately not timed.
+    const warmup = await engine.evaluate(fens[0]);
+    warmupFailed = warmup.evalFailed;
+    warmupReason = warmup.reason;
     for (const fen of fens) {
       const started = process.hrtime.bigint();
       const result = await engine.evaluate(fen);
@@ -131,6 +141,8 @@ async function measure(fens, depth) {
   return {
     results,
     failures,
+    warmupFailed,
+    warmupReason,
     totalMs,
     meanMs: times.length === 0 ? 0 : totalMs / times.length,
     p95Ms: percentile(times, 0.95),

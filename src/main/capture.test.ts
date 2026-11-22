@@ -268,4 +268,49 @@ describe('capture terminal reporting', () => {
     assert.equal(reason, 'storage');
     assert.deepEqual(ended, ['storage']);
   });
+
+  it('treats an unconfirmed final write as storage after the drain deadline', async () => {
+    const sdk = new FakeSdk();
+    const ended: SessionEndReason[] = [];
+    const anchor = { monoUs: 1_000_000, epochMs: 1_700_000_000_000 };
+    let startedWrite: () => void = () => undefined;
+    const writeStarted = new Promise<void>((resolve) => {
+      startedWrite = resolve;
+    });
+    const capture = startCapture({
+      apiKey: 'test-key',
+      anchor,
+      sdk,
+      flushMs: 0,
+      drainTimeoutMs: 20,
+      events: {
+        onSamples: () =>
+          new Promise<void>((resolve) => {
+            setTimeout(resolve, 100);
+            startedWrite();
+          }),
+        onValidation: () => undefined,
+        onError: () => undefined,
+        onPreview: () => undefined,
+        onEnded: (reason) => {
+          ended.push(reason);
+        },
+      },
+    });
+    const timestamp = anchor.epochMs * 1000 + 5_000_000;
+    const buffer = Buffer.from(
+      Metrics.encode({
+        cardio: {
+          pulseRate: [{ timestamp, value: 62, confidence: 80, stable: true }],
+        },
+      }).finish(),
+    );
+
+    sdk.emit('metrics', buffer);
+    await writeStarted;
+    const reason = await capture.stop();
+
+    assert.equal(reason, 'storage');
+    assert.deepEqual(ended, ['storage']);
+  });
 });

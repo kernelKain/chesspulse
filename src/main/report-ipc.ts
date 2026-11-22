@@ -17,8 +17,14 @@ export const REPORT_BUILD_CHANNEL = 'cp:report:build';
 export const REPORT_PROGRESS_CHANNEL = 'cp:report:progress';
 export const REPORT_CANCEL_CHANNEL = 'cp:report:cancel';
 
-/** One active build per session; a second build for the same session replaces the handle. */
-const activeBuilds = new Map<string, AbortController>();
+interface ActiveBuild {
+  controller: AbortController;
+  /** Once true, the artifact commit has begun and a cancel request must not be acknowledged. */
+  committing: boolean;
+}
+
+/** One active build per session. */
+const activeBuilds = new Map<string, ActiveBuild>();
 
 export function registerReportHandler(dataRoot: () => string = defaultDataRoot): void {
   ipcMain.handle(REPORT_BUILD_CHANNEL, async (event, payload: unknown) => {
@@ -27,13 +33,19 @@ export function registerReportHandler(dataRoot: () => string = defaultDataRoot):
       throw new Error('Choose a valid session and up to 20 PGNs under 2 MB.');
     }
     const { sessionId, pgns } = parsed.data;
-    const controller = new AbortController();
-    activeBuilds.set(sessionId, controller);
+    if (activeBuilds.has(sessionId)) {
+      throw new Error('A report build is already running for this session.');
+    }
+    const build: ActiveBuild = { controller: new AbortController(), committing: false };
+    activeBuilds.set(sessionId, build);
     try {
       // Shared exclusion also covers insight artifact reads; only one Stockfish build runs at once.
       const result = await withReportExclusion(() =>
         buildReport(dataRoot(), sessionId, pgns, undefined, {
-          signal: controller.signal,
+          signal: build.controller.signal,
+          onCommitStart: () => {
+            build.committing = true;
+          },
           onProgress: (progress) => {
             if (event.sender.isDestroyed()) return;
             const message = reportProgressSchema.safeParse({ sessionId, ...progress });
@@ -43,7 +55,7 @@ export function registerReportHandler(dataRoot: () => string = defaultDataRoot):
       );
       return reportResultSchema.parse(result);
     } finally {
-      if (activeBuilds.get(sessionId) === controller) activeBuilds.delete(sessionId);
+      if (activeBuilds.get(sessionId) === build) activeBuilds.delete(sessionId);
     }
   });
 
@@ -52,9 +64,11 @@ export function registerReportHandler(dataRoot: () => string = defaultDataRoot):
     if (!parsed.success) {
       throw new Error('Choose a session to cancel.');
     }
-    const controller = activeBuilds.get(parsed.data.sessionId);
-    if (!controller) return reportCancelResultSchema.parse({ cancelled: false });
-    controller.abort();
+    const build = activeBuilds.get(parsed.data.sessionId);
+    if (!build) return reportCancelResultSchema.parse({ cancelled: false });
+    // A commit already in progress is not cancellable; acknowledging it would lie about the artifact.
+    if (build.committing) return reportCancelResultSchema.parse({ cancelled: false });
+    build.controller.abort();
     return reportCancelResultSchema.parse({ cancelled: true });
   });
 }

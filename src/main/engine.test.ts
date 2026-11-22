@@ -75,8 +75,34 @@ describe('createEngine', { concurrency: false }, () => {
     }
   });
 
-  it('cancels an in-flight search and reports it', async () => {
+  it('treats a worker exit before a result as a crash and retries', async () => {
+    let spawned = 0;
+    const spawnWorker = (): Worker => {
+      spawned += 1;
+      if (spawned === 1) {
+        return new Worker(
+          "require('node:worker_threads').parentPort.on('message', () => process.exit(0));",
+          { eval: true },
+        );
+      }
+      return new Worker(path.join(process.cwd(), 'dist-electron/main/engine-worker.js'));
+    };
+    const engine = createEngine({ depth: 4, spawnWorker });
+    try {
+      const result = await engine.evaluate(START_FEN);
+      assert.equal(result.evalFailed, false);
+      assert.equal(spawned, 2);
+    } finally {
+      await engine.close();
+    }
+  });
+
+  it('cancels an in-flight search and reports it without stopping a borrowed worker', async () => {
     const worker = new Worker('setInterval(() => {}, 1000);', { eval: true });
+    let exited = false;
+    worker.on('exit', () => {
+      exited = true;
+    });
     const controller = new AbortController();
     const engine = createEngine({ worker, timeoutMs: 60_000, signal: controller.signal });
     try {
@@ -85,9 +111,65 @@ describe('createEngine', { concurrency: false }, () => {
       const result = await pending;
       assert.equal(result.evalFailed, true);
       assert.equal(result.reason, 'cancelled');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(exited, false);
     } finally {
       await engine.close();
       await worker.terminate();
+    }
+  });
+
+  it('rejects an invalid restart budget and accepts zero', async () => {
+    assert.throws(() => createEngine({ maxRestarts: -1 }), /non-negative integer/);
+    assert.throws(() => createEngine({ maxRestarts: 1.5 }), /non-negative integer/);
+    assert.throws(() => createEngine({ maxRestarts: Number.NaN }), /non-negative integer/);
+    const engine = createEngine({ maxRestarts: 0 });
+    await engine.close();
+  });
+
+  it('stops retrying once the budget is exhausted', async () => {
+    let spawned = 0;
+    const spawnWorker = (): Worker => {
+      spawned += 1;
+      return new Worker(
+        "require('node:worker_threads').parentPort.on('message', () => setTimeout(() => { throw new Error('crash'); }, 30));",
+        { eval: true },
+      );
+    };
+    const engine = createEngine({ budgetMs: 5, maxRestarts: 3, spawnWorker });
+    try {
+      const result = await engine.evaluate(START_FEN);
+      assert.equal(result.evalFailed, true);
+      assert.equal(result.reason, 'budget');
+      assert.equal(spawned, 1);
+    } finally {
+      await engine.close();
+    }
+  });
+
+  it('closes a factory-created replacement after a borrowed worker fails', async () => {
+    let replacementExited = false;
+    const borrowed = new Worker(
+      "require('node:worker_threads').parentPort.on('message', () => { throw new Error('borrowed crash'); });",
+      { eval: true },
+    );
+    const spawnWorker = (): Worker => {
+      const replacement = new Worker(path.join(process.cwd(), 'dist-electron/main/engine-worker.js'));
+      replacement.on('exit', () => {
+        replacementExited = true;
+      });
+      return replacement;
+    };
+    const engine = createEngine({ worker: borrowed, spawnWorker, depth: 4 });
+    try {
+      const result = await engine.evaluate(START_FEN);
+      assert.equal(result.evalFailed, false);
+      await engine.close();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(replacementExited, true);
+    } finally {
+      await engine.close();
+      await borrowed.terminate().catch(() => undefined);
     }
   });
 

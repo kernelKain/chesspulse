@@ -28,15 +28,20 @@ const LOW_COVERAGE_REMEDY =
 interface Evaluator {
   evaluate(fen: string): Promise<PositionEval>;
   close(): Promise<void>;
+  /** Optional for injected test evaluators; production createEngine always supplies it. */
+  depth?: number;
 }
 
 export interface ReportBuildControl {
   /** Aborts the in-flight engine search; no artifact is written after cancellation. */
   signal?: AbortSignal;
   onProgress?: (progress: { scored: number; total: number }) => void;
+  /** Marks the point where cancellation is no longer accepted because the commit has begun. */
+  onCommitStart?: () => void;
 }
 
 interface EngineStats {
+  depth: number;
   positions: number;
   scored: number;
   failed: number;
@@ -148,7 +153,7 @@ export async function buildReport(
       verdict,
       settled: summary.settled,
       elevated: summary.elevated,
-      engine: { depth: ENGINE_DEPTH, ...scoredMoves.engine },
+      engine: scoredMoves.engine,
       alignmentMode: first?.alignment.mode ?? 'inferred',
       toleranceSec: first?.alignment.toleranceSec ?? 0,
       ...(aligned.banner ? { banner: aligned.banner } : {}),
@@ -185,6 +190,8 @@ export async function buildReport(
         moves: scoredMoves.timelineMoves,
       },
     });
+    if (control.signal?.aborted) return CANCELLED_REFUSAL;
+    control.onCommitStart?.();
     if (control.signal?.aborted) return CANCELLED_REFUSAL;
     await saveReportArtifacts(root, sessionId, JSON.stringify(report, null, 2) + '\n', pgnBatch);
     return report;
@@ -381,7 +388,7 @@ async function scoreAlignedMoves(
     metrics,
     elevatedBlunderTimes,
     timelineMoves,
-    engine: { positions: total, scored: scoredPositions, failed, reasons },
+    engine: { depth: engine.depth ?? ENGINE_DEPTH, positions: total, scored: scoredPositions, failed, reasons },
   };
 }
 

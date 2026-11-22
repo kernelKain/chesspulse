@@ -119,7 +119,7 @@ export function engineFailureNote(engine: Report['engine']): string | null {
   const positions = (count: number): string => `${count} ${count === 1 ? 'position' : 'positions'}`;
   const parts: string[] = [];
   if (engine.reasons.timeout > 0) parts.push(`${positions(engine.reasons.timeout)} timed out`);
-  if (engine.reasons.crash > 0) parts.push(`${positions(engine.reasons.crash)} crashed the engine`);
+  if (engine.reasons.crash > 0) parts.push(`${positions(engine.reasons.crash)} hit a worker failure`);
   if (engine.reasons.engine > 0) parts.push(`${positions(engine.reasons.engine)} hit an engine error`);
   if (engine.reasons.budget > 0) parts.push(`${positions(engine.reasons.budget)} ran out of the time budget`);
   if (parts.length === 0) return `${positions(engine.failed)} could not be scored.`;

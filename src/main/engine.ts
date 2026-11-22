@@ -52,14 +52,22 @@ interface WorkerEval {
 export function createEngine(options: EngineOptions = {}): {
   evaluate(fen: string): Promise<PositionEval>;
   close(): Promise<void>;
+  depth: number;
 } {
   const depth = options.depth ?? ENGINE_DEPTH;
   const timeoutMs = options.timeoutMs ?? POSITION_TIMEOUT_MS;
   const budgetMs = options.budgetMs ?? ENGINE_BUDGET_MS;
+  if (
+    options.maxRestarts !== undefined &&
+    (!Number.isInteger(options.maxRestarts) || options.maxRestarts < 0)
+  ) {
+    throw new Error('maxRestarts must be a non-negative integer.');
+  }
   const maxRestarts = options.maxRestarts ?? MAX_WORKER_RESTARTS;
   const signal = options.signal;
   let worker = options.worker;
-  const ownsWorker = options.worker === undefined;
+  // Ownership follows the current worker, not merely how the engine was constructed.
+  let ownsWorker = options.worker === undefined;
   const spawnWorker = options.spawnWorker ?? ((): Worker => new Worker(path.join(__dirname, 'engine-worker.js')));
   let startedAt: number | undefined;
   let queue: Promise<void> = Promise.resolve();
@@ -80,13 +88,13 @@ export function createEngine(options: EngineOptions = {}): {
   async function evaluateOne(fen: string): Promise<PositionEval> {
     if (signal?.aborted) return cancelled(fen);
     if (startedAt === undefined) startedAt = Date.now();
-    if (Date.now() - startedAt >= budgetMs) {
-      return { fen, depth, evalFailed: true, reason: 'budget' };
-    }
     if (!validateFen(fen).ok) {
       return { fen, depth, evalFailed: true, reason: 'fen' };
     }
     for (;;) {
+      if (Date.now() - startedAt >= budgetMs) {
+        return { fen, depth, evalFailed: true, reason: 'budget' };
+      }
       const result = await evaluateAttempt(fen);
       if (result.reason !== 'crash') return result;
       if (restarts >= maxRestarts) return result;
@@ -96,12 +104,16 @@ export function createEngine(options: EngineOptions = {}): {
 
   async function evaluateAttempt(fen: string): Promise<PositionEval> {
     if (signal?.aborted) return cancelled(fen);
-    try {
-      worker ??= spawnWorker();
-    } catch {
-      return { fen, depth, evalFailed: true, reason: 'crash' };
+    if (!worker) {
+      try {
+        worker = spawnWorker();
+        ownsWorker = true;
+      } catch {
+        return { fen, depth, evalFailed: true, reason: 'crash' };
+      }
     }
     const current = worker;
+    const owned = ownsWorker;
     const id = (requestId += 1);
 
     return new Promise((resolve) => {
@@ -111,6 +123,7 @@ export function createEngine(options: EngineOptions = {}): {
         if (timer !== undefined) clearTimeout(timer);
         current.off('message', onMessage);
         current.off('error', onError);
+        current.off('exit', onExit);
         signal?.removeEventListener('abort', onAbort);
       };
       const finish = (result: PositionEval): void => {
@@ -120,16 +133,28 @@ export function createEngine(options: EngineOptions = {}): {
         resolve(result);
       };
       const dropWorker = (): void => {
-        if (worker === current) worker = undefined;
+        if (worker === current) {
+          worker = undefined;
+          ownsWorker = false;
+        }
+      };
+      const stopOwnedWorker = (): void => {
+        if (owned) void current.terminate().catch(() => undefined);
       };
       const onError = (): void => {
+        dropWorker();
+        finish({ fen, depth, evalFailed: true, reason: 'crash' });
+        stopOwnedWorker();
+      };
+      const onExit = (): void => {
         dropWorker();
         finish({ fen, depth, evalFailed: true, reason: 'crash' });
       };
       const onAbort = (): void => {
         dropWorker();
-        void current.terminate().catch(() => undefined);
         finish(cancelled(fen));
+        // A borrowed worker is the caller's to stop; only terminate what the engine created.
+        stopOwnedWorker();
       };
       const onMessage = (message: unknown): void => {
         if (!isWorkerEval(message) || message.id !== id) return;
@@ -147,12 +172,13 @@ export function createEngine(options: EngineOptions = {}): {
         });
       };
       timer = setTimeout(() => {
-        finish({ fen, depth, evalFailed: true, reason: 'timeout' });
         dropWorker();
-        void current.terminate().catch(() => undefined);
+        finish({ fen, depth, evalFailed: true, reason: 'timeout' });
+        stopOwnedWorker();
       }, timeoutMs);
       current.on('message', onMessage);
       current.on('error', onError);
+      current.on('exit', onExit);
       signal?.addEventListener('abort', onAbort, { once: true });
       if (signal?.aborted) {
         onAbort();
@@ -161,6 +187,7 @@ export function createEngine(options: EngineOptions = {}): {
       try {
         current.postMessage({ type: 'eval', id, fen, depth });
       } catch {
+        // A postMessage throw means this attempt failed; dispose an owned worker before retrying.
         onError();
       }
     });
@@ -171,10 +198,11 @@ export function createEngine(options: EngineOptions = {}): {
     if (!ownsWorker || !worker) return;
     const current = worker;
     worker = undefined;
+    ownsWorker = false;
     await current.terminate();
   }
 
-  return { evaluate, close };
+  return { evaluate, close, depth };
 }
 
 function isWorkerEval(message: unknown): message is WorkerEval {

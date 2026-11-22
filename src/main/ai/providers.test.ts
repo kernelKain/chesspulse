@@ -127,6 +127,26 @@ describe('provider adapters', () => {
       );
     }
   });
+
+  it('prefers a refusal over reasoning metadata and ignores null reasoning fields', async () => {
+    const refusal: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: null, refusal: 'I cannot help.', reasoning_content: 'thought' } }],
+        }),
+        { status: 200 },
+      );
+    await assert.rejects(callProvider(configuration('openai'), INPUT, refusal), /refused the request/);
+
+    const empty: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: null, reasoning: null, reasoning_content: null } }],
+        }),
+        { status: 200 },
+      );
+    await assert.rejects(callProvider(configuration('openai'), INPUT, empty), /unreadable response/);
+  });
 });
 
 describe('readAiConfig', () => {

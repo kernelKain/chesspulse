@@ -58,6 +58,7 @@ export function App() {
   const insightRequestSeq = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
   const terminalSessionRef = useRef<string | null>(null);
+  const supersededSessions = useRef<Set<string>>(new Set());
 
   function resetInsight(): void {
     insightRequestSeq.current += 1;
@@ -70,6 +71,7 @@ export function App() {
     setGapPending(false);
     setCoachMessage(null);
     if (sessionIdRef.current === nextId) return;
+    if (sessionIdRef.current) supersededSessions.current.add(sessionIdRef.current);
     sessionIdRef.current = nextId;
     terminalSessionRef.current = null;
     reportRequestSeq.current += 1;
@@ -141,6 +143,8 @@ export function App() {
     return bridge.onSessionEnded((event) => {
       const parsed = sessionEndedSchema.safeParse(event);
       if (!parsed.success) return;
+      // A late event from a session the page has already replaced must not switch the screen back.
+      if (supersededSessions.current.has(parsed.data.sessionId)) return;
       adoptSession(parsed.data.sessionId);
       terminalSessionRef.current = parsed.data.sessionId;
       setPhase('stopped');

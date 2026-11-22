@@ -81,6 +81,15 @@ describe('scoreMove', () => {
     assert.equal(move.blunder, true);
     assert.ok(move.accuracy !== null && move.accuracy < 50);
   });
+
+  it('preserves mate involvement when the other evaluation fails', () => {
+    const move = scoreMove(failed, { evalFailed: false, mate: 1 }, 'settled', true);
+    assert.equal(move.mate, true);
+    assert.equal(move.cpl, null);
+    assert.equal(move.accuracy, null);
+    assert.equal(move.blunder, false);
+    assert.equal(move.includeInStats, true);
+  });
 });
 
 describe('mateToCp', () => {
@@ -123,6 +132,19 @@ describe('analyseMoves', () => {
       counted({ band: 'settled', accuracy: 73, blunder: true }),
       counted({ band: 'elevated', accuracy: 10, blunder: true, includeInStats: false }),
     ]), summary);
+  });
+
+  it('counts a scored mate move even when CPL is null', () => {
+    const summary = analyseMoves([
+      counted({ band: 'settled', cpl: null, mate: true, accuracy: 100 }),
+      counted({ band: 'settled', accuracy: 80 }),
+      counted({ band: 'settled', accuracy: 80 }),
+      counted({ band: 'settled', accuracy: 80 }),
+      counted({ band: 'settled', accuracy: 80 }),
+    ]);
+    assert.equal(summary.unscored, 0);
+    assert.equal(summary.scored, 5);
+    assert.deepEqual(summary.settled, { band: 'settled', moves: 5, status: 'ok', accuracy: 84 });
   });
 });
 

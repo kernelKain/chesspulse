@@ -73,7 +73,11 @@ function rendererDevOrigin(): string | undefined {
 function publishToWindows(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (win.isDestroyed()) continue;
-    win.webContents.send(channel, payload);
+    try {
+      win.webContents.send(channel, payload);
+    } catch {
+      // The window closed between the check and the send. Nothing else consumes this event.
+    }
   }
 }
 
@@ -175,12 +179,23 @@ function registerSessionHandlers(): void {
     if (!hasActiveSession(defaultDataRoot())) sessionStopper.beginSession();
     const meta = await startSession(defaultDataRoot(), anchor, parsed.data.timeControl, {
       onLimit: () => {
-        void stopEverything('limit').catch(() => undefined);
+        void stopEverything('limit').catch((error: unknown) => {
+          // The session is already in 'stopping', so it cannot accept over-limit samples; the
+          // failure is still recorded so a stop can be retried with the cause visible.
+          logError(
+            `[chesspulse] limit stop failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+          );
+        });
       },
     });
     if (!shutdownHooks.captureAllowed()) {
       await stopEverything('user').catch(() => undefined);
       throw new Error('Sensing was cancelled before the camera opened.');
+    }
+    // A limit or storage stop can finalize the session while startSession is still awaiting work.
+    if (stoppingSession || !hasActiveSession(defaultDataRoot())) {
+      await stopEverything('user').catch(() => undefined);
+      throw new Error('The session ended before the camera opened.');
     }
     coach = new BetweenGamesCoach(meta.startAnchor.monoUs);
     // Consent can be withdrawn while the header is written. Checked again immediately before the
@@ -199,7 +214,13 @@ function registerSessionHandlers(): void {
           onError: publishSdkError,
           onPreview: publishPreview,
           onEnded: (reason) => {
-            if (reason === 'storage') void stopEverything('storage').catch(() => undefined);
+            if (reason === 'storage') {
+              void stopEverything('storage').catch((error: unknown) => {
+                logError(
+                  `[chesspulse] storage stop failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+                );
+              });
+            }
           },
         },
       });

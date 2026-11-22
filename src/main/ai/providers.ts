@@ -151,16 +151,18 @@ function parseProviderText(provider: AiProvider, value: unknown): string {
     const parsed = openAiResponse.safeParse(value);
     if (parsed.success) {
       const message = parsed.data.choices[0]?.message;
+      const refusal = message?.refusal?.trim() ?? '';
+      const hasReasoning = message?.reasoning != null || message?.reasoning_content != null;
       if (message?.content && message.content.trim().length > 0) {
         text = message.content;
-      } else if (message && (message.reasoning !== undefined || message.reasoning_content !== undefined)) {
-        throw new AiProviderError(
-          'The AI provider returned reasoning but no final answer. Try a different model.',
-          false,
-        );
-      } else if (message?.refusal && message.refusal.trim().length > 0) {
+      } else if (refusal.length > 0) {
         throw new AiProviderError(
           'The AI provider refused the request. Nothing in this report depends on it.',
+          false,
+        );
+      } else if (hasReasoning) {
+        throw new AiProviderError(
+          'The AI provider returned reasoning but no final answer. Try a different model.',
           false,
         );
       }

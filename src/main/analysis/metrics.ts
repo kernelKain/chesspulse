@@ -80,12 +80,12 @@ export function scoreMove(
   band: PulseBand | null,
   includeInStats: boolean,
 ): MoveMetric {
+  const mate = mateInvolved(before) || mateInvolved(after);
   const beforeCp = normalisedCp(before);
   const afterCp = normalisedCp(after);
   if (beforeCp === null || afterCp === null) {
-    return { cpl: null, accuracy: null, blunder: false, mate: false, band, includeInStats };
+    return { cpl: null, accuracy: null, blunder: false, mate, band, includeInStats };
   }
-  const mate = mateInvolved(before) || mateInvolved(after);
   const drop = winPercent(beforeCp) - winPercent(-afterCp);
   return {
     // A mate value near 10,000 would swamp every centipawn bar, so the display keeps null.

@@ -360,7 +360,7 @@ describe('timeline helpers', () => {
       reasons: { timeout: 2, crash: 1, engine: 0, budget: 1 },
     });
     assert.match(mixed ?? '', /2 positions timed out/);
-    assert.match(mixed ?? '', /1 position crashed the engine/);
+    assert.match(mixed ?? '', /1 position hit a worker failure/);
     assert.match(mixed ?? '', /1 position ran out of the time budget/);
     assert.match(mixed ?? '', /4 positions were left out/);
   });
