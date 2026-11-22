@@ -8,11 +8,19 @@ import { after, describe, it } from 'node:test';
 import type { PulseSample } from '../shared/contracts.js';
 import { CONFIDENCE_FLOOR, SAMPLE_HOLD_US } from '../shared/sensing.js';
 import { bandFor } from './analysis/bands.js';
-import { createBandLookup, buildReport, COVERAGE_GATE_PCT, elevatedClaim, formatResult } from './report.js';
+import {
+  createBandLookup,
+  buildReport,
+  COVERAGE_GATE_PCT,
+  elevatedClaim,
+  formatResult,
+  refusalRemedy,
+} from './report.js';
 import { positionsFromMoves } from './analysis/positions.js';
 import { ENGINE_DEPTH } from './engine.js';
 import { requestInsight } from './ai/service.js';
-import { ingestSamples, startSession, stopSession } from './session.js';
+import { ingestSamples, recordFraming, recordMark, startSession, stopSession } from './session.js';
+import { VALIDATION } from '../shared/framing.js';
 import { digestGames, readGames, readReport } from './store.js';
 
 const roots: string[] = [];
@@ -37,9 +45,14 @@ async function session(
   samples: PulseSample[],
   stopUs: number,
   startEpoch = EPOCH,
+  gameEnds: readonly number[] = [stopUs],
+  nextStarts: readonly number[] = [],
 ): Promise<string> {
   const started = await startSession(root, { monoUs: 0, epochMs: startEpoch }, '60');
   await ingestSamples(root, samples);
+  // Placement comes only from the player's marks, so every fixture states where its games ended.
+  for (const atUs of nextStarts) recordMark(root, 'next', atUs);
+  for (const atUs of gameEnds) recordMark(root, 'end', atUs);
   await stopSession(root, { monoUs: stopUs, epochMs: startEpoch + stopUs / 1000 }, 'user');
   return started.id;
 }
@@ -296,7 +309,7 @@ describe('buildReport', () => {
   it('refuses a batch with an illegal move before the engine runs', async () => {
     const root = useRoot();
     const samples = Array.from({ length: 46 }, (_unused, index) => sample(index * 1_000_000));
-    const id = await session(root, samples, 45_000_000);
+    const id = await session(root, samples, 45_000_000, EPOCH, [30_000_000, 45_000_000]);
     let calls = 0;
     const result = await buildReport(root, id, [pgnAt(EPOCH + 10_000), illegalPgnAt(EPOCH + 20_000)], {
       async evaluate(fen: string) {
@@ -550,5 +563,203 @@ describe('buildReport', () => {
       /Build the report again/,
     );
     assert.equal(calls, 0);
+  });
+});
+
+describe('placement from player marks', () => {
+  it('shows the session as one block with a banner when the player made no marks', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 11 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 10_000_000, EPOCH, []);
+    // The PGN carries an EndTime. It must not place the game: only marks may.
+    const result = await buildReport(root, id, [pgnAt(EPOCH + 10_000)], evaluator());
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.alignmentMode, 'none');
+    assert.equal(result.banner, 'No game-end marks: games are not placed on the timeline.');
+    assert.equal(result.games[0]?.aligned, false);
+    assert.equal(result.timeline.games.length, 0);
+    assert.equal(result.verdict, 'Not enough scored moves for a verdict.');
+  });
+
+  it('refuses to place games when the marks do not match the pasted count', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 11 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 10_000_000, EPOCH, [2_000_000, 4_000_000, 6_000_000]);
+    await assert.rejects(
+      buildReport(root, id, [pgnAt(EPOCH + 4_000), pgnAt(EPOCH + 8_000)], evaluator()),
+      /does not match the number of pasted games/,
+    );
+  });
+});
+
+describe('occluded samples', () => {
+  it('reports the covered time and keeps it out of coverage', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 11 }, (_unused, index) => ({
+      ...sample(index * 1_000_000),
+      ...(index >= 2 && index <= 4 ? { occluded: true } : {}),
+    }));
+    const id = await session(root, samples, 10_000_000, EPOCH, []);
+    const result = await buildReport(root, id, [pgnAt(EPOCH + 10_000)], evaluator());
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.occludedSec, 3);
+    // Seven measured seconds of ten: the three covered ones are not counted, and neither is the
+    // last sample's hold beyond the stop.
+    assert.equal(Math.round(result.coveragePct), 70);
+  });
+});
+
+describe('chosen marks after a mismatch', () => {
+  it('places the games at the marks the player picked', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 11 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 10_000_000, EPOCH, [2_000_000, 4_000_000, 6_000_000]);
+    await assert.rejects(
+      buildReport(root, id, [pgnAt(EPOCH + 4_000), pgnAt(EPOCH + 8_000)], evaluator()),
+      /does not match the number of pasted games/,
+    );
+    const result = await buildReport(
+      root,
+      id,
+      [pgnAt(EPOCH + 4_000), pgnAt(EPOCH + 8_000)],
+      evaluator(),
+      {},
+      [2_000_000, 6_000_000],
+    );
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.alignmentMode, 'marks');
+    assert.deepEqual(
+      result.timeline.games.map((entry) => [entry.startUs, entry.endUs]),
+      [
+        [0, 2_000_000],
+        [2_000_000, 6_000_000],
+      ],
+    );
+  });
+
+  it('keeps the recorded start between games and honors a chosen next mark', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 16 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(
+      root,
+      samples,
+      20_000_000,
+      EPOCH,
+      [6_000_000, 12_000_000, 15_000_000],
+      [9_000_000],
+    );
+    const pgns = [pgnAt(EPOCH + 4_000), pgnAt(EPOCH + 8_000)];
+
+    // Three ends for two games, so the player has to answer.
+    await assert.rejects(
+      buildReport(root, id, pgns, evaluator()),
+      /does not match the number of pasted games/,
+    );
+    const result = await buildReport(root, id, pgns, evaluator(), {}, [6_000_000, 15_000_000]);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(
+      result.timeline.games.map((entry) => [entry.startUs, entry.endUs]),
+      [
+        [0, 6_000_000],
+        [9_000_000, 15_000_000],
+      ],
+    );
+  });
+
+  it('accepts a chosen next mark as a game ending', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 16 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(
+      root,
+      samples,
+      20_000_000,
+      EPOCH,
+      [6_000_000, 12_000_000, 15_000_000],
+      [9_000_000],
+    );
+    const result = await buildReport(
+      root,
+      id,
+      [pgnAt(EPOCH + 4_000), pgnAt(EPOCH + 8_000)],
+      evaluator(),
+      {},
+      [9_000_000, 15_000_000],
+    );
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.timeline.games[0]?.endUs, 9_000_000);
+  });
+
+  it('rejects a mark the session never recorded', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 11 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 10_000_000, EPOCH, [2_000_000, 4_000_000]);
+    await assert.rejects(
+      buildReport(root, id, [pgnAt(EPOCH + 4_000), pgnAt(EPOCH + 8_000)], evaluator(), {}, [1, 2]),
+      /was not recorded in this session/,
+    );
+  });
+});
+
+describe('refusal cause from the session', () => {
+  it('names the cause in a low-coverage refusal', async () => {
+    const root = useRoot();
+    const started = await startSession(root, { monoUs: 0, epochMs: EPOCH }, '60');
+    await ingestSamples(root, [sample(0), sample(1_000_000)]);
+    for (let index = 0; index < 3; index += 1) recordFraming(root, VALIDATION.noFaceFound);
+    recordFraming(root, VALIDATION.tooDark);
+    await stopSession(root, { monoUs: 10_000_000, epochMs: EPOCH + 10_000 }, 'user');
+
+    const result = await buildReport(root, started.id, [pgnAt(EPOCH + 10_000)]);
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.reason, 'low_coverage');
+    assert.match(result.remedy, /out of frame in 75% of the framing checks/);
+  });
+});
+
+describe('chosen partial ends', () => {
+  it('keeps the next mark that belongs to a chosen end', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 31 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 30_000_000, EPOCH, [10_000_000, 30_000_000], [22_000_000]);
+    // One game, ended at 30 s: its start is the 22 s mark, not the session start.
+    const result = await buildReport(root, id, [pgnAt(EPOCH + 10_000)], evaluator(), {}, [30_000_000]);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(
+      result.timeline.games.map((entry) => [entry.startUs, entry.endUs]),
+      [[22_000_000, 30_000_000]],
+    );
+  });
+});
+
+describe('refusal remedy', () => {
+  it('names the most frequent cause and its share', () => {
+    const remedy = refusalRemedy({ total: 10, counts: { no_face: 4, too_dark: 2 } });
+    assert.equal(
+      remedy,
+      'The face was out of frame in 40% of the framing checks. Sit centred, with your upper chest in view.',
+    );
+  });
+
+  it('breaks a tie in the fixed cause order', () => {
+    const remedy = refusalRemedy({ total: 4, counts: { too_dark: 2, no_face: 2 } });
+    assert.match(remedy, /out of frame/);
+  });
+
+  it('keeps the generic remedy for a session that recorded no counts', () => {
+    assert.match(refusalRemedy(undefined), /Most often this is lighting or moving out of frame/);
+    assert.match(refusalRemedy({ total: 3, counts: {} }), /Most often this is lighting/);
+  });
+
+  it('rounds the share to a whole percent', () => {
+    const remedy = refusalRemedy({ total: 3, counts: { motion: 1 } });
+    assert.match(remedy, /33%/);
+    assert.match(remedy, /too much movement/);
   });
 });

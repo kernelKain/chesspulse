@@ -11,6 +11,7 @@ export const APP_ERROR_CODES = [
   'session_busy',
   'session_failed',
   'session_not_running',
+  'mark_not_recorded',
   'storage_failed',
   'pgn_invalid',
   'report_failed',
@@ -62,6 +63,11 @@ export const APP_ERRORS: Record<AppErrorCode, { readonly message: string; readon
   },
   session_not_running: {
     message: 'No session is running.',
+    retryable: false,
+  },
+  mark_not_recorded: {
+    message:
+      'That game mark was not saved. The session had stopped or reached its mark limit, so games cannot be placed from it.',
     retryable: false,
   },
   storage_failed: {

@@ -20,6 +20,7 @@
     "useUnknownInCatchVariables": true
   },
   "include": [
+    "src/renderer/bridge.d.ts",
     "src/renderer/Explainer.tsx",
     "src/renderer/Explainer.test.ts",
     "src/renderer/SetupScreen.tsx",
@@ -32,6 +33,7 @@
     "src/renderer/KeyboardHelp.dom.test.tsx",
     "src/renderer/Timeline.tsx",
     "src/renderer/Timeline.dom.test.tsx",
+    "src/renderer/elevated.test.tsx",
     "src/renderer/dom-harness.ts",
     "src/renderer/CameraOpenIndicator.tsx",
     "src/renderer/CameraOpenIndicator.test.ts",
@@ -39,6 +41,12 @@
     "src/renderer/SessionList.test.ts",
     "src/renderer/PasteValidation.tsx",
     "src/renderer/PasteValidation.test.ts",
+    "src/renderer/ReviewStages.tsx",
+    "src/renderer/ReviewStages.test.tsx",
+    "src/renderer/MarkPicker.tsx",
+    "src/renderer/MarkPicker.test.ts",
+    "src/renderer/PasteScreen.tsx",
+    "src/renderer/PasteScreen.cards.test.tsx",
     "src/renderer/RefusalPanel.tsx",
     "src/renderer/RefusalPanel.test.ts",
     "src/renderer/ReviewProgress.tsx",

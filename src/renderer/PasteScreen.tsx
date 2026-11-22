@@ -156,6 +156,7 @@ export function PasteScreen({
       <p>
         {COPY.games.intro}
       </p>
+      <p className="paste-hint">{COPY.games.clockOptionNote}</p>
 
       <div className={`paste-banner tone-${bannerTone}`} role="status" aria-live="polite">
         <div className="banner-head">
@@ -268,11 +269,11 @@ export function PasteScreen({
   );
 }
 
-function GameSummaryRow({ game }: { game: PasteGameSummary }) {  const players =
+export function GameSummaryRow({ game }: { game: PasteGameSummary }) {
+  const players =
     game.white || game.black
       ? `${game.white || COPY.gamesList.unknown} vs ${game.black || COPY.gamesList.unknown}`
       : COPY.games.playersUnnamed;
-  const moves = COPY.gamesList.ply(game.moveCount);
   const clocks =
     game.moveCount === 0
       ? COPY.games.noMoves
@@ -281,14 +282,34 @@ function GameSummaryRow({ game }: { game: PasteGameSummary }) {  const players =
         : game.partialClocks
           ? COPY.games.partialClocks
           : COPY.games.clocksOk;
+  const clocksOk = game.moveCount > 0 && game.hasClocks && !game.partialClocks;
 
   return (
-    <div className="slot-meta">
-      <span className="meta-players">{players}</span>
-      <span className="meta-detail">
-        {game.result} · {ENDING_LABEL[game.ending]} · {moves} · {clocks}
-        {game.timeControl ? ` · ${game.timeControl}` : ''}
-      </span>
+    <div className="game-card">
+      <div className="game-card-head">
+        <span className="game-card-players">{players}</span>
+        <span className="game-card-result">{game.result}</span>
+      </div>
+      <dl className="game-facts">
+        <div className="game-fact">
+          <dt>{COPY.games.card.ending}</dt>
+          <dd>{ENDING_LABEL[game.ending]}</dd>
+        </div>
+        <div className="game-fact">
+          <dt>{COPY.games.card.moves}</dt>
+          <dd>{COPY.gamesList.ply(game.moveCount)}</dd>
+        </div>
+        <div className="game-fact">
+          <dt>{COPY.games.card.clock}</dt>
+          <dd className={clocksOk ? 'fact-ok' : 'fact-warn'}>{clocks}</dd>
+        </div>
+        {game.timeControl ? (
+          <div className="game-fact">
+            <dt>{COPY.games.card.timeControl}</dt>
+            <dd>{game.timeControl}</dd>
+          </div>
+        ) : null}
+      </dl>
       {!game.includeInStats ? (
         <span className="meta-excluded">{COPY.games.excluded}</span>
       ) : null}

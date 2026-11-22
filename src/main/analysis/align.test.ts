@@ -1,21 +1,19 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { PgnGame, PulseSample } from '../../shared/contracts.js';
+import type { PgnGame, PulseSample, SessionMark } from '../../shared/contracts.js';
 import { SAMPLE_HOLD_US } from '../../shared/sensing.js';
 import {
   alignGames,
   buildMoveTimeIndex,
-  ENDTIME_TOLERANCE_SEC,
-  epochMsFromMonoUs,
-  monoUsFromEpochMs,
+  MARKS_TOLERANCE_SEC,
   moveTimeKey,
-  STARTTIME_BANNER,
-  STARTTIME_TOLERANCE_SEC,
+  NO_MARKS_BANNER,
   type MoveTime,
   type SessionClock,
 } from './align.js';
 
 const EPOCH = 1_700_000_000_000;
+const SEC = 1_000_000;
 const clock: SessionClock = { startAnchor: { monoUs: 0, epochMs: EPOCH } };
 
 function game(partial: Partial<PgnGame> & Pick<PgnGame, 'index'>): PgnGame {
@@ -24,7 +22,7 @@ function game(partial: Partial<PgnGame> & Pick<PgnGame, 'index'>): PgnGame {
     white: 'Ada',
     black: 'Nim',
     result: '1-0',
-    timeControl: '60',
+    timeControl: partial.timeControl ?? '60',
     moves: partial.moves ?? [
       { san: 'e4', clockSec: 50 },
       { san: 'e5', clockSec: 40 },
@@ -36,259 +34,298 @@ function game(partial: Partial<PgnGame> & Pick<PgnGame, 'index'>): PgnGame {
   };
 }
 
-describe('session clock', () => {
-  it('converts one anchor both ways', () => {
-    assert.equal(epochMsFromMonoUs(clock, 2_500_000), EPOCH + 2_500);
-    assert.equal(monoUsFromEpochMs(clock, EPOCH + 2_500), 2_500_000);
+/** Marks in the order a player makes them: end of each game, next game after all but the last. */
+function marksFor(ends: readonly number[], starts: readonly number[]): SessionMark[] {
+  const marks: SessionMark[] = [];
+  ends.forEach((atUs, index) => {
+    marks.push({ atUs, kind: 'end' });
+    const start = starts[index];
+    if (start !== undefined) marks.push({ atUs: start, kind: 'next' });
   });
+  return marks;
+}
 
-  it('uses both anchors when the clocks disagree', () => {
-    const both: SessionClock = {
-      startAnchor: { monoUs: 0, epochMs: 1_000_000 },
-      stopAnchor: { monoUs: 10_000_000, epochMs: 1_010_500 },
-    };
-    assert.equal(epochMsFromMonoUs(both, 5_000_000), 1_005_250);
-    assert.equal(monoUsFromEpochMs(both, 1_005_250), 5_000_000);
-  });
-});
+function withStop(stopUs: number): SessionClock {
+  return { startAnchor: { monoUs: 0, epochMs: EPOCH }, stopAnchor: { monoUs: stopUs, epochMs: EPOCH + stopUs / 1000 } };
+}
 
-describe('alignGames', () => {
-  it('places a game from EndTime within the anchor tolerance', () => {
-    const aligned = alignGames([game({ index: 0, endTimeEpochMs: EPOCH + 120_000 })], clock);
+describe('alignGames from player marks', () => {
+  it('places one game between the session start and its game-end mark', () => {
+    const aligned = alignGames([game({ index: 0 })], withStop(120 * SEC), [], marksFor([60 * SEC], []));
     assert.equal(aligned.ok, true);
     if (!aligned.ok) return;
-    assert.equal(aligned.banner, undefined);
-    assert.equal(aligned.games[0]?.alignment.mode, 'endtime');
-    assert.equal(aligned.games[0]?.alignment.toleranceSec, ENDTIME_TOLERANCE_SEC);
-    assert.equal(aligned.games[0]?.endUs, 120_000_000);
-    assert.equal(aligned.games[0]?.startUs, 90_000_000);
-    assert.ok(Math.abs(aligned.games[0].startUs - 90_000_000) <= ENDTIME_TOLERANCE_SEC * 1_000_000);
-    assert.deepEqual(
-      aligned.moveTimes.map((move) => move.tUs),
-      [100_000_000, 120_000_000],
-    );
-  });
-
-  it('names the missing EndTime and the 90 second bound', () => {
-    const aligned = alignGames([game({ index: 0, startTimeEpochMs: EPOCH + 60_000 })], clock);
-    assert.equal(aligned.ok, true);
-    if (!aligned.ok) return;
-    assert.equal(aligned.games[0]?.alignment.mode, 'starttime');
-    assert.equal(aligned.games[0]?.alignment.toleranceSec, STARTTIME_TOLERANCE_SEC);
-    assert.equal(aligned.games[0]?.startUs, 60_000_000);
-    assert.equal(aligned.games[0]?.endUs, 90_000_000);
-    assert.equal(aligned.banner, STARTTIME_BANNER);
-    assert.match(aligned.banner, /EndTime/);
-    assert.match(aligned.banner, /90/);
-  });
-
-  it('packs a 1+0 game with no timestamps and does not invent a wait', () => {
-    const session: SessionClock = {
-      startAnchor: clock.startAnchor,
-      stopAnchor: { monoUs: 60_000_000, epochMs: EPOCH + 60_000 },
-    };
-    const short = game({
-      index: 0,
-      moves: [{ san: 'e4', clockSec: 50 }],
-    });
-    const next = game({
-      index: 1,
-      moves: [{ san: 'd4', clockSec: 50 }],
-    });
-    const aligned = alignGames([short, next], session);
-    assert.equal(aligned.ok, true);
-    if (!aligned.ok) return;
-    assert.equal(aligned.games[0]?.alignment.mode, 'inferred');
+    assert.equal(aligned.games.length, 1);
     assert.equal(aligned.games[0]?.startUs, 0);
-    assert.equal(aligned.games[0]?.endUs, 10_000_000);
-    assert.equal(aligned.games[1]?.startUs, 10_000_000);
-    assert.equal(aligned.games[0]?.alignment.toleranceSec, 40);
-    assert.deepEqual(aligned.gaps, []);
-    assert.match(aligned.banner ?? '', /EndTime/);
-    assert.match(aligned.banner ?? '', /UTC/);
-    assert.match(aligned.banner ?? '', /40 s/);
-    assert.deepEqual(alignGames([short, next], session), aligned);
+    assert.equal(aligned.games[0]?.endUs, 60 * SEC);
+    assert.equal(aligned.games[0]?.alignment.mode, 'marks');
+    assert.equal(aligned.games[0]?.alignment.toleranceSec, MARKS_TOLERANCE_SEC);
+    assert.equal(aligned.banner, undefined);
   });
 
-  it('measures a four-minute gap between two EndTime games', () => {
-    const first = game({ index: 0, endTimeEpochMs: EPOCH + 100_000, moves: [{ san: 'e4', clockSec: 50 }] });
-    const second = game({ index: 1, endTimeEpochMs: EPOCH + 350_000, moves: [{ san: 'd4', clockSec: 50 }] });
-    const aligned = alignGames([first, second], clock);
-    assert.equal(aligned.ok, true);
-    if (!aligned.ok) return;
-    assert.equal(aligned.gaps.length, 1);
-    assert.equal(aligned.gaps[0]?.durationUs, 240_000_000);
-    assert.equal(aligned.gaps[0]?.afterIndex, 0);
-    assert.equal(aligned.gaps[0]?.beforeIndex, 1);
-  });
-
-  it('leaves a pulse hole as a hole and ignores a weak sample', () => {
-    const played = game({ index: 0, endTimeEpochMs: EPOCH + 10_000, moves: [{ san: 'e4', clockSec: 50 }] });
-    const samples: PulseSample[] = [
-      { tUs: 0, bpm: 70, confidence: 80, stable: true },
-      { tUs: 5_000_000, bpm: 70, confidence: 10, stable: true },
-      { tUs: 10_000_000, bpm: 72, confidence: 80, stable: true },
-    ];
-    const aligned = alignGames([played], clock, samples);
-    assert.equal(aligned.ok, true);
-    if (!aligned.ok) return;
-    assert.equal(aligned.traceGaps.length, 1);
-    assert.equal(aligned.traceGaps[0]?.fromUs, SAMPLE_HOLD_US);
-    assert.equal(aligned.traceGaps[0]?.durationUs, 10_000_000 - SAMPLE_HOLD_US);
-  });
-
-  it('lets a usable sample from before the game cover the opening', () => {
-    const played = game({ index: 0, endTimeEpochMs: EPOCH + 12_000, moves: [{ san: 'e4', clockSec: 50 }] });
-    const samples: PulseSample[] = [
-      { tUs: 1_500_000, bpm: 70, confidence: 80, stable: true },
-      { tUs: 0, bpm: 70, confidence: 80, stable: true },
-      { tUs: 12_000_000, bpm: 72, confidence: 80, stable: true },
-    ];
-    const aligned = alignGames([played], clock, samples);
-    assert.equal(aligned.ok, true);
-    if (!aligned.ok) return;
-    assert.equal(aligned.traceGaps.length, 1);
-    assert.equal(aligned.traceGaps[0]?.fromUs, 1_500_000 + SAMPLE_HOLD_US);
-    assert.equal(aligned.traceGaps[0]?.toUs, 12_000_000);
-  });
-
-  it('does not place a clockless game or a session with no stop', () => {
-    const clockless = game({ index: 3, moves: [{ san: 'e4' }] });
-    const missingClocks = alignGames([clockless], clock);
-    assert.equal(missingClocks.ok, false);
-    if (missingClocks.ok) return;
-    assert.match(missingClocks.banner, /Game 4/);
-    const noStop = alignGames([game({ index: 0, moves: [{ san: 'e4', clockSec: 50 }] })], clock);
-    assert.equal(noStop.ok, false);
-    if (noStop.ok) return;
-    assert.match(noStop.banner, /stop time/);
-  });
-
-  it('places a finished game when an abandoned game has no clocks', () => {
-    const abandoned = game({
-      index: 0,
-      includeInStats: false,
-      ending: 'abandoned',
-      moves: [{ san: 'e4' }],
-      endTimeEpochMs: EPOCH + 30_000,
-    });
-    const played = game({ index: 1, endTimeEpochMs: EPOCH + 120_000 });
-    const aligned = alignGames([abandoned, played], clock);
-    assert.equal(aligned.ok, true);
-    if (!aligned.ok) return;
-    assert.deepEqual(aligned.games.map((entry) => entry.game.index), [1]);
-  });
-
-  it('rejects a negative clock delta and a packed span past the session', () => {
-    const backwards = alignGames(
-      [game({ index: 0, moves: [{ san: 'e4', clockSec: 70 }], endTimeEpochMs: EPOCH + 10_000 })],
-      clock,
+  it('ignores PGN header times even when the export carries them', () => {
+    const aligned = alignGames(
+      [game({ index: 0, endTimeEpochMs: EPOCH + 900_000, startTimeEpochMs: EPOCH + 100_000 })],
+      withStop(120 * SEC),
+      [],
+      marksFor([45 * SEC], []),
     );
-    assert.equal(backwards.ok, false);
-    if (backwards.ok) return;
-    assert.match(backwards.banner, /inconsistent clock/);
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    assert.equal(aligned.games[0]?.startUs, 0);
+    assert.equal(aligned.games[0]?.endUs, 45 * SEC);
+  });
 
-    const session: SessionClock = {
-      startAnchor: clock.startAnchor,
-      stopAnchor: { monoUs: 15_000_000, epochMs: EPOCH + 15_000 },
-    };
-    const overflow = alignGames(
+  it('places two games and measures the gap the player took between them', () => {
+    const marks = marksFor([60 * SEC, 200 * SEC], [120 * SEC]);
+    const aligned = alignGames([game({ index: 0 }), game({ index: 1 })], withStop(260 * SEC), [], marks);
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    assert.deepEqual(
+      aligned.games.map((entry) => [entry.startUs, entry.endUs]),
       [
-        game({ index: 0, moves: [{ san: 'e4', clockSec: 50 }] }),
-        game({ index: 1, moves: [{ san: 'd4', clockSec: 50 }] }),
+        [0, 60 * SEC],
+        [120 * SEC, 200 * SEC],
       ],
-      session,
     );
-    assert.equal(overflow.ok, false);
-    if (overflow.ok) return;
-    assert.match(overflow.banner, /longer than the session/);
+    assert.equal(aligned.gaps.length, 1);
+    assert.equal(aligned.gaps[0]?.durationUs, 60 * SEC);
+    assert.equal(aligned.gaps[0]?.afterIndex, 0);
   });
 
-  it('rounds leftover session time up to the next second and keeps an exact fit at zero', () => {
-    const loose: SessionClock = {
-      startAnchor: clock.startAnchor,
-      stopAnchor: { monoUs: 10_400_000, epochMs: EPOCH + 10_400 },
-    };
-    const padded = alignGames([game({ index: 0, moves: [{ san: 'e4', clockSec: 50 }] })], loose);
-    assert.equal(padded.ok, true);
-    if (!padded.ok) return;
-    assert.equal(padded.games[0]?.alignment.toleranceSec, 1);
-
-    const exact: SessionClock = {
-      startAnchor: clock.startAnchor,
-      stopAnchor: { monoUs: 10_000_000, epochMs: EPOCH + 10_000 },
-    };
-    const fitted = alignGames([game({ index: 0, moves: [{ san: 'e4', clockSec: 50 }] })], exact);
-    assert.equal(fitted.ok, true);
-    if (!fitted.ok) return;
-    assert.equal(fitted.games[0]?.alignment.toleranceSec, 0);
+  it('starts the next game at the end mark when the player never pressed "Next game started"', () => {
+    const aligned = alignGames(
+      [game({ index: 0 }), game({ index: 1 })],
+      withStop(200 * SEC),
+      [],
+      marksFor([60 * SEC, 150 * SEC], []),
+    );
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    assert.equal(aligned.games[1]?.startUs, 60 * SEC);
+    assert.equal(aligned.games[1]?.endUs, 150 * SEC);
+    assert.equal(aligned.gaps.length, 0);
   });
 
-  it('rejects a span outside the recording and keeps one inside it', () => {
-    const late: SessionClock = {
-      startAnchor: { monoUs: 5_000_000, epochMs: EPOCH + 5_000 },
-      stopAnchor: { monoUs: 20_000_000, epochMs: EPOCH + 20_000 },
-    };
-    const before = alignGames(
-      [game({ index: 0, endTimeEpochMs: EPOCH + 10_000, moves: [{ san: 'e4', clockSec: 50 }] })],
-      late,
+  it('ends the last game at the session stop when the player stopped without a final mark', () => {
+    const aligned = alignGames(
+      [game({ index: 0 }), game({ index: 1 })],
+      withStop(300 * SEC),
+      [],
+      marksFor([60 * SEC], [120 * SEC]),
     );
-    assert.equal(before.ok, false);
-    if (before.ok) return;
-    assert.match(before.banner, /outside the session clock/);
-
-    const open: SessionClock = { startAnchor: { monoUs: 0, epochMs: EPOCH } };
-    const contained = alignGames(
-      [game({ index: 0, endTimeEpochMs: EPOCH + 10_000, moves: [{ san: 'e4', clockSec: 50 }] })],
-      open,
-    );
-    assert.equal(contained.ok, true);
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    assert.equal(aligned.games[1]?.startUs, 120 * SEC);
+    assert.equal(aligned.games[1]?.endUs, 300 * SEC);
   });
 
-  it('places a timeout flag after the last move by the unused clock', () => {
-    const flagged = alignGames(
+  it('places three games from three marks and two starts', () => {
+    const marks = marksFor([100 * SEC, 220 * SEC, 340 * SEC], [130 * SEC, 250 * SEC]);
+    const games = [0, 1, 2].map((index) => game({ index }));
+    const aligned = alignGames(games, withStop(400 * SEC), [], marks);
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    assert.deepEqual(
+      aligned.games.map((entry) => [entry.startUs, entry.endUs]),
+      [
+        [0, 100 * SEC],
+        [130 * SEC, 220 * SEC],
+        [250 * SEC, 340 * SEC],
+      ],
+    );
+    assert.equal(aligned.gaps.length, 2);
+  });
+
+  it('places a ten-game blitz session from ten marks', () => {
+    const ends = Array.from({ length: 10 }, (_item, index) => (index + 1) * 60 * SEC);
+    const starts = Array.from({ length: 9 }, (_item, index) => (index + 1) * 60 * SEC + 10 * SEC);
+    const games = Array.from({ length: 10 }, (_item, index) => game({ index }));
+    const aligned = alignGames(games, withStop(620 * SEC), [], marksFor(ends, starts));
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    assert.equal(aligned.games.length, 10);
+    assert.equal(aligned.games[9]?.startUs, 550 * SEC);
+    assert.equal(aligned.games[9]?.endUs, 600 * SEC);
+    assert.equal(aligned.gaps.length, 9);
+  });
+
+  it('falls back to the previous end when the only next mark came after the game ended', () => {
+    // end, end, next, end: the next mark belongs after game 2 started, not before it.
+    const marks: SessionMark[] = [
+      { atUs: 60 * SEC, kind: 'end' },
+      { atUs: 120 * SEC, kind: 'end' },
+      { atUs: 130 * SEC, kind: 'next' },
+      { atUs: 180 * SEC, kind: 'end' },
+    ];
+    const aligned = alignGames(
+      [game({ index: 0 }), game({ index: 1 }), game({ index: 2 })],
+      withStop(240 * SEC),
+      [],
+      marks,
+    );
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    assert.deepEqual(
+      aligned.games.map((entry) => [entry.startUs, entry.endUs]),
+      [
+        [0, 60 * SEC],
+        [60 * SEC, 120 * SEC],
+        [130 * SEC, 180 * SEC],
+      ],
+    );
+  });
+
+  it('keeps every move time inside the marked span', () => {
+    const aligned = alignGames(
       [
         game({
           index: 0,
-          ending: 'timeout',
-          endTimeEpochMs: EPOCH + 70_000,
-          moves: [{ san: 'e4', clockSec: 50 }],
+          moves: [
+            { san: 'e4', clockSec: 50 },
+            { san: 'e5', clockSec: 40 },
+            { san: 'Nf3', clockSec: 30 },
+          ],
         }),
       ],
-      clock,
+      withStop(60 * SEC),
+      [],
+      marksFor([10 * SEC], []),
     );
-    assert.equal(flagged.ok, true);
-    if (!flagged.ok) return;
-    assert.equal(flagged.games[0]?.endUs, 70_000_000);
-    assert.equal(flagged.games[0]?.startUs, 0);
-    assert.equal(flagged.moveTimes[0]?.tUs, 10_000_000);
-    assert.equal(flagged.games[0]?.alignment.toleranceSec, ENDTIME_TOLERANCE_SEC);
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    for (const move of aligned.moveTimes) {
+      assert.ok((move.tUs ?? 0) <= 10 * SEC, `move ${move.moveIndex} landed at ${move.tUs}`);
+    }
+    assert.equal(aligned.moveTimes[2]?.tUs, 10 * SEC);
+  });
 
-    const unknown = alignGames(
-      [game({ index: 0, ending: 'timeout', moves: [], endTimeEpochMs: EPOCH + 10_000, timeControl: undefined })],
-      clock,
+  it('starts a pasted subset at its own mark instead of the session start', () => {
+    // Four games were played; the player pasted the last two and answered 150 s and 240 s.
+    const marks: SessionMark[] = [
+      { atUs: 90 * SEC, kind: 'next' },
+      { atUs: 150 * SEC, kind: 'end' },
+      { atUs: 180 * SEC, kind: 'next' },
+      { atUs: 240 * SEC, kind: 'end' },
+    ];
+    const aligned = alignGames(
+      [game({ index: 2 }), game({ index: 3 })],
+      withStop(300 * SEC),
+      [],
+      marks,
     );
-    assert.equal(unknown.ok, true);
-    if (!unknown.ok) return;
-    assert.equal(unknown.games[0]?.alignment.toleranceSec, STARTTIME_TOLERANCE_SEC);
-    assert.equal(unknown.moveTimes.length, 0);
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    assert.deepEqual(
+      aligned.games.map((entry) => [entry.startUs, entry.endUs]),
+      [
+        [90 * SEC, 150 * SEC],
+        [180 * SEC, 240 * SEC],
+      ],
+    );
+  });
+
+  it('asks for the marks when there are more game ends than games', () => {
+    const marks = marksFor([60 * SEC, 120 * SEC, 180 * SEC], []);
+    const aligned = alignGames([game({ index: 0 }), game({ index: 1 })], withStop(300 * SEC), [], marks);
+    assert.equal(aligned.ok, false);
+    if (aligned.ok) return;
+    assert.equal(aligned.reason, 'mismatch');
+    assert.equal(aligned.marks.length, 3);
+  });
+
+  it('asks for the marks when a game has no end and the session has no stop', () => {
+    const aligned = alignGames([game({ index: 0 }), game({ index: 1 })], clock, [], marksFor([60 * SEC], []));
+    assert.equal(aligned.ok, false);
+    if (aligned.ok) return;
+    assert.equal(aligned.reason, 'mismatch');
+  });
+
+  it('shows one block and no games when the player made no marks', () => {
+    const aligned = alignGames([game({ index: 0 })], withStop(120 * SEC), [], []);
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    assert.deepEqual(aligned.games, []);
+    assert.deepEqual(aligned.moveTimes, []);
+    assert.equal(aligned.banner, NO_MARKS_BANNER);
+  });
+
+  it('refuses a mark outside the session clock instead of clamping it', () => {
+    const aligned = alignGames([game({ index: 0 })], withStop(60 * SEC), [], marksFor([90 * SEC], []));
+    assert.equal(aligned.ok, false);
+    if (aligned.ok) return;
+    assert.equal(aligned.reason, 'outside');
+  });
+
+  it('lays move times out from the marked start, and leaves clockless moves without a time', () => {
+    const aligned = alignGames(
+      [
+        game({
+          index: 0,
+          moves: [
+            { san: 'e4', clockSec: 50 },
+            { san: 'e5', clockSec: 40 },
+            { san: 'Nf3' },
+          ],
+        }),
+      ],
+      withStop(120 * SEC),
+      [],
+      marksFor([60 * SEC], []),
+    );
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    assert.equal(aligned.moveTimes[0]?.tUs, 10 * SEC);
+    assert.equal(aligned.moveTimes[1]?.tUs, 30 * SEC);
+    assert.equal(aligned.moveTimes[2]?.tUs, null);
+  });
+
+  it('leaves every move after a missing clock without a time', () => {
+    const aligned = alignGames(
+      [
+        game({
+          index: 0,
+          moves: [
+            { san: 'e4', clockSec: 50 },
+            { san: 'e5', clockSec: 40 },
+            { san: 'Nf3' },
+            { san: 'Nc6', clockSec: 20 },
+          ],
+        }),
+      ],
+      withStop(120 * SEC),
+      [],
+      marksFor([60 * SEC], []),
+    );
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    assert.equal(aligned.moveTimes[1]?.tUs, 30 * SEC);
+    assert.equal(aligned.moveTimes[2]?.tUs, null);
+    // Black still had clocks, but the running total stopped being known at move 3.
+    assert.equal(aligned.moveTimes[3]?.tUs, null);
+  });
+
+  it('reports a trace gap when no usable sample covers part of a game', () => {
+    const samples: PulseSample[] = [
+      { tUs: 1 * SEC, bpm: 80, confidence: 95, stable: true },
+      { tUs: 50 * SEC, bpm: 82, confidence: 95, stable: true },
+    ];
+    const aligned = alignGames([game({ index: 0 })], withStop(120 * SEC), samples, marksFor([60 * SEC], []));
+    assert.equal(aligned.ok, true);
+    if (!aligned.ok) return;
+    const gap = aligned.traceGaps.find((entry) => entry.fromUs === 1 * SEC + SAMPLE_HOLD_US);
+    assert.ok(gap, 'the uncovered stretch was not reported');
+    assert.equal(gap?.toUs, 50 * SEC);
   });
 });
 
 describe('move time index', () => {
-  it('matches a linear find for every aligned move and misses unknown keys', () => {
-    const aligned = alignGames([game({ index: 0, endTimeEpochMs: EPOCH + 120_000 })], clock);
-    assert.equal(aligned.ok, true);
-    if (!aligned.ok) return;
-    const index = buildMoveTimeIndex(aligned.moveTimes);
-    for (const move of aligned.moveTimes) {
-      const linear: MoveTime | undefined = aligned.moveTimes.find(
-        (entry) => entry.gameIndex === move.gameIndex && entry.moveIndex === move.moveIndex,
-      );
-      const keyed = index.get(moveTimeKey(move.gameIndex, move.moveIndex));
-      assert.deepEqual(keyed, linear);
-      assert.deepEqual(keyed, move);
-    }
-    assert.equal(index.get(moveTimeKey(99, 99)), undefined);
+  it('builds one lookup keyed by game and move', () => {
+    const moveTimes: MoveTime[] = [
+      { gameIndex: 0, moveIndex: 0, tUs: 1 },
+      { gameIndex: 1, moveIndex: 0, tUs: 2 },
+    ];
+    const index = buildMoveTimeIndex(moveTimes);
+    assert.equal(index.get(moveTimeKey(1, 0))?.tUs, 2);
+    assert.equal(index.get(moveTimeKey(2, 0)), undefined);
   });
 });

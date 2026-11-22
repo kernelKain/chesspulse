@@ -1,22 +1,23 @@
-// What: places each game on the session clock and names how far that placement can be wrong.
-// Why: the pulse and the moves were recorded on different clocks, and a missing EndTime must stay visible.
-// Removed: games without a timestamp would be drawn as if their times were known.
+// What: places each game on the session clock from the player's own marks, and reports the gaps.
+// Why: R6-06 makes the marks the only game boundary; chess.com exports carry no EndTime, and a
+//      pasted order is not a time.
+// Removed: games would be placed from header times or packed in paste order, which the player
+//      never confirmed and the PGNs cannot support.
 import {
   alignedGameSchema,
   type AlignedGame,
   type PgnGame,
   type PulseSample,
   type SessionAnchor,
+  type SessionMark,
 } from '../../shared/contracts.js';
 import { CONFIDENCE_FLOOR, SAMPLE_HOLD_US } from '../../shared/sensing.js';
 import { thinkTimeSec } from './pgn.js';
 
-/** P5: one anchor stays within 1 s. That is the EndTime tolerance. */
-export const ENDTIME_TOLERANCE_SEC = 1;
-/** The blueprint's stated drift when a game is placed from its UTC start only. */
-export const STARTTIME_TOLERANCE_SEC = 90;
-export const STARTTIME_BANNER =
-  'No `EndTime` in these PGNs. Games were placed from start times only — expect ±90 s of drift.';
+/** A mark is a button press, so the placement is exact to the mark rather than to a header time. */
+export const MARKS_TOLERANCE_SEC = 0;
+
+export const NO_MARKS_BANNER = 'No game-end marks: games are not placed on the timeline.';
 
 export interface SessionClock {
   startAnchor: SessionAnchor;
@@ -64,219 +65,118 @@ export type AlignResult =
       traceGaps: TraceGap[];
       banner?: string;
     }
-  | { ok: false; banner: string };
+  | {
+      ok: false;
+      reason: 'no_games' | 'no_stop' | 'mismatch' | 'outside';
+      banner: string;
+      /** The marks the Review may offer when the player has to say which one ended a game. */
+      marks: readonly SessionMark[];
+    };
 
-export function monoUsFromEpochMs(clock: SessionClock, epochMs: number): number {
-  const start = clock.startAnchor;
-  const stop = clock.stopAnchor;
-  const deltaMs = epochMs - start.epochMs;
-  if (!stop || stop.epochMs === start.epochMs || stop.monoUs === start.monoUs) {
-    return Math.round(start.monoUs + deltaMs * 1000);
-  }
-  const fraction = deltaMs / (stop.epochMs - start.epochMs);
-  return Math.round(start.monoUs + fraction * (stop.monoUs - start.monoUs));
-}
-
-export function epochMsFromMonoUs(clock: SessionClock, monoUs: number): number {
-  const start = clock.startAnchor;
-  const stop = clock.stopAnchor;
-  const deltaUs = monoUs - start.monoUs;
-  if (!stop || stop.epochMs === start.epochMs || stop.monoUs === start.monoUs) {
-    return Math.round(start.epochMs + deltaUs / 1000);
-  }
-  const fraction = deltaUs / (stop.monoUs - start.monoUs);
-  return Math.round(start.epochMs + fraction * (stop.epochMs - start.epochMs));
-}
-
+/**
+ * What: turns the player's marks into one span per game.
+ * Why: the marks are the only timestamp the player actually produced, so they are the only placement.
+ * Removed: the report would guess boundaries from header times the export does not carry.
+ *
+ * Rule (phase-06 plan §3.4): game 1 starts at the session start; each later game starts at the
+ * first "Next game started" mark after the previous game's end; game i ends at the i-th
+ * "Game ended" mark. If the player stopped instead of marking the final game, the last game ends
+ * at the session stop. Any other count is a mismatch and the player is asked, never guessed.
+ */
 export function alignGames(
   games: readonly PgnGame[],
   clock: SessionClock,
   samples: readonly PulseSample[] = [],
+  marks: readonly SessionMark[] = [],
 ): AlignResult {
-  if (games.length === 0) return { ok: false, banner: 'No games to align.' };
-
-  const mode = placementMode(games);
-  if (mode === 'mixed') {
+  if (games.length === 0) {
+    return { ok: false, reason: 'no_games', banner: 'No games to align.', marks: [] };
+  }
+  const ends = marks
+    .filter((mark) => mark.kind === 'end')
+    .map((mark) => mark.atUs)
+    .sort((left, right) => left - right);
+  if (ends.length === 0) {
+    return { ok: true, games: [], moveTimes: [], gaps: [], traceGaps: [], banner: NO_MARKS_BANNER };
+  }
+  const stopUs = clock.stopAnchor?.monoUs;
+  const finalEnd = ends.length === games.length - 1 ? stopUs : ends[games.length - 1];
+  if (finalEnd === undefined || ends.length > games.length || ends.length < games.length - 1) {
     return {
       ok: false,
-      banner: 'Some games have a timestamp and others do not, so they were not placed on one clock.',
-    };
-  }
-  const ready: { game: PgnGame; duration: number }[] = [];
-  for (const game of games) {
-    const duration = durationUs(game);
-    if (typeof duration === 'number') {
-      ready.push({ game, duration });
-      continue;
-    }
-    if (!game.includeInStats) continue;
-    const label = game.index + 1;
-    const banner =
-      duration === 'negative'
-        ? `Game ${label} has an inconsistent clock, so it was not placed.`
-        : `Game ${label} has no move clocks, so its length is unknown and it was not placed.`;
-    return { ok: false, banner };
-  }
-  if (ready.length === 0) {
-    return { ok: false, banner: 'No game had clocks that could be placed.' };
-  }
-  if (mode === 'inferred' && !clock.stopAnchor) {
-    return {
-      ok: false,
+      reason: 'mismatch',
       banner:
-        'No EndTime or UTC start in these PGNs, and the session has no stop time, so the games were not placed on the trace.',
+        'The number of game marks does not match the number of pasted games, so the games were not placed.',
+      marks,
     };
   }
 
-  const placed = place(
-    ready.map((entry) => entry.game),
-    ready.map((entry) => entry.duration),
-    clock,
-    mode,
-  );
-  if (!placed.ok) return placed;
+  const placed: AlignedGame[] = [];
+  let previousEnd: number | null = null;
+  for (let index = 0; index < games.length; index += 1) {
+    const game = games[index];
+    if (!game) continue;
+    const endUs = index === games.length - 1 ? finalEnd : (ends[index] ?? finalEnd);
+    const boundary = index === 0 ? clock.startAnchor.monoUs : (previousEnd ?? clock.startAnchor.monoUs);
+    // A subset of games can be pasted, so game 1 may not be the session's first game: its start is
+    // the last "Next game started" mark before its end, and only then the session start.
+    const startUs = lastNextBefore(marks, boundary, endUs) ?? boundary;
+    if (endUs <= startUs) {
+      return {
+        ok: false,
+        reason: 'mismatch',
+        banner: `The marks for game ${index + 1} are out of order, so the games were not placed.`,
+        marks,
+      };
+    }
+    placed.push({ game, startUs, endUs, alignment: { mode: 'marks', toleranceSec: MARKS_TOLERANCE_SEC } });
+    previousEnd = endUs;
+  }
 
   const aligned: AlignedGame[] = [];
-  for (const game of placed.games) {
+  for (const game of placed) {
     const checked = alignedGameSchema.safeParse(game);
-    if (!checked.success) return { ok: false, banner: 'The aligned game does not match the contract.' };
+    if (!checked.success) {
+      return {
+        ok: false,
+        reason: 'outside',
+        banner: 'The aligned game does not match the contract.',
+        marks,
+      };
+    }
     aligned.push(checked.data);
   }
 
+  const outside = rejectOutside(aligned, clock);
+  if (outside !== null) return { ok: false, reason: 'outside', banner: outside, marks: [] };
+
   const moveTimes = aligned.flatMap((game) => moveTimesFor(game));
-  const gaps = mode === 'inferred' ? [] : betweenGameGaps(aligned);
+  const gaps = betweenGameGaps(aligned);
   const traceGaps = aligned.flatMap((game) => traceGapsFor(game, samples));
-  return placed.banner
-    ? { ok: true, games: aligned, moveTimes, gaps, traceGaps, banner: placed.banner }
-    : { ok: true, games: aligned, moveTimes, gaps, traceGaps };
+  return { ok: true, games: aligned, moveTimes, gaps, traceGaps };
 }
 
-function placementMode(games: readonly PgnGame[]): 'endtime' | 'starttime' | 'inferred' | 'mixed' {
-  const allEnd = games.every((game) => game.endTimeEpochMs !== undefined);
-  const anyEnd = games.some((game) => game.endTimeEpochMs !== undefined);
-  const allStart = games.every((game) => game.startTimeEpochMs !== undefined);
-  const anyStart = games.some((game) => game.startTimeEpochMs !== undefined);
-  if (allEnd) return 'endtime';
-  if (!anyEnd && allStart) return 'starttime';
-  if (!anyEnd && !anyStart) return 'inferred';
-  return 'mixed';
-}
-
-function unplayedTimeoutUs(game: PgnGame): number | null {
-  if (game.ending !== 'timeout') return 0;
-  if (game.moves.length === 0) return null;
-  const flaggerStarts = game.moves.length % 2 === 1 ? 1 : 0;
-  let clockSec: number | undefined;
-  for (let index = flaggerStarts; index < game.moves.length; index += 2) {
-    const clock = game.moves[index]?.clockSec;
-    if (clock !== undefined) clockSec = clock;
+/**
+ * What: the last "Next game started" mark between the previous boundary and this game's end.
+ * Why: the latest start before the end is this game's start, even when the pasted games are a
+ *      subset of the session and the first pasted game is not the first game played.
+ * Removed: a subset would start at the session start, and a stray mark after the game would make
+ *      the span backwards instead of falling back to the previous boundary.
+ */
+function lastNextBefore(
+  marks: readonly SessionMark[],
+  afterUs: number,
+  beforeUs: number,
+): number | null {
+  let best: number | null = null;
+  for (const mark of marks) {
+    if (mark.kind !== 'next' || mark.atUs <= afterUs || mark.atUs >= beforeUs) continue;
+    if (best === null || mark.atUs > best) best = mark.atUs;
   }
-  if (clockSec === undefined) clockSec = baseSec(game.timeControl) ?? undefined;
-  if (clockSec === undefined) return null;
-  return Math.round(clockSec * 1_000_000);
+  return best;
 }
 
-function baseSec(timeControl: string | undefined): number | null {
-  if (timeControl === undefined) return null;
-  const increment = /^(\d+)\+(\d+)$/.exec(timeControl);
-  if (increment?.[1]) return Number(increment[1]);
-  const sudden = /^(\d+)$/.exec(timeControl);
-  if (sudden?.[1]) return Number(sudden[1]);
-  return null;
-}
-
-function durationUs(game: PgnGame): number | 'missing' | 'negative' {
-  if (game.moves.length === 0) return 0;
-  const thinks = thinkTimeSec(game);
-  let seconds = 0;
-  for (const think of thinks) {
-    if (think === null) return 'missing';
-    if (think < 0) return 'negative';
-    seconds += think;
-  }
-  return Math.round(seconds * 1_000_000);
-}
-
-function place(
-  games: readonly PgnGame[],
-  durations: readonly number[],
-  clock: SessionClock,
-  mode: 'endtime' | 'starttime' | 'inferred',
-): { ok: true; games: AlignedGame[]; banner?: string } | { ok: false; banner: string } {
-  if (mode === 'endtime') {
-    return stamp(games, durations, (game, duration) => {
-      const flagUs = monoUsFromEpochMs(clock, game.endTimeEpochMs ?? 0);
-      const unplayed = unplayedTimeoutUs(game);
-      if (unplayed === null) {
-        return { startUs: flagUs - duration, endUs: flagUs, toleranceSec: STARTTIME_TOLERANCE_SEC };
-      }
-      return { startUs: flagUs - duration - unplayed, endUs: flagUs, toleranceSec: ENDTIME_TOLERANCE_SEC };
-    }, 'endtime', clock);
-  }
-  if (mode === 'starttime') {
-    const stamped = stamp(games, durations, (game, duration) => {
-      const startUs = monoUsFromEpochMs(clock, game.startTimeEpochMs ?? 0);
-      return { startUs, endUs: startUs + duration, toleranceSec: STARTTIME_TOLERANCE_SEC };
-    }, 'starttime', clock);
-    if (!stamped.ok) return stamped;
-    return { ok: true, games: stamped.games, banner: STARTTIME_BANNER };
-  }
-
-  const stopUs = clock.stopAnchor?.monoUs ?? clock.startAnchor.monoUs;
-  let cursor = clock.startAnchor.monoUs;
-  const inferred = games.map((game, index) => {
-    const duration = durations[index] ?? 0;
-    const startUs = cursor;
-    const endUs = cursor + duration;
-    cursor = endUs;
-    return aligned(game, startUs, endUs, 'inferred', 0);
-  });
-  if (cursor > stopUs) {
-    return { ok: false, banner: 'The games are longer than the session, so they were not placed.' };
-  }
-  const slackUs = stopUs - cursor;
-  const slackSec = slackUs === 0 ? 0 : Math.ceil(slackUs / 1_000_000);
-  const withTolerance = inferred.map((game) => ({
-    ...game,
-    alignment: { mode: 'inferred' as const, toleranceSec: slackSec },
-  }));
-  const checked = rejectOutside(withTolerance, clock);
-  if (!checked.ok) return checked;
-  return {
-    ok: true,
-    games: checked.games,
-    banner: `No EndTime or UTC start in these PGNs. Games were packed in paste order from the session start. Placement can be off by ${slackSec} s.`,
-  };
-}
-
-function stamp(
-  games: readonly PgnGame[],
-  durations: readonly number[],
-  at: (game: PgnGame, duration: number) => { startUs: number; endUs: number; toleranceSec: number },
-  mode: 'endtime' | 'starttime',
-  clock: SessionClock,
-): { ok: true; games: AlignedGame[] } | { ok: false; banner: string } {
-  const placed = games.map((game, index) => {
-    const span = at(game, durations[index] ?? 0);
-    return aligned(game, span.startUs, span.endUs, mode, span.toleranceSec);
-  });
-  return rejectOutside(placed, clock);
-}
-
-function aligned(
-  game: PgnGame,
-  startUs: number,
-  endUs: number,
-  mode: AlignedGame['alignment']['mode'],
-  toleranceSec: number,
-): AlignedGame {
-  return { game, startUs, endUs, alignment: { mode, toleranceSec } };
-}
-
-function rejectOutside(
-  games: readonly AlignedGame[],
-  clock: SessionClock,
-): { ok: true; games: AlignedGame[] } | { ok: false; banner: string } {
+function rejectOutside(games: readonly AlignedGame[], clock: SessionClock): string | null {
   const recordedStart = clock.startAnchor.monoUs;
   const recordedStop = clock.stopAnchor?.monoUs;
   const outside = games.some((game) => {
@@ -285,19 +185,28 @@ function rejectOutside(
     if (recordedStop !== undefined && (game.startUs > recordedStop || game.endUs > recordedStop)) return true;
     return false;
   });
-  if (outside) {
-    return { ok: false, banner: 'A game time falls outside the session clock, so it was not placed.' };
-  }
-  return { ok: true, games: [...games] };
+  return outside ? 'A game mark falls outside the session clock, so it was not placed.' : null;
 }
 
+/**
+ * What: lays each move after the previous one by its think time, inside the marked span.
+ * Why: a move cannot happen after the game ended, so a clock that adds up past the mark must not
+ *      attribute the move to a pulse sample taken after the game.
+ * Removed: an inconsistent clock could place moves beyond the game and even beyond the session.
+ */
 function moveTimesFor(game: AlignedGame): MoveTime[] {
   const thinks = thinkTimeSec(game.game);
   let cursor = game.startUs;
+  // A missing clock makes every later cumulative offset unknown: thinking time is a running sum,
+  // so resuming it after a gap would date the move earlier than it happened.
+  let timed = true;
   return game.game.moves.map((_move, moveIndex) => {
     const think = thinks[moveIndex];
-    if (think === null || think === undefined) return { gameIndex: game.game.index, moveIndex, tUs: null };
-    cursor += Math.round(think * 1_000_000);
+    if (think === null || think === undefined || !timed) {
+      timed = false;
+      return { gameIndex: game.game.index, moveIndex, tUs: null };
+    }
+    cursor = Math.min(game.endUs, cursor + Math.round(think * 1_000_000));
     return { gameIndex: game.game.index, moveIndex, tUs: cursor };
   });
 }
@@ -353,5 +262,6 @@ function traceGapsFor(game: AlignedGame, samples: readonly PulseSample[]): Trace
 }
 
 function usable(sample: PulseSample): boolean {
-  return sample.stable && sample.confidence >= CONFIDENCE_FLOOR;
+  // An occluded sample is a hole in the trace, not measured time inside the game.
+  return sample.occluded !== true && sample.stable && sample.confidence >= CONFIDENCE_FLOOR;
 }

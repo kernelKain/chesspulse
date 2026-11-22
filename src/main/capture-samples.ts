@@ -8,7 +8,7 @@ import {
   type SessionAnchor,
   type ValidationMessage,
 } from '../shared/contracts.js';
-import { VALIDATION } from '../shared/framing.js';
+import { VALIDATION, isOcclusionCode } from '../shared/framing.js';
 
 /** Kept exported here for the existing capture tests; the codes themselves live in shared framing. */
 export { VALIDATION };
@@ -119,6 +119,41 @@ export function latestPulseSample(
 ): PulseSample | null {
   const fresh = newPulseSamples(payload, anchor, lastTUs);
   return fresh.length > 0 ? fresh[fresh.length - 1] : null;
+}
+
+/** One validation code and the instant it started, on the same clock as the readings. */
+export interface ValidationInterval {
+  readonly fromUs: number;
+  readonly code: number;
+}
+
+/** The code in force at a reading's own timestamp, not at the time the batch arrived. */
+export function codeAt(intervals: readonly ValidationInterval[], tUs: number): number {
+  let code: number = VALIDATION.ok;
+  let from = -Infinity;
+  for (const interval of intervals) {
+    if (interval.fromUs <= tUs && interval.fromUs >= from) {
+      code = interval.code;
+      from = interval.fromUs;
+    }
+  }
+  return code;
+}
+
+/**
+ * What: marks each reading taken while the face could not be measured.
+ * Why: R6-07 keeps the sample in the raw file but must not count it as measured time, and a
+ *      coalesced metrics batch can straddle a validation change, so the code is chosen per reading.
+ * Removed: coverage and the baseline would treat an occluded stretch as a calm pulse, or mark a
+ *      whole batch with a code that was only true for part of it.
+ */
+export function withOcclusion(
+  samples: readonly PulseSample[],
+  intervals: readonly ValidationInterval[],
+): PulseSample[] {
+  return samples.map((sample) =>
+    isOcclusionCode(codeAt(intervals, sample.tUs)) ? { ...sample, occluded: true } : sample,
+  );
 }
 
 export function toPulseSample(

@@ -49,18 +49,34 @@ test('the app fits the four widths, respects reduced motion, and opens the keybo
     ({ app, page } = await launch(home));
     mkdirSync(SHOTS, { recursive: true });
 
+    assert.ok(await page.locator('.brand-mark').isVisible(), 'the first-run screen has no brand mark');
+    await page.screenshot({ path: path.join(SHOTS, 'first-run.png'), fullPage: true });
     await page.getByRole('button', { name: 'Skip for now' }).click();
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 900 });
       assert.equal(await page.getByRole('heading', { level: 1 }).innerText(), 'Ready when you are.');
       await noOverflow(page, `home ${width}`);
+      // The mark must decode: a CSP-blocked or missing asset renders with naturalWidth 0.
+      const mark = await page.evaluate(() => {
+        const img = document.querySelector('.brand-mark');
+        return img ? { width: img.getBoundingClientRect().width, natural: img.naturalWidth } : null;
+      });
+      assert.ok(
+        mark && mark.width > 0 && mark.natural > 0,
+        `home ${width}: the brand mark did not render`,
+      );
+      if (width >= 960) {
+        assert.ok(await page.locator('.board-tile').isVisible(), `home ${width}: the board tile is hidden`);
+      }
       await page.screenshot({ path: path.join(SHOTS, `home-${width}.png`), fullPage: true });
 
       await page.getByRole('button', { name: 'Start a session' }).click();
       assert.equal(await page.getByRole('heading', { level: 1 }).innerText(), 'Set up your session.');
       await noOverflow(page, `setup ${width}`);
-      if (width === 640) {
-        await page.screenshot({ path: path.join(SHOTS, 'setup-640.png'), fullPage: true });
+      const setupCards = await page.locator('.setup-card').count();
+      assert.equal(setupCards, 3, `setup ${width}: expected 3 setup cards, found ${setupCards}`);
+      if (width === 640 || width === 1440) {
+        await page.screenshot({ path: path.join(SHOTS, `setup-${width}.png`), fullPage: true });
       }
       await page.getByRole('button', { name: 'Back to Home' }).click();
 
@@ -106,7 +122,31 @@ test('the app fits the four widths, respects reduced motion, and opens the keybo
     await page.keyboard.press('Escape');
     assert.equal(await page.getByRole('dialog').count(), 0);
 
+    // Normal motion: the tile is allowed to transition, so the reduced-motion result means something.
+    const tileMotion = await page.evaluate(() =>
+      getComputedStyle(document.querySelector('.board-tile-face')).transitionDuration,
+    );
+    assert.ok(Number.parseFloat(tileMotion) > 0, `the board tile transition is ${tileMotion}`);
+
     await page.emulateMedia({ reducedMotion: 'reduce' });
+    const tile = await page.evaluate(() => {
+      const face = document.querySelector('.board-tile-face');
+      return {
+        transform: face ? getComputedStyle(face).transform : '',
+        transition: face ? getComputedStyle(face).transitionDuration : '',
+      };
+    });
+    assert.notEqual(tile.transform, '', 'the board tile face is missing');
+    assert.equal(Number.parseFloat(tile.transition), 0, `the board tile transition is ${tile.transition}`);
+    // The tile hides below 760px; line 96 already restores 1100 after the width loop. State the
+    // precondition here so a future reordering fails with a message instead of a hover timeout.
+    assert.ok(await page.locator('.board-tile').isVisible(), 'the board tile is hidden; hover cannot run');
+    await page.hover('.board-tile');
+    const hovered = await page.evaluate(
+      () => getComputedStyle(document.querySelector('.board-tile-face')).transform,
+    );
+    assert.equal(hovered, tile.transform, 'the board tile moved under reduced motion');
+
     const motion = await page.evaluate(() => {
       const dot = document.createElement('span');
       dot.className = 'recording-dot';

@@ -18,7 +18,18 @@ export const SESSION_WARNING_MS = 80 * 60 * 1_000;
 export const SESSION_LIMIT_MS = 90 * 60 * 1_000;
 
 export function isUsableSample(sample: PulseSample, floor = CONFIDENCE_FLOOR): boolean {
+  // An occluded sample was taken where no face could be measured, so it cannot support a number.
+  if (sample.occluded === true) return false;
   return sample.stable && sample.confidence >= floor;
+}
+
+/**
+ * What: the time covered by samples taken while the face was covered.
+ * Why: R6-07 reports that time as its own line, counted from marked samples and nothing else.
+ * Removed: the report could only show total coverage, with no word for why it dropped.
+ */
+export function occludedUs(samples: readonly PulseSample[], holdUs = SAMPLE_HOLD_US): number {
+  return samples.reduce((total, sample) => (sample.occluded === true ? total + holdUs : total), 0);
 }
 
 export type SignalQuality = 'waiting' | 'good' | 'weak' | 'poor';

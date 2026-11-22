@@ -105,6 +105,8 @@ export function endingMark(ending: PgnGame['ending']): EndingMark {
 
 export function alignmentConfidenceLabel(report: Pick<Report, 'alignmentMode' | 'toleranceSec'>): string {
   const tolerance = formatSeconds(report.toleranceSec);
+  if (report.alignmentMode === 'marks') return 'Placed from your game-end marks';
+  if (report.alignmentMode === 'none') return 'Not placed: no game-end marks';
   if (report.alignmentMode === 'endtime') return `Aligned from EndTime (±${tolerance})`;
   if (report.alignmentMode === 'starttime') return `Aligned from start time (±${tolerance})`;
   return `Inferred from paste order (±${tolerance})`;
@@ -175,7 +177,9 @@ export function buildTimelineView(result: Report | Refusal | null): TimelineView
   const { usableRuns, weakSamples } = splitPulseRuns(ordered, timeline.elevatedThresholdBpm);
   const { yMinBpm, yMaxBpm } = bpmDomain(ordered, timeline.baselineBpm, timeline.elevatedThresholdBpm);
   const state: TimelineState =
-    result.banner || result.alignmentMode !== 'endtime' ? 'low_confidence' : 'aligned';
+    result.banner || (result.alignmentMode !== 'endtime' && result.alignmentMode !== 'marks')
+      ? 'low_confidence'
+      : 'aligned';
 
   return {
     state,

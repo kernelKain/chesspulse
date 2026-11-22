@@ -17,6 +17,8 @@ export const pulseSampleSchema = z
     bpm: z.number().finite(),
     confidence: z.number().finite().min(0).max(100),
     stable: z.boolean(),
+    /** True when a face or motion code was active: the sample is kept, but never counted. */
+    occluded: z.boolean().optional(),
   })
   .strict();
 
@@ -24,6 +26,41 @@ export const sessionAnchorSchema = z
   .object({
     monoUs: monoUsSchema,
     epochMs: z.number().finite(),
+  })
+  .strict();
+
+/**
+ * What: one player mark during sensing. `end` is "Game ended"; `next` is "Next game started".
+ * Why: R6-06 places each game on the trace from these marks, with no time entered by the player.
+ * Removed: games could only be placed from PGN header times, which chess.com exports do not carry.
+ */
+export const sessionMarkSchema = z
+  .object({
+    atUs: monoUsSchema,
+    kind: z.enum(['end', 'next']),
+  })
+  .strict();
+
+export const framingCauseSchema = z.enum([
+  'no_face',
+  'too_dark',
+  'too_far',
+  'too_close',
+  'motion',
+  'chest',
+  'too_bright',
+]);
+
+/**
+ * What: how often each framing cause was reported while the session was sensing.
+ * Why: R6-08 names the most frequent cause in a refusal, as a share of the session.
+ * Removed: a refusal could only offer a generic remedy.
+ */
+export const framingCountsSchema = z
+  .object({
+    total: z.number().int().positive(),
+    // Partial: a session only stores the causes it actually saw.
+    counts: z.partialRecord(framingCauseSchema, z.number().int().nonnegative()),
   })
   .strict();
 
@@ -56,6 +93,10 @@ export const sessionMetaSchema = z
       .optional(),
     // Absent while the session is still open. A crash must not look like a chosen stop.
     stopReason: stopReasonSchema.optional(),
+    // Absent in sessions recorded before marks were stored, and while a session is open.
+    marks: z.array(sessionMarkSchema).max(80).optional(),
+    // Absent in sessions recorded before framing was counted.
+    framing: framingCountsSchema.optional(),
   })
   .strict();
 
@@ -90,7 +131,7 @@ export const pgnGameSchema = z
   })
   .strict();
 
-export const alignmentModeSchema = z.enum(['endtime', 'starttime', 'inferred']);
+export const alignmentModeSchema = z.enum(['endtime', 'starttime', 'inferred', 'marks', 'none']);
 
 export const alignedGameSchema = z
   .object({
@@ -229,6 +270,8 @@ export const reportSchema = z
       .strict(),
     alignmentMode: alignmentModeSchema,
     toleranceSec: z.number().finite().nonnegative(),
+    /** Time the face was covered by a hand or object, from marked samples only. */
+    occludedSec: z.number().int().nonnegative().optional(),
     banner: z.string().min(1).optional(),
     games: z.array(reportGameSchema),
     timeline: timelineDataSchema,
@@ -355,12 +398,37 @@ export const reportBuildRequestSchema = z
   .object({
     sessionId: z.string().min(1),
     pgns: z.array(z.string()).max(20),
+    /** The marks the player chose when their own marks did not match the pasted games. */
+    gameEndMarks: z.array(monoUsSchema).max(20).optional(),
   })
   .strict()
   .refine(
     (value) => new TextEncoder().encode(value.pgns.join('\n')).length <= PASTE_BYTE_LIMIT,
     { message: 'PGN paste exceeds 2 MB' },
   );
+
+export const sessionMarksRequestSchema = z
+  .object({
+    sessionId: z.string().min(1),
+  })
+  .strict();
+
+export const sessionMarksResultSchema = z
+  .object({
+    marks: z
+      .array(
+        z
+          .object({
+            atUs: monoUsSchema,
+            kind: z.enum(['end', 'next']),
+            /** Measured from the session start, which is the only clock the player ever saw. */
+            elapsedUs: monoUsSchema,
+          })
+          .strict(),
+      )
+      .max(80),
+  })
+  .strict();
 
 export const reportProgressSchema = z
   .object({
@@ -641,6 +709,8 @@ export type PreviewStopResult = z.infer<typeof previewStopResultSchema>;
 export type PulseSample = z.infer<typeof pulseSampleSchema>;
 export type SessionAnchor = z.infer<typeof sessionAnchorSchema>;
 export type SessionMeta = z.infer<typeof sessionMetaSchema>;
+export type SessionMark = z.infer<typeof sessionMarkSchema>;
+export type FramingCounts = z.infer<typeof framingCountsSchema>;
 export type PgnGame = z.infer<typeof pgnGameSchema>;
 export type AlignedGame = z.infer<typeof alignedGameSchema>;
 export type LowCoverageTrace = z.infer<typeof lowCoverageTraceSchema>;
@@ -653,6 +723,7 @@ export type Report = z.infer<typeof reportSchema>;
 export type ReportResult = z.infer<typeof reportResultSchema>;
 export type ReportExport = z.infer<typeof reportExportSchema>;
 export type ReportProgress = z.infer<typeof reportProgressSchema>;
+export type SessionMarkView = z.infer<typeof sessionMarksResultSchema>['marks'][number];
 export type ReportExportResult = z.infer<typeof reportExportResultSchema>;
 export type SessionDeleteResult = z.infer<typeof sessionDeleteResultSchema>;
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;

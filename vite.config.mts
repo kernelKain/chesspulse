@@ -24,6 +24,10 @@ export default defineConfig(({ command }) => ({
   build: {
     outDir: '../../dist',
     emptyOutDir: true,
+    // What: never inline a bundled asset as a data: URL.
+    // Why: the built page runs under `img-src 'self'`, so an inlined logo would be blocked.
+    // Removed: the logo would silently disappear in the packaged app while working in dev.
+    assetsInlineLimit: 0,
   },
   server: {
     host: '127.0.0.1',

@@ -1,15 +1,17 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { SessionAnchor } from '../shared/contracts.js';
+import type { PulseSample, SessionAnchor } from '../shared/contracts.js';
 import {
   SDK_ERROR,
   VALIDATION,
   latestPulseSample,
   newPulseSamples,
   sdkErrorMessage,
+  codeAt,
   toPulseSample,
   validationMessage,
   validationText,
+  withOcclusion,
 } from './capture-samples.js';
 
 const anchor: SessionAnchor = { monoUs: 1_000_000, epochMs: 1_700_000_000_000 };
@@ -177,5 +179,46 @@ describe('sdkErrorMessage', () => {
   it('keeps the SDK detail for an unmapped code', () => {
     assert.equal(sdkErrorMessage(99, 'Something specific.'), 'Something specific. (sensing code 99)');
     assert.equal(sdkErrorMessage(99, ''), 'Sensing stopped unexpectedly (code 99).');
+  });
+});
+
+describe('occlusion marking', () => {
+  const samples: PulseSample[] = [
+    { tUs: 1_000_000, bpm: 70, confidence: 80, stable: true },
+    { tUs: 2_000_000, bpm: 72, confidence: 80, stable: true },
+  ];
+
+  it('marks every reading taken while a face or motion code was active', () => {
+    for (const code of [VALIDATION.noFaceFound, VALIDATION.excessiveMotion, VALIDATION.faceTooClose]) {
+      const marked = withOcclusion(samples, [{ fromUs: 0, code }]);
+      assert.equal(marked.length, 2);
+      assert.ok(marked.every((sample) => sample.occluded === true));
+      assert.equal(marked[0]?.bpm, 70);
+    }
+  });
+
+  it('leaves readings alone for measuring, lighting, and posture codes', () => {
+    for (const code of [VALIDATION.ok, VALIDATION.tooDark, VALIDATION.tooBright]) {
+      const unchanged = withOcclusion(samples, [{ fromUs: 0, code }]);
+      assert.ok(unchanged.every((sample) => sample.occluded === undefined));
+    }
+  });
+
+  it('judges each reading by its own timestamp when a batch crosses a change', () => {
+    const sequence = [
+      { fromUs: 0, code: VALIDATION.ok },
+      { fromUs: 1_500_000, code: VALIDATION.noFaceFound },
+    ];
+    const marked = withOcclusion(samples, sequence);
+    assert.equal(marked[0]?.occluded, undefined);
+    assert.equal(marked[1]?.occluded, true);
+    assert.equal(codeAt(sequence, 1_000_000), VALIDATION.ok);
+    assert.equal(codeAt(sequence, 1_500_000), VALIDATION.noFaceFound);
+    assert.equal(codeAt([], 1_000_000), VALIDATION.ok);
+  });
+
+  it('does not mutate the samples it was given', () => {
+    withOcclusion(samples, [{ fromUs: 0, code: VALIDATION.noFaceFound }]);
+    assert.equal(samples[0]?.occluded, undefined);
   });
 });

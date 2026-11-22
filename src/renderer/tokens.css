@@ -1,11 +1,30 @@
-/* ChessPulse design tokens. */
+/* ChessPulse design tokens.
+   What: one colour role per meaning, and these roles are the only colours in the renderer.
+   Why: D-13 replaced the single-accent rule with a chess + pulse palette. Naming each role by
+        meaning keeps the chart readable when a value changes, and the contrast script reads this
+        block to check every pair.
+   Removed: components would hard-code hexes and drift apart, and "elevated" would lose its
+        three-way encoding (ember, hatch, word). */
 :root {
+  /* Board neutrals: the two square colours. Used by the logo and the Home tile only. */
+  --board-light: #d8d0c0;
+  --board-dark: #55636b;
+
+  /* Surfaces. */
   --bg: #0e1012;
   --surface: #161a1d;
   --line: #262c31;
+
+  /* Text. */
   --text: #e9e7e3;
   --muted: #98a0a6;
-  --accent: #e0663a;
+
+  /* Signal: the measured pulse trace and anything that says "sensing now". Never a judgement. */
+  --pulse: #5ac8d8;
+
+  /* Ember: the elevated state only. Always drawn with the hatch and the word "Elevated". */
+  --elevated: #e0663a;
+
   --ok: #6f8f7b;
   --warn: #c9a227;
   --danger: #d06b5e;

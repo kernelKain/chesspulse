@@ -11,6 +11,7 @@ import {
   pgnValidateRequestSchema,
   reportBuildRequestSchema,
   reportCancelRequestSchema,
+  sessionMarksRequestSchema,
   reportExportRequestSchema,
   sessionDeleteRequestSchema,
   sessionOpenRequestSchema,
@@ -86,6 +87,12 @@ export const INVOKE_CHANNELS = {
   reportBuild: {
     name: 'cp:report:build',
     request: reportBuildRequestSchema,
+    fallback: 'report_failed',
+    absentAsEmpty: false,
+  },
+  sessionMarks: {
+    name: 'cp:session:marks',
+    request: sessionMarksRequestSchema,
     fallback: 'report_failed',
     absentAsEmpty: false,
   },

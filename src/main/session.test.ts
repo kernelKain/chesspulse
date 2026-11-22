@@ -6,12 +6,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import type { PulseSample } from '../shared/contracts.js';
+import { VALIDATION } from '../shared/framing.js';
 import { createSession, readMeta, readSamples } from './store.js';
 import {
   BASELINE_WINDOW_US,
   activeSessionState,
   baselineFromSamples,
   coverageFromSamples,
+  recordFraming,
   activeTimeControl,
   ingestSamples,
   isActiveSession,
@@ -81,6 +83,38 @@ describe('coverageFromSamples', () => {
     assert.equal(holed.usableUs, MAX_SAMPLE_HOLD_US + 1_000_000);
     assert.ok(holed.pct < full.pct);
     assert.equal(withHole[1].bpm, 70);
+  });
+
+  it('drops coverage by exactly the time the face was covered', () => {
+    const start = 0;
+    const stop = 4_000_000;
+    const clear = [0, 1, 2, 3].map((second) => sample(second * 1_000_000, 70));
+    const full = coverageFromSamples(clear, start, stop);
+    const covered = [
+      sample(0, 70),
+      { ...sample(1_000_000, 70), occluded: true },
+      sample(2_000_000, 70),
+      { ...sample(3_000_000, 70), occluded: true },
+    ];
+    const reduced = coverageFromSamples(covered, start, stop);
+    assert.equal(full.pct, 100);
+    assert.equal(reduced.usableUs, full.usableUs - 2 * 1_000_000);
+    assert.equal(reduced.pct, 50);
+  });
+});
+
+describe('framing counts', () => {
+  it('counts causes while sensing and stores them with the stop', async () => {
+    const root = useRoot();
+    const started = await startSession(root, anchor, '3+2');
+    await ingestSamples(root, [sample(0, 70)]);
+    recordFraming(root, VALIDATION.noFaceFound);
+    recordFraming(root, VALIDATION.noFaceFound);
+    recordFraming(root, VALIDATION.tooDark);
+    recordFraming(root, VALIDATION.ok);
+    await stopSession(root, { monoUs: 2_000_000, epochMs: anchor.epochMs + 2_000 }, 'user');
+    const meta = await readMeta(root, started.id);
+    assert.deepEqual(meta.framing, { total: 4, counts: { no_face: 2, too_dark: 1 } });
   });
 });
 
