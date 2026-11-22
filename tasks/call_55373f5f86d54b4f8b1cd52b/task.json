@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "call_55373f5f86d54b4f8b1cd52b",
+  "agent_id": "ses_dff843802ffeyDEAnefn5wTgGn",
+  "subagent_type": "reviewer",
+  "task_description": "Review seven finding fixes",
+  "token_usage": {
+    "input_tokens": 115968,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 661120,
+    "output_tokens": 3934,
+    "api_call_count": 20
+  },
+  "started_at": "2026-11-22T05:10:41.851+05:30",
+  "completed_at": "2026-11-22T05:13:09.857361028+05:30"
+}
