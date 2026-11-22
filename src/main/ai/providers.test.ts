@@ -7,6 +7,7 @@ import { readAiConfig } from './config.js';
 import {
   CLIENT_USER_AGENT,
   MAX_OUTPUT_TOKENS,
+  OPENCODE_MAX_OUTPUT_TOKENS,
   OPENCODE_REASONING_EFFORT,
   callProvider,
   type AiConfiguration,
@@ -60,7 +61,7 @@ describe('provider adapters', () => {
         assert.equal(body.max_completion_tokens, MAX_OUTPUT_TOKENS);
         assert.equal(body.max_tokens, undefined);
       } else if (provider === 'opencode' || provider === 'custom') {
-        assert.equal(body.max_tokens, MAX_OUTPUT_TOKENS);
+        assert.equal(body.max_tokens, provider === 'opencode' ? OPENCODE_MAX_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS);
         assert.equal(body.max_completion_tokens, undefined);
       }
 

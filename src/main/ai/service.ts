@@ -110,9 +110,10 @@ export async function requestInsight(
  */
 export function computedSummary(report: Report): unknown {
   return {
-    coveragePct: report.coveragePct,
-    baselineBpm: report.baselineBpm,
-    elevatedThresholdBpm: report.timeline.elevatedThresholdBpm,
+    // Rounded as the report header prints them, so the model can only quote what the page shows.
+    coveragePct: Math.round(report.coveragePct),
+    baselineBpm: oneDecimal(report.baselineBpm),
+    elevatedThresholdBpm: oneDecimal(report.timeline.elevatedThresholdBpm),
     settled: report.settled,
     elevated: report.elevated,
     alignmentMode: report.alignmentMode,
@@ -158,6 +159,11 @@ export function computedSummary(report: Report): unknown {
   };
 }
 
+
+/** One decimal place, as `formatNumber` in shared/summary.ts shows bpm. */
+function oneDecimal(value: number): number {
+  return Math.round(value * 10) / 10;
+}
 
 function providerFailure(error: unknown): AiProviderError {
   if (error instanceof AiProviderError) return error;

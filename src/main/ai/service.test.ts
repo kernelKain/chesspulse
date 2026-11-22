@@ -426,6 +426,16 @@ describe('grounded move labels and config view', () => {
     );
   });
 
+  it('rounds coverage and bpm as the report header prints them', () => {
+    const summary = computedSummary({
+      ...withGame,
+      coveragePct: 88.17310816317546,
+      baselineBpm: 81.39413452148438,
+      timeline: { ...withGame.timeline, elevatedThresholdBpm: 91.39413452148438 },
+    }) as { coveragePct: number; baselineBpm: number; elevatedThresholdBpm: number };
+    assert.deepEqual([summary.coveragePct, summary.baselineBpm, summary.elevatedThresholdBpm], [88, 81.4, 91.4]);
+  });
+
   it('names the provider and model for the panel and never the key', () => {
     const view = insightConfigView({ CP_AI_PROVIDER: 'opencode', CP_AI_KEY: 'sk-secret-value', CP_AI_MODEL: 'deepseek-v4.1-flash' });
     assert.deepEqual(view, { configured: true, provider: 'opencode', model: 'deepseek-v4.1-flash' });
