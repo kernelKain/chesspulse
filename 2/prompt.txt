@@ -1,0 +1,21 @@
+continue: Write File
+
+handoff-2026-11-23.md
+I've written a handoff note for the new chat at 
+handoff-2026-11-23.md
+. In the new chat, ask it to read AGENTS.md, then that file, then 
+interface-redesign.md
+.
+
+The note covers:
+
+Where the code stands: on pgn-timezones, nothing committed, with the PGN timezone fix and the report redesign mixed together in the working files.
+What's approved: A1 through B1, plus B2 waiting for your CodeRabbit review.
+What's left: the remaining redesign steps, the submission tasks, and the unreliable AI reading.
+Your open decisions.
+The deadline: your 12:30 IST cutoff.
+Start the new chat with Entire running so it's recorded from the first message. Run entire session list there first to check.
+
+---
+
+1. approved, 2. do what is fastest to get done with but in right order, 3. okay commit and all wok of this phase to be done on 1 branch, 4. we'll solve ai issue at end of this phase, 5. do what is best
