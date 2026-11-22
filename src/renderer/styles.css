@@ -1,17 +1,12 @@
+@import './tokens.css';
+
 :root {
-  color: #e9e7e3;
-  background: #0e1012;
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
-  --bg: #0e1012;
-  --surface: #161a1d;
-  --line: #262c31;
-  --text: #e9e7e3;
-  --muted: #98a0a6;
-  --accent: #e0663a;
-  --ok: #6f8f7b;
-  --warn: #c9a227;
 }
+
 
 body {
   margin: 0;
@@ -26,7 +21,7 @@ main {
 
 .label {
   margin: 0 0 12px;
-  color: #98a0a6;
+  color: var(--muted);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   font-size: 12px;
@@ -982,7 +977,7 @@ textarea {
   width: min(420px, 100%);
   aspect-ratio: 4 / 3;
   object-fit: cover;
-  background: #000;
+  background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 10px;
   /* Mirroring makes framing yourself natural; the frames sent to the SDK are unmirrored. */
@@ -1301,7 +1296,7 @@ textarea {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #e04b3a;
+  background: var(--accent);
   animation: record-pulse 2s ease-in-out infinite;
 }
 
@@ -1454,5 +1449,87 @@ textarea {
 .session-unreadable,
 .session-empty {
   margin-top: 16px;
+  color: var(--text);
+}
+
+/* ---- Component system (W5 S53) ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  border: var(--border-w) solid var(--line);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-base);
+  cursor: pointer;
+  transition: none;
+}
+.btn-primary {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--bg);
+}
+.btn-secondary {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--text);
+}
+.btn-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+.btn-danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--bg);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px var(--sp-2);
+  border: var(--border-w) solid var(--line);
+  border-radius: var(--r-control);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.inline-alert {
+  padding: var(--sp-3);
+  border: var(--border-w) solid var(--warn);
+  border-radius: var(--r-panel);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.empty-state {
+  padding: var(--sp-5);
+  border: var(--border-w) dashed var(--line);
+  border-radius: var(--r-panel);
+  color: var(--muted);
+  text-align: center;
+}
+
+.loading-state {
+  padding: var(--sp-4);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.card {
+  padding: var(--sp-4);
+  border: var(--border-w) solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--surface);
   color: var(--text);
 }

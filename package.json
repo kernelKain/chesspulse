@@ -14,7 +14,8 @@
     "report": "tsc -p tsconfig.electron.json && node dist-electron/main/report.js",
     "doctor": "tsc -p tsconfig.electron.json && node dist-electron/main/doctor-cli.js",
     "bench:depth": "tsc -p tsconfig.electron.json && node scripts/engine-depth-bench.mjs",
-    "start": "electron ."
+    "start": "electron .",
+    "check:contrast": "node scripts/contrast-check.mjs"
   },
   "build": {
     "appId": "local.chesspulse.app",

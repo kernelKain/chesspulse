@@ -483,11 +483,25 @@ function EndingRail({
   view: TimelineViewModel;
   xOf: (tUs: number) => number;
 }) {
+  const positions = view.games.map((game) => ({
+    game,
+    mark: endingMark(game.ending),
+    raw: Math.min(LEFT + PLOT_W - 14, Math.max(LEFT + 14, xOf(game.endUs))),
+  }));
+  const MIN_SPACING = 52;
+  positions.sort((a, b) => a.raw - b.raw);
+  let prev = -Infinity;
+  for (const p of positions) {
+    if (p.raw - prev < MIN_SPACING) {
+      p.raw = prev + MIN_SPACING;
+    }
+    if (p.raw > LEFT + PLOT_W - 14) p.raw = LEFT + PLOT_W - 14;
+    prev = p.raw;
+  }
   return (
     <g className="ending-rail">
-      {view.games.map((game) => {
-        const mark = endingMark(game.ending);
-        const x = Math.min(LEFT + PLOT_W - 14, Math.max(LEFT + 14, xOf(game.endUs)));
+      {positions.map(({ game, mark, raw }) => {
+        const x = raw;
         const anchor = x > LEFT + PLOT_W - 96 ? 'end' : 'middle';
         return (
           <g key={game.index} className="ending-mark">

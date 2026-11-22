@@ -49,14 +49,12 @@ function emptyValidation(count: number): PasteValidation {
 }
 
 export function PasteScreen({
-  sessionId,
   initialSlots,
   onBack,
   onContinue,
   onHelp,
   onSlotsChange,
 }: {
-  sessionId: string | null;
   initialSlots?: string[];
   onBack: (slots: string[]) => void;
   onContinue: (pgns: string[], validation: PasteValidation) => void;
@@ -156,7 +154,6 @@ export function PasteScreen({
       <h1 id={`${baseId}-heading`}>Paste your games in order.</h1>
       <p>
         Copy each game&apos;s PGN from chess.com oldest first, one game per box.
-        {sessionId ? ` Session ${sessionId}.` : ''}
       </p>
 
       <div className={`paste-banner tone-${bannerTone}`} role="status" aria-live="polite">

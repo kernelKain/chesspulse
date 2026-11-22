@@ -896,7 +896,6 @@ export function App() {
       <main>
         {status.tone === 'error' ? <StatusRegion status={status} /> : null}
         <PasteScreen
-          sessionId={sessionId}
           initialSlots={flow.draft.length > 0 ? flow.draft : undefined}
           onBack={(currentSlots) => {
             dispatch({ type: 'pasteChanged', slots: currentSlots });

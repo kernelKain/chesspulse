@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AiProvider } from '../shared/contracts';
+import { COPY } from './copy';
 
 export type InsightViewState =
   | { status: 'idle' }
@@ -54,7 +55,7 @@ export function InsightPanel({
 
   return (
     <section className="insight-panel" aria-labelledby="insight-title">
-      <p className="label">Layer 4 · Optional</p>
+      <p className="label">{COPY.insight.label}</p>
       <h2 id="insight-title">Reading</h2>
       <p className="inferred-label">INFERRED — written by a model from the numbers above. Not measured.</p>
 
