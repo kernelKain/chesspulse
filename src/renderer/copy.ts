@@ -162,7 +162,7 @@ export const COPY = {
     partialClocks: 'Partial clocks',
     clocksOk: 'Clocks OK',
     clockOptionNote:
-      'On chess.com, turn on the option that includes clock times when you copy a game. The review uses the clock on each move.',
+      'On chess.com, choose Share, then PGN, and tick the timestamps box (the clock icon) before you copy. The review uses the clock on each move.',
     card: {
       result: 'Result',
       ending: 'Ending',
