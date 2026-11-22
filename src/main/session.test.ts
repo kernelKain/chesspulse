@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -8,11 +9,14 @@ import type { PulseSample } from '../shared/contracts.js';
 import { createSession, readMeta, readSamples } from './store.js';
 import {
   BASELINE_WINDOW_US,
+  activeSessionState,
   baselineFromSamples,
   coverageFromSamples,
   activeTimeControl,
   ingestSamples,
+  isActiveSession,
   MAX_SAMPLE_HOLD_US,
+  MAX_SESSION_US,
   recoverInterruptedSessions,
   setSampleSink,
   startSession,
@@ -102,16 +106,117 @@ describe('session controller', () => {
     assert.equal(stored.some((entry) => entry.confidence === 10), true);
   });
 
-  it('refuses a second start and a batch past 90 minutes', async () => {
+  it('refuses a second start while one is running', async () => {
     const root = useRoot();
     await startSession(root, anchor, '3+2');
     await assert.rejects(() => startSession(root, anchor, '3+2'), /already running/);
-    await assert.rejects(
-      () => ingestSamples(root, [sample(90 * 60 * 1_000_000 + 1, 70)]),
-      /90 minutes/,
-    );
     const stopped = await stopSession(root, { monoUs: 1_000, epochMs: anchor.epochMs + 1 }, 'user');
     assert.equal((await readSamples(root, stopped.id)).length, 0);
+  });
+
+  it('identifies only the running session as active', async () => {
+    const root = useRoot();
+    const started = await startSession(root, anchor, '3+2');
+    assert.equal(isActiveSession(root, started.id), true);
+    assert.equal(isActiveSession(root, '01OTHER0000000000000000000'), false);
+    await stopSession(root, { monoUs: 1_000, epochMs: anchor.epochMs + 1 }, 'user');
+    assert.equal(isActiveSession(root, started.id), false);
+  });
+
+  it('reports the running session and its start time to a reloaded page', async () => {
+    const root = useRoot();
+    assert.deepEqual(activeSessionState(root), {
+      active: false,
+      sessionId: null,
+      startedAtEpochMs: null,
+    });
+    const started = await startSession(root, anchor, '3+2');
+    assert.deepEqual(activeSessionState(root), {
+      active: true,
+      sessionId: started.id,
+      startedAtEpochMs: anchor.epochMs,
+    });
+    await stopSession(root, { monoUs: 1_000, epochMs: anchor.epochMs + 1 }, 'user');
+    assert.equal(activeSessionState(root).active, false);
+  });
+
+  it('leaves the 90-minute boundary to the timer instead of rejecting a sample batch', async () => {
+    const root = useRoot();
+    const started = await startSession(root, anchor, '3+2');
+    await ingestSamples(root, [sample(MAX_SESSION_US + 1, 70)]);
+    assert.equal((await readSamples(root, started.id)).length, 1);
+    const stopped = await stopSession(
+      root,
+      { monoUs: MAX_SESSION_US + 1, epochMs: anchor.epochMs + MAX_SESSION_US / 1000 },
+      'user',
+    );
+    assert.equal(stopped.stopReason, 'user');
+  });
+
+  it('arms the 90-minute limit at start and stores limit when it fires', async () => {
+    const root = useRoot();
+    let fire: () => void = () => undefined;
+    let delayMs = 0;
+    let cleared = 0;
+    let stopping: ReturnType<typeof stopSession> | undefined;
+    const started = await startSession(root, anchor, '3+2', {
+      limitScheduler: {
+        set: (callback, delay) => {
+          fire = callback;
+          delayMs = delay;
+          return 1;
+        },
+        clear: () => {
+          cleared += 1;
+        },
+      },
+      onLimit: () => {
+        stopping = stopSession(
+          root,
+          { monoUs: MAX_SESSION_US, epochMs: anchor.epochMs + MAX_SESSION_US / 1000 },
+          'limit',
+        );
+      },
+    });
+
+    assert.equal(delayMs, MAX_SESSION_US / 1000);
+    assert.equal(activeTimeControl(root), '3+2');
+    fire();
+    assert.ok(stopping);
+    const meta = await stopping;
+    assert.equal(meta.id, started.id);
+    assert.equal(meta.stopReason, 'limit');
+    assert.equal(meta.coverage?.totalUs, MAX_SESSION_US);
+    assert.equal((await readSamples(root, meta.id)).length, 0);
+    assert.equal(activeTimeControl(root), undefined);
+    assert.equal(cleared, 0);
+  });
+
+  it('clears the limit timer when a player stop finalizes the session', async () => {
+    const root = useRoot();
+    let fire: () => void = () => undefined;
+    let cleared = 0;
+    let limitCalls = 0;
+    await startSession(root, anchor, '3+2', {
+      limitScheduler: {
+        set: (callback) => {
+          fire = callback;
+          return 1;
+        },
+        clear: () => {
+          cleared += 1;
+        },
+      },
+      onLimit: () => {
+        limitCalls += 1;
+      },
+    });
+
+    const stopped = await stopSession(root, { monoUs: 1_000, epochMs: anchor.epochMs + 1 }, 'user');
+    assert.equal(stopped.stopReason, 'user');
+    assert.equal(cleared, 1);
+    fire();
+    assert.equal(limitCalls, 0);
   });
 
   it('rejects a second start while the first is still opening', async () => {
@@ -174,6 +279,20 @@ describe('session controller', () => {
     }
   });
 
+  it('recovers the ingest tail after a rejected append and finalizes a storage stop', async () => {
+    const root = useRoot();
+    const started = await startSession(root, anchor, '3+2');
+    const broken = [{ ...sample(0, 70), confidence: 'high' }] as unknown as PulseSample[];
+    await assert.rejects(() => ingestSamples(root, broken), /not a pulse sample/);
+    await ingestSamples(root, [sample(1_000_000, 74)]);
+
+    const stopped = await stopSession(root, { monoUs: 2_000_000, epochMs: anchor.epochMs + 2_000 }, 'storage');
+
+    assert.equal(stopped.id, started.id);
+    assert.equal(stopped.stopReason, 'storage');
+    assert.deepEqual(await readSamples(root, started.id), [sample(1_000_000, 74)]);
+  });
+
   it('does not accept samples while the sample file needs repair', async () => {
     const root = useRoot();
     const started = await startSession(root, anchor, '3+2');
@@ -218,20 +337,79 @@ describe('session controller', () => {
     assert.equal((await readMeta(root, broken.id)).stopReason, undefined);
   });
 
-  it('can stop again after finalization fails', async () => {
+  it('can stop again after finalization fails and clears the limit timer', async () => {
     const root = useRoot();
-    const started = await startSession(root, anchor, '3+2');
+    let cleared = 0;
+    const started = await startSession(root, anchor, '3+2', {
+      limitScheduler: {
+        set: () => 1,
+        clear: () => {
+          cleared += 1;
+        },
+      },
+    });
     const file = path.join(root, 'sessions', started.id, 'meta.json');
     const header = await readFile(file, 'utf8');
     await writeFile(file, '{');
     const stopAnchor = { monoUs: 1_000, epochMs: anchor.epochMs + 1 };
     await assert.rejects(() => stopSession(root, stopAnchor, 'user'), /not valid/);
+    assert.equal(cleared, 1);
     await assert.rejects(() => ingestSamples(root, [sample(0, 70)]), /No session is running/);
     assert.equal(activeTimeControl(root), '3+2');
     await writeFile(file, header);
     const stopped = await stopSession(root, stopAnchor, 'user');
     assert.equal(stopped.stopReason, 'user');
+    assert.equal(cleared, 1);
     assert.equal(activeTimeControl(root), undefined);
+  });
+
+  it('recovers a killed sensing process as a crash with coverage', async () => {
+    const root = useRoot();
+    const script = path.join(root, 'crash-child.cjs');
+    await writeFile(
+      script,
+      `const { startSession, ingestSamples } = require(${JSON.stringify(path.join(__dirname, 'session.js'))});\n` +
+        `const root = ${JSON.stringify(root)};\n` +
+        '(async () => {\n' +
+        "  await startSession(root, { monoUs: 0, epochMs: 1700000000000 }, '3+2');\n" +
+        '  await ingestSamples(root, [\n' +
+        '    { tUs: 0, bpm: 70, confidence: 80, stable: true },\n' +
+        '    { tUs: 1000000, bpm: 72, confidence: 80, stable: true },\n' +
+        '    { tUs: 3000000, bpm: 74, confidence: 80, stable: true },\n' +
+        '  ]);\n' +
+        "  process.kill(process.pid, 'SIGKILL');\n" +
+        '})().catch((error) => { console.error(error); process.exit(1); });\n',
+    );
+    const child = spawn(process.execPath, [script], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    let timer: NodeJS.Timeout | undefined;
+    const exited = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+      (resolve, reject) => {
+        timer = setTimeout(() => {
+          child.kill('SIGKILL');
+          reject(new Error(`The crash child did not exit in time. stderr: ${stderr}`));
+        }, 10_000);
+        child.once('error', reject);
+        child.once('exit', (code, signal) => resolve({ code, signal }));
+      },
+    ).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
+    assert.equal(exited.signal, 'SIGKILL', `child exited with code ${exited.code}: ${stderr}`);
+
+    const { recovered, failures } = await recoverInterruptedSessions(root);
+
+    assert.deepEqual(failures, []);
+    assert.equal(recovered.length, 1);
+    assert.equal(recovered[0].stopReason, 'crash');
+    assert.equal(recovered[0].coverage?.totalUs, 3_000_000);
+    assert.equal(recovered[0].coverage?.usableUs, 2_000_000);
+    assert.equal((recovered[0].coverage?.pct ?? 100) < 100, true);
+    assert.equal((await readSamples(root, recovered[0].id)).length, 3);
   });
 
   it('closes an interrupted session as a crash', async () => {

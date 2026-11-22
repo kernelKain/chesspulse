@@ -12,6 +12,9 @@ import {
   pulseSampleSchema,
   refusalSchema,
   reportBuildRequestSchema,
+  sessionEndedSchema,
+  sessionStartedSchema,
+  stopReasonSchema,
 } from './contracts.js';
 
 const sample = {
@@ -34,6 +37,37 @@ describe('pulseSampleSchema', () => {
   it('rejects a field that is not in the contract', () => {
     const parsed = pulseSampleSchema.safeParse({ ...sample, video: true });
     assert.equal(parsed.success, false);
+  });
+});
+
+describe('session end contracts', () => {
+  it('accepts stored storage and limit reasons but no unknown reason', () => {
+    assert.equal(stopReasonSchema.safeParse('storage').success, true);
+    assert.equal(stopReasonSchema.safeParse('limit').success, true);
+    assert.equal(stopReasonSchema.safeParse('user').success, true);
+    assert.equal(stopReasonSchema.safeParse('camera').success, false);
+  });
+
+  it('accepts only automatic-ended events with a player message', () => {
+    const ended = {
+      sessionId: '01TESTSESSION0000000000000',
+      reason: 'storage',
+      message: 'Sensing stopped because the pulse samples could not be saved.',
+    };
+    assert.deepEqual(sessionEndedSchema.parse(ended), ended);
+    assert.equal(sessionEndedSchema.safeParse({ ...ended, reason: 'limit' }).success, true);
+    assert.equal(sessionEndedSchema.safeParse({ ...ended, reason: 'user' }).success, false);
+    assert.equal(sessionEndedSchema.safeParse({ ...ended, trace: [] }).success, false);
+  });
+
+  it('accepts a start event only with an id and a start time', () => {
+    const started = { sessionId: '01TESTSESSION0000000000000', startedAtEpochMs: 1_700_000_000_000 };
+    assert.deepEqual(sessionStartedSchema.parse(started), started);
+    assert.equal(sessionStartedSchema.safeParse({ sessionId: started.sessionId }).success, false);
+    assert.equal(
+      sessionStartedSchema.safeParse({ ...started, startedAtEpochMs: 'now' }).success,
+      false,
+    );
   });
 });
 

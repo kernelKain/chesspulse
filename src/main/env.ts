@@ -38,6 +38,20 @@ export function readSensingKey(env: NodeJS.ProcessEnv): string {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : '';
 }
 
+/**
+ * Tries each path in order and loads the first file that exists.
+ * Why: a packaged app cannot read `.env` from inside the asar, so it must also look beside the
+ * executable and in the per-user config directory.
+ */
+export function loadEnvCandidates(files: readonly string[], env: NodeJS.ProcessEnv): EnvLoadResult {
+  const candidates = files.filter((file) => file.length > 0);
+  for (const file of candidates) {
+    const result = loadEnvFile(file, env);
+    if (result.found) return result;
+  }
+  return { found: false, path: candidates[0] ?? '' };
+}
+
 function unquote(value: string): string {
   const first = value[0];
   const last = value[value.length - 1];

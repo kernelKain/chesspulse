@@ -110,6 +110,42 @@ export function alignmentConfidenceLabel(report: Pick<Report, 'alignmentMode' | 
   return `Inferred from paste order (±${tolerance})`;
 }
 
+export function engineCalibrationNote(engine: Report['engine']): string {
+  return `Engine depth ${engine.depth}. Speed is checked on fixtures; move accuracy is not calibrated against your games.`;
+}
+
+export function refusalHeading(reason: Refusal['reason']): string {
+  switch (reason) {
+    case 'low_coverage':
+      return 'Coverage was too low for a review.';
+    case 'order':
+      return 'The games are out of order.';
+    case 'no_games':
+      return 'No games were included in the report.';
+    case 'illegal_move':
+      return 'A move in the pasted games is illegal.';
+    case 'cancelled':
+      return 'The report build was cancelled.';
+    case 'no_trace':
+      return 'The session has no pulse trace.';
+  }
+}
+
+export function engineFailureNote(engine: Report['engine']): string | null {
+  if (engine.failed === 0) return null;
+  const positions = (count: number): string => `${count} ${count === 1 ? 'position' : 'positions'}`;
+  const parts: string[] = [];
+  if (engine.reasons.timeout > 0) parts.push(`${positions(engine.reasons.timeout)} timed out`);
+  if (engine.reasons.crash > 0) parts.push(`${positions(engine.reasons.crash)} hit a worker failure`);
+  if (engine.reasons.engine > 0) parts.push(`${positions(engine.reasons.engine)} hit an engine error`);
+  if (engine.reasons.budget > 0) parts.push(`${positions(engine.reasons.budget)} ran out of the time budget`);
+  if (parts.length === 0) return `${positions(engine.failed)} could not be scored.`;
+  if (parts.length === 1) {
+    return `${parts[0]} and ${engine.failed === 1 ? 'was' : 'were'} left out.`;
+  }
+  return `${parts.join(', ')}; ${positions(engine.failed)} ${engine.failed === 1 ? 'was' : 'were'} left out.`;
+}
+
 export function buildTimelineView(result: Report | Refusal | null): TimelineViewModel {
   if (!result) return emptyView();
   if (!result.ok) {
@@ -260,9 +296,9 @@ export function moveTableRows(view: TimelineViewModel): TimelineMoveRow[] {
       san: move.san,
       pulseBpm: pulse ? `${formatNumber(pulse.bpm)} bpm` : '—',
       band: move.band === 'elevated' ? 'Elevated' : move.band === 'settled' ? 'Settled' : 'No reading',
-      cpl: move.cpl === null ? 'Unscored' : `${Math.round(move.cpl)} cp`,
+      cpl: !move.scored ? 'Unscored' : move.mate ? 'Mate' : `${Math.round(move.cpl ?? 0)} cp`,
       think: move.thinkSec === null ? '—' : `${formatNumber(move.thinkSec)} s`,
-      note: move.blunder ? 'Blunder' : move.cpl === null ? 'Mate or unscored' : '',
+      note: !move.scored ? 'Unscored' : move.blunder ? 'Blunder' : move.mate ? 'Mate' : '',
     };
   });
 }
@@ -466,7 +502,7 @@ function nearestMoveTo(moves: readonly TimelineMove[], tUs: number): TimelineMov
 }
 
 function formatMoveReadout(move: TimelineMove): string {
-  const cpl = move.cpl === null ? 'unscored' : `${Math.round(move.cpl)} cpl`;
+  const cpl = !move.scored ? 'unscored' : move.mate ? 'mate' : `${Math.round(move.cpl ?? 0)} cpl`;
   const think = move.thinkSec === null ? '' : `, ${formatNumber(move.thinkSec)} s think`;
   const blunder = move.blunder ? ', blunder' : '';
   return ` · ${move.san} (${cpl}${think}${blunder})`;
@@ -478,4 +514,38 @@ function formatSeconds(sec: number): string {
 
 function formatNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+/**
+ * Spaces game-ending labels so two can never sit on top of each other. A forward pass pushes each
+ * label past its predecessor; if that overflows the plot, a backward pass pulls the run indoors.
+ * When the plot cannot fit the labels at the requested spacing, they are distributed evenly.
+ */
+export function spaceEndingLabels(
+  rawPositions: readonly number[],
+  min: number,
+  max: number,
+  minSpacing = 52,
+): number[] {
+  if (rawPositions.length === 0) return [];
+  if (max < min) throw new Error('The label range is inverted.');
+  const positions = [...rawPositions]
+    .sort((left, right) => left - right)
+    .map((value) => Math.min(max, Math.max(min, value)));
+  const count = positions.length;
+  if (count === 1) return positions;
+  if (max - min < minSpacing * (count - 1)) {
+    return positions.map((_value, index) => min + ((max - min) * index) / (count - 1));
+  }
+  const spaced = [...positions];
+  for (let index = 1; index < count; index += 1) {
+    spaced[index] = Math.max(spaced[index], spaced[index - 1] + minSpacing);
+  }
+  if (spaced[count - 1] > max) {
+    spaced[count - 1] = max;
+    for (let index = count - 2; index >= 0; index -= 1) {
+      spaced[index] = Math.min(spaced[index], spaced[index + 1] - minSpacing);
+    }
+  }
+  return spaced;
 }

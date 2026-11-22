@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { PulseSample, Refusal, Report } from './contracts.js';
+import { REPORT_SCHEMA_VERSION, type PulseSample, type Refusal, type Report } from './contracts.js';
 import {
   alignmentConfidenceLabel,
   buildGameMiniViews,
@@ -8,11 +8,15 @@ import {
   CPL_CAP,
   cplBarRatio,
   endingMark,
+  engineCalibrationNote,
+  engineFailureNote,
+  refusalHeading,
   formatElapsed,
   moveTableRows,
   sampleReadout,
   sampleStatusText,
   sampleTableRows,
+  spaceEndingLabels,
   splitPulseRuns,
   THINK_CAP_SEC,
   thinkTimeRatio,
@@ -26,12 +30,21 @@ function sample(tSec: number, bpm: number, confidence = 80, stable = true): Puls
 function baseReport(overrides: Partial<Report> = {}): Report {
   return {
     ok: true,
+    schemaVersion: REPORT_SCHEMA_VERSION,
     sessionId: '01TESTSESSION0000000000000',
+    gamesDigest: 'a'.repeat(64),
     coveragePct: 92,
     baselineBpm: 70,
     verdict: '1 blunder, 1 of them while your pulse was elevated.',
     settled: { band: 'settled', moves: 6, status: 'ok', accuracy: 82 },
     elevated: { band: 'elevated', moves: 5, status: 'ok', accuracy: 58 },
+    engine: {
+      depth: 12,
+      positions: 10,
+      scored: 10,
+      failed: 0,
+      reasons: { timeout: 0, crash: 0, engine: 0, budget: 0 },
+    },
     alignmentMode: 'endtime',
     toleranceSec: 1,
     games: [
@@ -75,6 +88,8 @@ function baseReport(overrides: Partial<Report> = {}): Report {
           cpl: 140,
           thinkSec: 4.5,
           blunder: true,
+          mate: false,
+          scored: true,
           band: 'elevated',
         },
       ],
@@ -184,6 +199,8 @@ describe('buildTimelineView', () => {
         cpl: 10,
         thinkSec: 1,
         blunder: false,
+        mate: false,
+        scored: true,
         band: 'settled',
       },
       {
@@ -194,6 +211,8 @@ describe('buildTimelineView', () => {
         cpl: 20,
         thinkSec: 2,
         blunder: false,
+        mate: false,
+        scored: true,
         band: 'settled',
       },
     ];
@@ -293,6 +312,77 @@ describe('timeline helpers', () => {
     assert.equal(samples[2]?.status, 'Low confidence');
   });
 
+  it('shows a mate move without a centipawn value', () => {
+    const report = baseReport();
+    const original = report.timeline.moves[0];
+    assert.ok(original);
+    report.timeline.moves[0] = { ...original, cpl: null, mate: true, blunder: false };
+    const view = buildTimelineView(report);
+    const row = moveTableRows(view)[0];
+    assert.equal(row?.cpl, 'Mate');
+    assert.equal(row?.note, 'Mate');
+    assert.match(sampleReadout(view, 2), /e4 \(mate, 4\.5 s think\)/);
+  });
+
+  it('shows Unscored when a mate was involved but evaluation never completed', () => {
+    const report = baseReport();
+    const original = report.timeline.moves[0];
+    assert.ok(original);
+    report.timeline.moves[0] = { ...original, cpl: null, mate: true, scored: false, blunder: false };
+    const view = buildTimelineView(report);
+    const row = moveTableRows(view)[0];
+    assert.equal(row?.cpl, 'Unscored');
+    assert.equal(row?.note, 'Unscored');
+    assert.match(sampleReadout(view, 2), /e4 \(unscored/);
+  });
+
+  it('states the engine depth and its calibration limit', () => {
+    assert.equal(
+      engineCalibrationNote({
+        depth: 12,
+        positions: 10,
+        scored: 10,
+        failed: 0,
+        reasons: { timeout: 0, crash: 0, engine: 0, budget: 0 },
+      }),
+      'Engine depth 12. Speed is checked on fixtures; move accuracy is not calibrated against your games.',
+    );
+  });
+
+  it('states why engine positions were left out', () => {
+    assert.equal(
+      engineFailureNote({
+        depth: 12,
+        positions: 10,
+        scored: 10,
+        failed: 0,
+        reasons: { timeout: 0, crash: 0, engine: 0, budget: 0 },
+      }),
+      null,
+    );
+    assert.equal(
+      engineFailureNote({
+        depth: 12,
+        positions: 10,
+        scored: 7,
+        failed: 3,
+        reasons: { timeout: 3, crash: 0, engine: 0, budget: 0 },
+      }),
+      '3 positions timed out and were left out.',
+    );
+    const mixed = engineFailureNote({
+      depth: 12,
+      positions: 10,
+      scored: 6,
+      failed: 4,
+      reasons: { timeout: 2, crash: 1, engine: 0, budget: 1 },
+    });
+    assert.match(mixed ?? '', /2 positions timed out/);
+    assert.match(mixed ?? '', /1 position hit a worker failure/);
+    assert.match(mixed ?? '', /1 position ran out of the time budget/);
+    assert.match(mixed ?? '', /4 positions were left out/);
+  });
+
   it('builds stacked per-game mini-timeline views sharing the session bpm scale', () => {
     const view = buildTimelineView(baseReport());
     const minis = buildGameMiniViews(view);
@@ -327,5 +417,35 @@ describe('timeline helpers', () => {
       spacedEnd.map((t) => t / 1_000_000),
       [0, 300, 600, 900, 1000],
     );
+  });
+});
+
+describe('refusalHeading', () => {
+  it('names each refusal reason without repeating the remedy', () => {
+    assert.match(refusalHeading('low_coverage'), /Coverage/);
+    assert.match(refusalHeading('order'), /out of order/);
+    assert.match(refusalHeading('no_games'), /No games/);
+    assert.match(refusalHeading('illegal_move'), /illegal/);
+    assert.match(refusalHeading('cancelled'), /cancelled/);
+    assert.match(refusalHeading('no_trace'), /pulse trace/);
+  });
+});
+
+describe('spaceEndingLabels', () => {
+  it('pushes a close run right and keeps it inside the plot', () => {
+    assert.deepEqual(spaceEndingLabels([100, 110, 120], 0, 500), [100, 152, 204]);
+  });
+
+  it('pulls a run left when it would overflow the right edge', () => {
+    assert.deepEqual(spaceEndingLabels([400, 410, 420], 0, 430, 52), [326, 378, 430]);
+  });
+
+  it('distributes evenly when the plot cannot fit the spacing', () => {
+    assert.deepEqual(spaceEndingLabels([10, 20, 30], 0, 60, 52), [0, 30, 60]);
+  });
+
+  it('leaves an empty or single label alone', () => {
+    assert.deepEqual(spaceEndingLabels([], 0, 100), []);
+    assert.deepEqual(spaceEndingLabels([84], 0, 100), [84]);
   });
 });

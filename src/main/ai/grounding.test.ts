@@ -29,6 +29,20 @@ describe('AI grounding evaluation fixtures', () => {
       assert.throws(() => groundInsight(item.stats, item.response), /introduced a number.*99/);
     });
   }
+
+  for (const name of ['diagnostic', 'medical', 'mental-state']) {
+    it(`rejects diagnostic or mental-state ${name} output`, () => {
+      const item = fixture(name);
+      assert.throws(() => groundInsight(item.stats, item.response), /diagnostic or mental-state/);
+    });
+  }
+
+  for (const name of ['pulse-language', 'tilted-position']) {
+    it(`accepts ${name} without a claim`, () => {
+      const item = fixture(name);
+      assert.equal(groundInsight(item.stats, item.response), item.response);
+    });
+  }
 });
 
 describe('groundInsight', () => {
@@ -68,5 +82,80 @@ describe('groundInsight', () => {
     assert.equal(groundInsight({ id: 9007199254740992n }, 'ID 9007199254740992.'), 'ID 9007199254740992.');
     assert.throws(() => groundInsight({ id: 9007199254740992n }, 'ID 9007199254740993.'), /9007199254740993/);
     assert.throws(() => groundInsight({ id: '900719925474099312345678901234567890' }, 'ID 9e999999999999999999999.'), /9e999/);
+  });
+
+  it('rejects a state claim even when every number is grounded', () => {
+    assert.throws(
+      () => groundInsight({ baselineBpm: 70 }, 'You were anxious about the 70 bpm baseline.'),
+      /diagnostic or mental-state/,
+    );
+  });
+
+  it('rejects present-tense and contracted mental-state claims', () => {
+    for (const text of ['You are stressed.', "You're stressed.", 'You seem anxious.', 'You stay focused.', 'You feel stressed.', 'You feel very tired.', 'You seem frustrated.', 'You seem **frustrated**.', 'You were *nervous*.']) {
+      assert.throws(() => groundInsight({}, text), /diagnostic or mental-state/);
+    }
+  });
+
+  it('rejects a direct claim split by a newline or tab', () => {
+    assert.throws(
+      () => groundInsight({ baselineBpm: 70 }, 'You\nare stressed about the 70 bpm baseline.'),
+      /diagnostic or mental-state/,
+    );
+    assert.throws(
+      () => groundInsight({ baselineBpm: 70 }, 'You\tfelt anxious about the 70 bpm baseline.'),
+      /diagnostic or mental-state/,
+    );
+  });
+
+  it('keeps measured pulse text across a newline unchanged', () => {
+    const output = 'Baseline\n70 bpm.';
+    assert.equal(groundInsight({ baselineBpm: 70 }, output), output);
+  });
+
+  it('rejects a named-disease diagnosis without the general vocabulary', () => {
+    assert.throws(() => groundInsight({}, 'You have diabetes.'), /diagnostic or mental-state/);
+    assert.throws(() => groundInsight({}, 'You have insomnia.'), /diagnostic or mental-state/);
+    assert.throws(() => groundInsight({}, 'You are suffering from burnout.'), /diagnostic or mental-state/);
+    assert.equal(
+      groundInsight({ baselineBpm: 70 }, 'Your pulse was 70 bpm.'),
+      'Your pulse was 70 bpm.',
+    );
+  });
+});
+
+describe('direct-claim modifiers and measured heart rate', () => {
+  it('rejects a degree word between the verb and the state adjective', () => {
+    for (const text of [
+      'You were very stressed.',
+      "You're a bit anxious.",
+      'You seemed really tired.',
+      'You felt extremely overwhelmed.',
+    ]) {
+      assert.throws(() => groundInsight({}, text), /diagnostic or mental-state/);
+    }
+  });
+
+  it('allows a grounded heart-rate measurement while still rejecting diagnostic use', () => {
+    assert.equal(
+      groundInsight({ baselineBpm: 72 }, 'Your baseline heart rate was 72.'),
+      'Your baseline heart rate was 72.',
+    );
+    assert.throws(
+      () => groundInsight({ baselineBpm: 72 }, 'Your heart disease explains the 72.'),
+      /diagnostic or mental-state/,
+    );
+    assert.throws(
+      () => groundInsight({ baselineBpm: 72 }, 'Your hypertensive response explains the 72.'),
+      /diagnostic or mental-state/,
+    );
+    assert.throws(
+      () =>
+        groundInsight(
+          { baselineBpm: 72 },
+          'Your pulse was 72 bpm and you were nervous about the position.',
+        ),
+      /diagnostic or mental-state/,
+    );
   });
 });

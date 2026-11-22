@@ -17,12 +17,25 @@ export interface Score {
   evalFailed: boolean;
   scoreCp?: number;
   mate?: number;
+  /** A terminal position chess.js identified locally; such a position is never sent to the engine. */
+  terminal?: 'checkmate' | 'stalemate';
 }
+
+/** Mate in N maps to 10000 - 100N, so every mate outranks any centipawn advantage. */
+export const MATE_SCORE_BASE = 10_000;
+export const MATE_SCORE_STEP = 100;
+/** Distances beyond this stay at the floor; a mate in 100 must still beat any ordinary score. */
+export const MATE_SCORE_FLOOR = 5_000;
 
 export interface MoveMetric {
   cpl: number | null;
   accuracy: number | null;
   blunder: boolean;
+  /**
+   * True when either side of the move carried a mate score or the move ended in checkmate.
+   * Such moves count in accuracy and blunders but keep `cpl` null for display.
+   */
+  mate: boolean;
   band: PulseBand | null;
   includeInStats: boolean;
 }
@@ -42,9 +55,15 @@ export interface AnalysisSummary {
   scored: number;
 }
 
-export function centipawnLoss(before: Score, after: Score): number | null {
-  if (!scored(before) || !scored(after)) return null;
-  return Math.max(0, before.scoreCp + after.scoreCp);
+export function mateToCp(mate: number): number {
+  const magnitude = Math.max(
+    MATE_SCORE_FLOOR,
+    MATE_SCORE_BASE - MATE_SCORE_STEP * Math.abs(mate),
+  );
+  if (mate > 0) return magnitude;
+  if (mate < 0) return -magnitude;
+  // UCI mate 0 means the side to move is already mated.
+  return -MATE_SCORE_BASE;
 }
 
 export function winPercent(centipawns: number): number {
@@ -66,15 +85,19 @@ export function scoreMove(
   band: PulseBand | null,
   includeInStats: boolean,
 ): MoveMetric {
-  const cpl = centipawnLoss(before, after);
-  if (cpl === null || !scored(before) || !scored(after)) {
-    return { cpl: null, accuracy: null, blunder: false, band, includeInStats };
+  const mate = mateInvolved(before) || mateInvolved(after);
+  const beforeCp = normalisedCp(before);
+  const afterCp = normalisedCp(after);
+  if (beforeCp === null || afterCp === null) {
+    return { cpl: null, accuracy: null, blunder: false, mate, band, includeInStats };
   }
-  const drop = winPercent(before.scoreCp) - winPercent(-after.scoreCp);
+  const drop = winPercent(beforeCp) - winPercent(-afterCp);
   return {
-    cpl,
-    accuracy: moveAccuracy(before.scoreCp, after.scoreCp),
+    // A mate value near 10,000 would swamp every centipawn bar, so the display keeps null.
+    cpl: mate ? null : Math.max(0, beforeCp + afterCp),
+    accuracy: moveAccuracy(beforeCp, afterCp),
     blunder: drop >= BLUNDER_WIN_DROP,
+    mate,
     band,
     includeInStats,
   };
@@ -135,6 +158,14 @@ function bandPhrase(label: string, summary: BandSummary): string {
   return summary.status === 'ok' ? `${summary.accuracy}% ${label}` : `${label} insufficient`;
 }
 
-function scored(score: Score): score is Score & { scoreCp: number } {
-  return !score.evalFailed && score.mate === undefined && score.scoreCp !== undefined;
+function normalisedCp(score: Score): number | null {
+  if (score.evalFailed) return null;
+  if (score.terminal === 'checkmate') return -MATE_SCORE_BASE;
+  if (score.terminal === 'stalemate') return 0;
+  if (score.mate !== undefined) return mateToCp(score.mate);
+  return score.scoreCp ?? null;
+}
+
+function mateInvolved(score: Score): boolean {
+  return score.terminal === 'checkmate' || score.mate !== undefined;
 }

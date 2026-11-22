@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AiProvider } from '../shared/contracts';
+import { COPY } from './copy';
 
 export type InsightViewState =
   | { status: 'idle' }
@@ -26,7 +27,7 @@ export function InsightPanel({
   onCancel: () => void;
 }) {
   const [provider, setProvider] = useState<AiProvider>('openai');
-  const [question, setQuestion] = useState('What should I understand from this session?');
+  const [question, setQuestion] = useState<string>(COPY.insight.prompt);
   const writeButton = useRef<HTMLButtonElement>(null);
   const cancelButton = useRef<HTMLButtonElement>(null);
   const restoreFocus = useRef(false);
@@ -43,9 +44,9 @@ export function InsightPanel({
 
   const liveText =
     state.status === 'idle'
-      ? 'Nothing is sent until you choose Write reading.'
+      ? COPY.insight.idle
       : state.status === 'loading'
-        ? 'Writing from the computed report…'
+        ? COPY.insight.loading
         : state.status === 'disabled'
           ? state.reason
           : state.status === 'error'
@@ -54,13 +55,13 @@ export function InsightPanel({
 
   return (
     <section className="insight-panel" aria-labelledby="insight-title">
-      <p className="label">Layer 4 · Optional</p>
-      <h2 id="insight-title">Reading</h2>
-      <p className="inferred-label">INFERRED — written by a model from the numbers above. Not measured.</p>
+      <p className="label">{COPY.insight.label}</p>
+      <h2 id="insight-title">{COPY.insight.title}</h2>
+      <p className="inferred-label">{COPY.insight.inferredLabel}</p>
 
       <div className="insight-controls">
         <label>
-          Provider
+          {COPY.insight.provider}
           <select value={provider} disabled={loading} onChange={(event) => setProvider(event.target.value as AiProvider)}>
             {PROVIDERS.map((item) => (
               <option key={item.value} value={item.value}>{item.label}</option>
@@ -68,7 +69,7 @@ export function InsightPanel({
           </select>
         </label>
         <label>
-          Question
+          {COPY.insight.question}
           <textarea
             rows={3}
             maxLength={4000}
@@ -80,8 +81,8 @@ export function InsightPanel({
       </div>
 
       <div className="actions">
-        <button ref={writeButton} type="button" disabled={loading || !question.trim()} onClick={() => onRequest(provider, question.trim())}>
-          Write reading
+        <button ref={writeButton} type="button" disabled={loading || !question.trim()} onClick={() => onRequest(provider, question.trim())} className="btn btn-secondary">
+          {COPY.insight.write}
         </button>
         {loading ? (
           <button
@@ -91,8 +92,9 @@ export function InsightPanel({
               restoreFocus.current = document.activeElement === cancelButton.current;
               onCancel();
             }}
+            className="btn btn-secondary"
           >
-            Cancel
+            {COPY.insight.cancel}
           </button>
         ) : null}
       </div>

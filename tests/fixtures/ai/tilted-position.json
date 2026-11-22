@@ -1,0 +1,6 @@
+{
+  "name": "chess evaluation tilt is not a player-state claim",
+  "stats": { "blunders": 8 },
+  "response": "The evaluation tilted toward your opponent after the blunder.",
+  "expected": "accept"
+}

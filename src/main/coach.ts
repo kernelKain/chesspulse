@@ -1,20 +1,57 @@
 // What: emits at most one numbered recovery prompt in each player-marked between-games gap.
 // Why: the fair-play boundary forbids advice during a game; a rolling median ignores weak samples.
-// Removed: a pulse spike could produce advice during a rated game or repeat on every batch.
+// Removed: every session sample was retained and the baseline was recomputed on every batch.
 import { BASELINE_WINDOW_US } from '../shared/sensing.js';
 import type { CoachMessage, PulseSample } from '../shared/contracts.js';
 import { ELEVATED_MARGIN_BPM } from './analysis/bands.js';
 import { baselineFromSamples, isUsableSample } from './session.js';
 
+/** The coach only needs the trailing ten minutes to judge the current gap. */
+export const COACH_RECENT_WINDOW_US = 10 * 60 * 1_000_000;
+
+type BaselineReader = (
+  samples: readonly PulseSample[],
+  startUs: number,
+) => { baselineBpm?: number } | undefined;
+
 export class BetweenGamesCoach {
-  private readonly samples: PulseSample[] = [];
+  private samples: PulseSample[] = [];
+  private latestUs: number;
+  private baselineResolved = false;
+  private baselineBpm: number | undefined;
   private betweenGames = false;
+  private markedGames = 0;
   private fired = false;
 
-  constructor(private readonly startUs: number) {}
+  constructor(
+    private readonly startUs: number,
+    private readonly readBaseline: BaselineReader = baselineFromSamples,
+  ) {
+    this.latestUs = startUs;
+  }
 
-  ingest(samples: readonly PulseSample[]): CoachMessage | null {
-    this.samples.push(...samples);
+  /** Test and diagnostic visibility into the bounded window. */
+  get retainedSampleCount(): number {
+    return this.samples.length;
+  }
+
+  /** A reloaded page reads this so the gap control does not disagree with the running coach. */
+  get isBetweenGames(): boolean {
+    return this.betweenGames;
+  }
+
+  /** Player-marked boundaries in this session. The app never infers one. */
+  get markedGameCount(): number {
+    return this.markedGames;
+  }
+
+  ingest(batch: readonly PulseSample[]): CoachMessage | null {
+    for (const sample of batch) {
+      this.samples.push(sample);
+      if (sample.tUs > this.latestUs) this.latestUs = sample.tUs;
+    }
+    this.resolveBaseline();
+    this.prune();
     return this.evaluate();
   }
 
@@ -25,32 +62,45 @@ export class BetweenGamesCoach {
       this.fired = false;
       return null;
     }
+    this.markedGames += 1;
     return this.evaluate();
   }
 
+  private resolveBaseline(): void {
+    if (this.baselineResolved) return;
+    if (this.latestUs < this.startUs + BASELINE_WINDOW_US) return;
+    // One calculation when the first minute is complete; later batches never recompute it.
+    this.baselineBpm = this.readBaseline(this.samples, this.startUs)?.baselineBpm;
+    this.baselineResolved = true;
+  }
+
+  private prune(): void {
+    if (!this.baselineResolved) return;
+    const cutoff = this.latestUs - COACH_RECENT_WINDOW_US;
+    this.samples = this.samples.filter((sample) => sample.tUs >= cutoff);
+  }
+
   private evaluate(): CoachMessage | null {
-    if (!this.betweenGames || this.fired || this.samples.length === 0) return null;
-    const latestUs = this.samples.reduce((latest, sample) => Math.max(latest, sample.tUs), this.startUs);
-    if (latestUs < this.startUs + BASELINE_WINDOW_US) return null;
-    const baseline = baselineFromSamples(this.samples, this.startUs)?.baselineBpm;
-    if (baseline === undefined) return null;
+    if (!this.betweenGames || this.fired) return null;
+    if (!this.baselineResolved || this.baselineBpm === undefined) return null;
+    if (this.samples.length === 0) return null;
 
     const recent = this.samples
       .filter(
         (sample) =>
-          sample.tUs >= latestUs - BASELINE_WINDOW_US &&
-          sample.tUs <= latestUs &&
+          sample.tUs >= this.latestUs - BASELINE_WINDOW_US &&
+          sample.tUs <= this.latestUs &&
           isUsableSample(sample),
       )
       .map((sample) => sample.bpm);
     if (recent.length === 0) return null;
     const recentBpm = median(recent);
-    if (recentBpm < baseline + ELEVATED_MARGIN_BPM) return null;
+    if (recentBpm < this.baselineBpm + ELEVATED_MARGIN_BPM) return null;
 
-    const deltaBpm = Math.round((recentBpm - baseline) * 10) / 10;
+    const deltaBpm = Math.round((recentBpm - this.baselineBpm) * 10) / 10;
     this.fired = true;
     return {
-      baselineBpm: baseline,
+      baselineBpm: this.baselineBpm,
       recentBpm,
       deltaBpm,
       text: `Pulse still +${formatNumber(deltaBpm)} over baseline. Take a real break before the next game.`,

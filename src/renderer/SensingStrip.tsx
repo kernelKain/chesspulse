@@ -1,6 +1,7 @@
 import type { KeyboardEvent } from 'react';
 import type { PulseSample } from '../shared/contracts';
 import { BASELINE_WINDOW_US, traceSegments } from '../shared/sensing';
+import { COPY } from './copy';
 
 const Y_MIN = 40;
 const Y_MAX = 180;
@@ -24,8 +25,8 @@ export function SensingStrip({
     : [];
   const shown = selectedIndex !== null ? samples[selectedIndex] : latest;
   const label = shown
-    ? `${formatBpm(shown.bpm)} bpm, confidence ${shown.confidence}, ${shown.stable ? 'stable' : 'not stable'}`
-    : 'Nothing recorded yet.';
+    ? COPY.strip.reading(formatBpm(shown.bpm), shown.confidence, shown.stable)
+    : COPY.strip.empty;
 
   function onKey(event: KeyboardEvent<HTMLDivElement>): void {
     if (samples.length === 0) return;
@@ -45,19 +46,19 @@ export function SensingStrip({
       className="strip"
       tabIndex={0}
       role="group"
-      aria-roledescription="pulse trace"
-      aria-label="Pulse trace"
+      aria-roledescription={COPY.strip.traceRole}
+      aria-label={COPY.strip.traceAria}
       aria-describedby="strip-keys"
       onKeyDown={onKey}
     >
       <p id="strip-keys" className="hint">
-        Left and right arrow keys move through samples.
+        {COPY.strip.keys}
       </p>
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="presentation">
         <line className="axis" x1={PAD} y1={HEIGHT - PAD} x2={WIDTH - PAD} y2={HEIGHT - PAD} />
         {visible.length === 0 ? (
           <text className="empty" x={PAD} y={HEIGHT / 2}>
-            Nothing recorded yet.
+            {COPY.strip.empty}
           </text>
         ) : (
           traceSegments(visible).map((segment) =>
@@ -81,7 +82,7 @@ export function SensingStrip({
         {shown ? formatBpm(shown.bpm) : '—'}
       </p>
       <p className="unit" aria-hidden="true">
-        bpm
+        {COPY.strip.bpm}
       </p>
       <p className="live" aria-live="polite">
         {label}

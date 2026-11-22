@@ -5,12 +5,52 @@ const NUMBER = /(?<![\d.])[-+]?(?:\d[\d,]*(?:\.\d*)?|\.\d[\d,]*)(?:[eE][-+]?\d+)
 const VALID_COMMA_NUMBER = /^[-+]?(?:\d+(?:,\d{3})*(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/;
 const UNICODE_NEGATIVE_NUMBER = /[\u2212\uFE63\uFF0D]\s*\p{Nd}/u;
 
+/** Degree words between the verb and the state adjective must not hide a direct claim. */
+const DEGREE = String.raw`(?:(?:very|really|so|quite|extremely|incredibly|completely|totally|rather|pretty|somewhat|slightly|a little|a bit|kind of|sort of)\s+)?`;
+const STATE = String.raw`(?:anxious|nervous|stressed|panicked|panicking|afraid|scared|angry|frustrated|upset|overwhelmed|tilted|calm|relaxed|focused|distracted|tired|exhausted)`;
+/** Markdown emphasis around a state adjective must not hide the claim. */
+const EMPHASIS = String.raw`(?:\*{1,3}|_{1,3}|~{2})?`;
+
+/**
+ * A fixed, deliberately narrow list. It catches diagnostic vocabulary and direct claims about the
+ * player's mind or body; it does not try to police tone, and measured pulse language stays allowed.
+ */
+const CLAIM_PATTERNS: readonly RegExp[] = [
+  /\bdiagnos(?:e|ed|es|ing|is|tic)\b/i,
+  /\b(?:medical|clinical|clinically)\b/i,
+  /\b(?:disorder|syndrome|disease|illness|symptom|symptoms)\b/i,
+  /\b(?:therapy|treatment|medication|medications|prescription|prescriptions)\b/i,
+  /\b(?:hypertens(?:ion|ive)|arrhythmi(?:a|c)|cardiac|cardiovascular)\b/i,
+  /\b(?:heart disease|blood pressure|stress response)\b/i,
+  /\b(?:cortisol|adrenaline|adrenal|fight or flight)\b/i,
+  /\b(?:diabetes|diabetic|cancer|asthma|epilepsy|migraine|stroke|infection|insomnia|fatigue|burnout|exhaustion|dehydration|concussion|dementia|alzheimer'?s|parkinson'?s|thyroid|hormonal|inflammation|nausea|headache|ulcer|fever|chronic pain)\b/i,
+  /\bmental health\b/i,
+  /\byou (?:have|had|suffer from|are suffering from|were suffering from|have been diagnosed with|were diagnosed with|are being treated for|are dealing with)\b[^.!?\n]{0,60}\b(?:condition|disorder|disease|syndrome|illness|insomnia|fatigue|burnout|exhaustion|dehydration|concussion|dementia|parkinson'?s|alzheimer'?s|thyroid|inflammation|nausea|headache|ulcer|fever|pain)\b/i,
+  /\b(?:anxiety|anxious|depression|depressed|panic attack|ptsd|adhd|autism)\b/i,
+  new RegExp(String.raw`\byou(?:['’]re| are) ${DEGREE}${EMPHASIS}\s*${STATE}\b${EMPHASIS}`, 'i'),
+  new RegExp(String.raw`\byou (?:seem|look|appear|sound|remain|stay) ${DEGREE}${EMPHASIS}\s*${STATE}\b${EMPHASIS}`, 'i'),
+  new RegExp(String.raw`\byou (?:were|felt|seemed|looked|appeared|got|became|stayed|remained|sounded|feel|feels) ${DEGREE}${EMPHASIS}\s*${STATE}\b${EMPHASIS}`, 'i'),
+  /\byou (?:must|might|may) have (?:been|felt) (?:anxious|nervous|stressed|panicked|overwhelmed|tilted|calm|relaxed)\b/i,
+  /\byou (?:were|felt|seemed|looked|appeared) (?:in|under) (?:stress|pressure|distress)\b/i,
+  /\byou (?:panicked|tilted|choked|froze)\b/i,
+  /\byour (?:anxiety|stress|nerves|emotions|emotional state|mental state|physical state|mood|frame of mind|brain|body|nervous system)\b/i,
+  new RegExp(String.raw`\b(?:felt|feeling) ${DEGREE}${EMPHASIS}\s*${STATE}\b${EMPHASIS}`, 'i'),
+];
+
+export class GroundingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GroundingError';
+  }
+}
+
 export function groundInsight(stats: unknown, output: string): string {
   assertSupportedNotation(output);
+  assertNoClaims(output);
   for (const match of output.matchAll(NUMBER)) {
     const token = withoutSentencePunctuation(match[0]);
     if (token.includes(',') && !VALID_COMMA_NUMBER.test(token)) {
-      throw new Error(`The AI response contained a malformed number: ${match[0]}. Nothing in the report changed.`);
+      throw new GroundingError(`The AI response contained a malformed number: ${match[0]}. Nothing in the report changed.`);
     }
   }
   const serialized = JSON.stringify(stats, (_key, value) => (typeof value === 'bigint' ? value.toString() : value)) ?? '';
@@ -18,7 +58,7 @@ export function groundInsight(stats: unknown, output: string): string {
   for (const match of output.matchAll(NUMBER)) {
     const token = withoutSentencePunctuation(match[0]);
     if (!allowed.has(canonicalDecimal(token))) {
-      throw new Error(`The AI response introduced a number that is not in the session data: ${token}. Nothing in the report changed.`);
+      throw new GroundingError(`The AI response introduced a number that is not in the session data: ${token}. Nothing in the report changed.`);
     }
   }
   return output;
@@ -29,7 +69,18 @@ function assertSupportedNotation(text: string): void {
   const unicodeDigit = [...text].find((character) => /\p{Nd}/u.test(character) && !/[0-9]/.test(character));
   const unsupported = unicodeNegative?.[0] ?? unicodeDigit;
   if (unsupported) {
-    throw new Error(`The AI response used unsupported numeric notation: ${unsupported}. Nothing in the report changed.`);
+    throw new GroundingError(`The AI response used unsupported numeric notation: ${unsupported}. Nothing in the report changed.`);
+  }
+}
+
+function assertNoClaims(text: string): void {
+  // Newlines and tabs are word separators in prose. Detect claims across them while returning the
+  // original text unchanged from groundInsight.
+  const normalized = text.replace(/\s+/g, ' ');
+  for (const pattern of CLAIM_PATTERNS) {
+    if (pattern.test(normalized)) {
+      throw new GroundingError('The AI response made a diagnostic or mental-state claim. Nothing in the report changed.');
+    }
   }
 }
 

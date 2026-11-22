@@ -1,12 +1,13 @@
 // What: writes one session as a header plus append-only pulse samples.
 // Why: the trace has to survive a restart, and a crash must not leave a half-written header.
 // Removed: the report could not be rebuilt, and a sample could be stored as a video file.
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { open, mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import {
+  REPORT_SCHEMA_VERSION,
   SCHEMA_VERSION,
   pulseSampleSchema,
   reportBuildRequestSchema,
@@ -43,6 +44,17 @@ const sessionIndexSchema = z
 
 const tails = new Map<string, Promise<void>>();
 const tornSamples = new Set<string>();
+
+/** Why a stored report could not be opened. The message stays player-facing; the kind picks copy. */
+export class StoredReportError extends Error {
+  constructor(
+    readonly kind: 'missing' | 'stale' | 'newer' | 'invalid',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'StoredReportError';
+  }
+}
 
 export interface NewSession {
   startedAtEpochMs: number;
@@ -175,6 +187,87 @@ export async function readMeta(root: string, sessionId: string): Promise<Session
   return parsed.data;
 }
 
+export interface AtomicFileHandle {
+  writeFile(body: string): Promise<void>;
+  sync(): Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface AtomicFileSystem {
+  open(filePath: string, flags: string, mode?: number): Promise<AtomicFileHandle>;
+  rename(from: string, to: string): Promise<void>;
+  rm(filePath: string, options: { force: boolean }): Promise<void>;
+}
+
+const defaultAtomicFileSystem: AtomicFileSystem = { open, rename, rm };
+
+// What: stages and saves the report and its exact PGN batch under one store exclusion.
+// Why: both temp files must be durable before either artifact is replaced.
+// Removed: independent saves could start a report replacement before the new PGN temp file existed.
+export async function saveReportArtifacts(
+  root: string,
+  sessionId: string,
+  text: string,
+  pgns: readonly string[],
+  fs: AtomicFileSystem = defaultAtomicFileSystem,
+): Promise<void> {
+  const parsed = reportBuildRequestSchema.safeParse({ sessionId, pgns });
+  if (!parsed.success) throw new Error('The PGN batch is not valid.');
+  await exclusive(root, async () => {
+    const dir = sessionDir(root, sessionId);
+    await stat(path.join(dir, 'meta.json'));
+    const gamesFile = path.join(dir, 'games.json');
+    const reportFile = path.join(dir, 'report.json');
+    const pending = new Set<string>();
+    let previousGames: string | null = null;
+    try {
+      previousGames = await readFile(gamesFile, 'utf8');
+    } catch (error) {
+      if (!isEnoent(error)) throw error;
+    }
+    let gamesCommitted = false;
+    let reportCommitted = false;
+    try {
+      const gamesTmp = await stageAtomic(gamesFile, jsonText(parsed.data.pgns), fs);
+      pending.add(gamesTmp);
+      const reportTmp = await stageAtomic(reportFile, text, fs);
+      pending.add(reportTmp);
+      await renameAtomic(gamesTmp, gamesFile, fs);
+      pending.delete(gamesTmp);
+      gamesCommitted = true;
+      // Sync the games rename before replacing the report, so a failed sync can still roll back.
+      await syncDirectory(gamesFile, fs);
+      await renameAtomic(reportTmp, reportFile, fs);
+      pending.delete(reportTmp);
+      reportCommitted = true;
+      await syncDirectory(reportFile, fs);
+    } catch (error) {
+      await Promise.all([...pending].map((tmp) => removeAtomicTemp(tmp, fs)));
+      // A failed report rename must not leave the new PGNs beside the old report. If the report
+      // was renamed and only its directory sync failed, both new files are already a matched pair.
+      if (gamesCommitted && !reportCommitted) {
+        try {
+          if (previousGames === null) {
+            await fs.rm(gamesFile, { force: true });
+          } else {
+            await writeAtomic(gamesFile, previousGames, fs);
+          }
+        } catch {
+          // The digest mismatch still makes the pair detectable and refusable.
+        }
+      }
+      throw error;
+    }
+  });
+}
+
+// What: hashes the exact ordered PGN batch as a JSON array.
+// Why: report and PGN files are separate writes, so readers need proof that they belong together.
+// Removed: a crash or hand edit could silently pair one report with different games.
+export function digestGames(pgns: readonly string[]): string {
+  return createHash('sha256').update(JSON.stringify(pgns), 'utf8').digest('hex');
+}
+
 export async function saveReport(root: string, sessionId: string, text: string): Promise<void> {
   await exclusive(root, async () => {
     const dir = sessionDir(root, sessionId);
@@ -189,12 +282,29 @@ export async function readReport(root: string, sessionId: string): Promise<Repor
   try {
     value = JSON.parse(await readFile(file, 'utf8'));
   } catch (error) {
-    if (isEnoent(error)) throw new Error('Build a report before requesting an AI reading.');
-    throw new Error('The stored report is not valid.');
+    if (isEnoent(error)) throw new StoredReportError('missing', 'Build a report before requesting an AI reading.');
+    throw new StoredReportError('invalid', 'The stored report is not valid.');
   }
+  assertReportVersion(value);
   const parsed = reportSchema.safeParse(value);
-  if (!parsed.success || parsed.data.sessionId !== sessionId) throw new Error('The stored report is not valid.');
+  if (!parsed.success || parsed.data.sessionId !== sessionId) {
+    throw new StoredReportError(
+      'invalid',
+      'The stored report is not valid or is stale. Build the report again before requesting AI.',
+    );
+  }
   return parsed.data;
+}
+
+/** True when a report file is present. The list does not parse it; opening does. */
+export async function hasSavedReport(root: string, sessionId: string): Promise<boolean> {
+  try {
+    await stat(path.join(sessionDir(root, sessionId), 'report.json'));
+    return true;
+  } catch (error) {
+    if (isEnoent(error)) return false;
+    throw error;
+  }
 }
 
 export async function saveGames(root: string, sessionId: string, pgns: readonly string[]): Promise<void> {
@@ -224,6 +334,27 @@ export async function readGames(root: string, sessionId: string): Promise<string
 export async function deleteReport(root: string, sessionId: string): Promise<void> {
   await exclusive(root, async () => {
     await rm(path.join(sessionDir(root, sessionId), 'report.json'), { force: true });
+  });
+}
+
+// What: removes one session folder, then rebuilds the index from what remains.
+// Why: a failed index write must leave a readable store, and a reader must not see a deleted id.
+// Removed: deleting a session would leave a ghost row or a half-written index.
+export async function deleteSession(root: string, sessionId: string): Promise<boolean> {
+  const dir = sessionDir(root, sessionId);
+  return exclusive(root, async () => {
+    // Refuse a newer index before touching data; a missing or corrupt one is repaired here.
+    await readIndexIds(root);
+    let existed = true;
+    try {
+      await stat(dir);
+    } catch (error) {
+      if (isEnoent(error)) existed = false;
+      else throw error;
+    }
+    if (existed) await rm(dir, { recursive: true, force: false });
+    await writeIndex(root, await scanSessionIds(root));
+    return existed;
   });
 }
 
@@ -290,22 +421,51 @@ function parseMeta(value: unknown): SessionMeta {
   return parsed.data;
 }
 
-function assertCurrentVersion(value: unknown): void {
+function assertCurrentVersion(value: unknown, label = 'session'): void {
   if (typeof value !== 'object' || value === null || !('schemaVersion' in value)) return;
   const version = value.schemaVersion;
   if (typeof version === 'number' && version > SCHEMA_VERSION) {
-    throw new Error('This session was written by a newer version of ChessPulse.');
+    throw new Error(`This ${label} was written by a newer version of ChessPulse.`);
   }
+}
+
+function assertReportVersion(value: unknown): void {
+  if (typeof value !== 'object' || value === null) {
+    throw new StoredReportError('invalid', 'The stored report is not valid.');
+  }
+  const version = (value as { schemaVersion?: unknown }).schemaVersion;
+  if (typeof version === 'number' && version > REPORT_SCHEMA_VERSION) {
+    throw new StoredReportError(
+      'newer',
+      'This report was written by a newer version of ChessPulse. Update the app to read it.',
+    );
+  }
+  if (version === REPORT_SCHEMA_VERSION) return;
+  // A versionless object that still looks like a finished report is an older report, not junk.
+  if ((value as { ok?: unknown }).ok !== true) {
+    throw new StoredReportError('invalid', 'The stored report is not valid.');
+  }
+  throw new StoredReportError(
+    'stale',
+    'This report was written by an older version of ChessPulse. Build the report again from the pasted games.',
+  );
 }
 
 async function readIndexIds(root: string): Promise<string[]> {
   const indexFile = path.join(root, 'sessions', 'index.json');
+  let value: unknown;
+  let parsedJson = true;
   try {
-    const text = await readFile(indexFile, 'utf8');
-    const parsed = sessionIndexSchema.safeParse(JSON.parse(text));
-    if (parsed.success && (await indexMatchesDisk(root, parsed.data.ids))) return parsed.data.ids;
+    value = JSON.parse(await readFile(indexFile, 'utf8'));
   } catch {
-    // A missing or broken index is rebuilt from the session folders.
+    // A missing or unreadable index is rebuilt from the session folders.
+    parsedJson = false;
+  }
+  if (parsedJson) {
+    // A newer index must be refused, not silently replaced by this version's view of the folders.
+    assertCurrentVersion(value, 'data index');
+    const parsed = sessionIndexSchema.safeParse(value);
+    if (parsed.success && (await indexMatchesDisk(root, parsed.data.ids))) return parsed.data.ids;
   }
   const ids = await scanSessionIds(root);
   await writeIndex(root, ids);
@@ -367,23 +527,76 @@ function sessionDir(root: string, sessionId: string): string {
   return dir;
 }
 
-async function writeAtomic(filePath: string, body: string): Promise<void> {
-  const tmp = `${filePath}.${process.pid}.tmp`;
-  const handle = await open(tmp, 'w', 0o600);
+async function writeAtomic(
+  filePath: string,
+  body: string,
+  fs: AtomicFileSystem = defaultAtomicFileSystem,
+): Promise<void> {
+  let tmp: string | undefined;
   try {
-    await handle.writeFile(body);
-    await handle.sync();
-    await handle.close();
+    tmp = await stageAtomic(filePath, body, fs);
+    await commitAtomic(tmp, filePath, fs);
   } catch (error) {
-    await handle.close();
-    await rm(tmp, { force: true });
+    if (tmp) await removeAtomicTemp(tmp, fs);
     throw error;
   }
+}
+
+async function stageAtomic(filePath: string, body: string, fs: AtomicFileSystem): Promise<string> {
+  const tmp = `${filePath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  const handle = await fs.open(tmp, 'w', 0o600);
   try {
-    await rename(tmp, filePath);
+    await closeAfter(handle, async () => {
+      await handle.writeFile(body);
+      await handle.sync();
+    });
   } catch (error) {
-    await rm(tmp, { force: true });
+    await removeAtomicTemp(tmp, fs);
     throw error;
+  }
+  return tmp;
+}
+
+async function renameAtomic(tmp: string, filePath: string, fs: AtomicFileSystem): Promise<void> {
+  await fs.rename(tmp, filePath);
+}
+
+async function syncDirectory(filePath: string, fs: AtomicFileSystem): Promise<void> {
+  const directory = await fs.open(path.dirname(filePath), 'r');
+  await closeAfter(directory, () => directory.sync());
+}
+
+async function commitAtomic(tmp: string, filePath: string, fs: AtomicFileSystem): Promise<void> {
+  await renameAtomic(tmp, filePath, fs);
+  await syncDirectory(filePath, fs);
+}
+
+async function closeAfter(handle: AtomicFileHandle, operation: () => Promise<void>): Promise<void> {
+  let failed = false;
+  let failure: unknown;
+  try {
+    await operation();
+  } catch (error) {
+    failed = true;
+    failure = error;
+  }
+  try {
+    await handle.close();
+  } catch (error) {
+    if (!failed) {
+      failed = true;
+      failure = error;
+    }
+  }
+  if (failed) throw failure;
+}
+
+// Cleanup is best-effort so a secondary rm failure never hides the causal storage error.
+async function removeAtomicTemp(tmp: string, fs: AtomicFileSystem): Promise<void> {
+  try {
+    await fs.rm(tmp, { force: true });
+  } catch {
+    // The original write, sync, close, or rename error is more useful to the caller.
   }
 }
 

@@ -2,24 +2,74 @@
 // Why: the page must not receive Node, files, or keys, and main checks every payload again.
 // Removed: a later screen could not start or stop a session.
 import { contextBridge, ipcRenderer } from 'electron';
+import { EVENT_CHANNELS, INVOKE_CHANNELS } from '../shared/channels.js';
+import { AppError, deserializeAppError, serializeAppError } from '../shared/errors.js';
 
-const CONSENT_CHANNEL = 'cp:consent:set';
-const SESSION_START_CHANNEL = 'cp:session:start';
-const SESSION_STOP_CHANNEL = 'cp:session:stop';
-const SAMPLE_CHANNEL = 'cp:sample:batch';
-const VALIDATION_CHANNEL = 'cp:validation';
-const SDK_ERROR_CHANNEL = 'cp:sdk:error';
-const PREVIEW_CHANNEL = 'cp:preview';
-const PASTE_VALIDATE_CHANNEL = 'cp:pgn:validate';
-const REPORT_BUILD_CHANNEL = 'cp:report:build';
-const COACH_GAP_CHANNEL = 'cp:coach:gap';
-const COACH_MESSAGE_CHANNEL = 'cp:coach:message';
-const INSIGHT_REQUEST_CHANNEL = 'cp:insight:request';
-const INSIGHT_CANCEL_CHANNEL = 'cp:insight:cancel';
+/** Preload-side argument checks are programming errors, but they still leave as a typed code. */
+function rejectInvalidRequest(): Promise<never> {
+  return Promise.reject(new Error(serializeAppError(new AppError('invalid_request'))));
+}
+
+/**
+ * Every rejection leaves this process as a typed code in the message.
+ * contextBridge drops custom Error fields, so a code marker is the only transport that survives.
+ */
+async function invoke(channel: string, payload: unknown): Promise<unknown> {
+  try {
+    return await ipcRenderer.invoke(channel, payload);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : error;
+    const appError = deserializeAppError(detail) ?? new AppError('internal', { cause: error });
+    throw new Error(serializeAppError(appError));
+  }
+}
 
 interface ConsentState {
   granted: boolean;
   cameraAllowed: boolean;
+}
+
+interface AppSessionState {
+  active: boolean;
+  sessionId: string | null;
+  startedAtEpochMs: number | null;
+  betweenGames: boolean;
+  markedGames: number;
+}
+
+interface AppState {
+  consent: ConsentState;
+  session: AppSessionState;
+}
+
+interface DoctorCheck {
+  id: 'node' | 'env' | 'sensing-key' | 'camera' | 'engine' | 'data-dir' | 'ai';
+  label: string;
+  status: 'pass' | 'warn' | 'fail' | 'skip';
+  detail: string;
+}
+
+interface SetupStatus {
+  checks: DoctorCheck[];
+}
+
+interface SessionSummary {
+  id: string;
+  startedAtEpochMs: number;
+  durationMs: number | null;
+  coveragePct: number | null;
+  hasReport: boolean;
+}
+
+interface SessionListResult {
+  sessions: SessionSummary[];
+  unreadable: number;
+}
+
+interface SessionOpenResult {
+  report: unknown | null;
+  reportError: 'stale' | 'newer' | 'invalid' | null;
+  games: string[];
 }
 
 interface ValidationMessage {
@@ -48,6 +98,23 @@ interface CoachMessage {
   text: string;
 }
 
+interface SessionEnded {
+  sessionId: string;
+  reason: 'storage' | 'limit';
+  message: string;
+}
+
+interface SessionStarted {
+  sessionId: string;
+  startedAtEpochMs: number;
+}
+
+interface ReportProgress {
+  sessionId: string;
+  scored: number;
+  total: number;
+}
+
 function readConsentState(value: unknown): ConsentState {
   if (typeof value !== 'object' || value === null) {
     throw new Error('The window returned an unexpected consent state.');
@@ -59,26 +126,201 @@ function readConsentState(value: unknown): ConsentState {
   return { granted: record.granted, cameraAllowed: record.cameraAllowed };
 }
 
+function readAppState(value: unknown): AppState {  if (typeof value !== 'object' || value === null || !('consent' in value) || !('session' in value)) {
+    throw new Error('The window returned an unexpected app state.');
+  }
+  const consent = readConsentState(value.consent);
+  const raw = value.session;
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error('The window returned an unexpected app state.');
+  }
+  const session = raw as {
+    active?: unknown;
+    sessionId?: unknown;
+    startedAtEpochMs?: unknown;
+    betweenGames?: unknown;
+    markedGames?: unknown;
+  };
+  if (
+    typeof session.active !== 'boolean' ||
+    (session.sessionId !== null && typeof session.sessionId !== 'string') ||
+    (session.startedAtEpochMs !== null && typeof session.startedAtEpochMs !== 'number') ||
+    typeof session.betweenGames !== 'boolean' ||
+    typeof session.markedGames !== 'number' ||
+    !Number.isInteger(session.markedGames) ||
+    session.markedGames < 0
+  ) {
+    throw new Error('The window returned an unexpected app state.');
+  }
+  if (
+    session.active
+      ? session.sessionId === null || session.startedAtEpochMs === null
+      : session.sessionId !== null || session.startedAtEpochMs !== null
+  ) {
+    throw new Error('The window returned an unexpected app state.');
+  }
+  return {
+    consent,
+    session: {
+      active: session.active,
+      sessionId: session.sessionId,
+      startedAtEpochMs: session.startedAtEpochMs,
+      betweenGames: session.betweenGames,
+      markedGames: session.markedGames,
+    },
+  };
+}
+
+function readSessionList(value: unknown): SessionListResult {
+  if (typeof value !== 'object' || value === null || !('sessions' in value) || !Array.isArray(value.sessions)) {
+    throw new Error('The window returned an unexpected session list.');
+  }
+  const record = value as { sessions: unknown[]; unreadable?: unknown };
+  const sessions = record.sessions.map((raw) => {
+    if (typeof raw !== 'object' || raw === null) {
+      throw new Error('The window returned an unexpected session list.');
+    }
+    const session = raw as {
+      id?: unknown;
+      startedAtEpochMs?: unknown;
+      durationMs?: unknown;
+      coveragePct?: unknown;
+      hasReport?: unknown;
+    };
+    if (
+      typeof session.id !== 'string' ||
+      typeof session.startedAtEpochMs !== 'number' ||
+      (session.durationMs !== null && typeof session.durationMs !== 'number') ||
+      (session.coveragePct !== null && typeof session.coveragePct !== 'number') ||
+      typeof session.hasReport !== 'boolean'
+    ) {
+      throw new Error('The window returned an unexpected session list.');
+    }
+    return {
+      id: session.id,
+      startedAtEpochMs: session.startedAtEpochMs,
+      durationMs: session.durationMs,
+      coveragePct: session.coveragePct,
+      hasReport: session.hasReport,
+    };
+  });
+  if (typeof record.unreadable !== 'number' || !Number.isInteger(record.unreadable) || record.unreadable < 0) {
+    throw new Error('The window returned an unexpected session list.');
+  }
+  return { sessions, unreadable: record.unreadable };
+}
+
+function readSessionOpen(value: unknown): SessionOpenResult {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('The window returned an unexpected saved session.');
+  }
+  const record = value as { report?: unknown; reportError?: unknown; games?: unknown };
+  if (
+    (record.report !== null && (typeof record.report !== 'object' || record.report === null)) ||
+    (record.reportError !== null &&
+      record.reportError !== 'stale' &&
+      record.reportError !== 'newer' &&
+      record.reportError !== 'invalid') ||
+    !Array.isArray(record.games) ||
+    !record.games.every((game) => typeof game === 'string')
+  ) {
+    throw new Error('The window returned an unexpected saved session.');
+  }
+  return {
+    report: record.report,
+    reportError: record.reportError,
+    games: record.games,
+  };
+}
+
+function readSetupStatus(value: unknown): SetupStatus {
+  if (typeof value !== 'object' || value === null || !('checks' in value) || !Array.isArray(value.checks)) {
+    throw new Error('The window returned an unexpected readiness result.');
+  }
+  const checks = value.checks.map((raw) => {
+    if (typeof raw !== 'object' || raw === null) {
+      throw new Error('The window returned an unexpected readiness result.');
+    }
+    const check = raw as { id?: unknown; label?: unknown; status?: unknown; detail?: unknown };
+    if (
+      typeof check.id !== 'string' ||
+      typeof check.label !== 'string' ||
+      typeof check.detail !== 'string' ||
+      (check.status !== 'pass' &&
+        check.status !== 'warn' &&
+        check.status !== 'fail' &&
+        check.status !== 'skip')
+    ) {
+      throw new Error('The window returned an unexpected readiness result.');
+    }
+    return {
+      id: check.id as DoctorCheck['id'],
+      label: check.label,
+      status: check.status as DoctorCheck['status'],
+      detail: check.detail,
+    };
+  });
+  return { checks };
+}
+
 contextBridge.exposeInMainWorld('chesspulse', {
+  getAppState(): Promise<AppState> {
+    return invoke(INVOKE_CHANNELS.appStateGet.name, {}).then(readAppState);
+  },
+  getSetupStatus(): Promise<SetupStatus> {
+    return invoke(INVOKE_CHANNELS.setupStatus.name, {}).then(readSetupStatus);
+  },
+  listSessions(): Promise<SessionListResult> {
+    return invoke(INVOKE_CHANNELS.sessionsList.name, {}).then(readSessionList);
+  },
+  openSession(sessionId: unknown): Promise<SessionOpenResult> {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      return rejectInvalidRequest();
+    }
+    return invoke(INVOKE_CHANNELS.sessionOpen.name, { sessionId }).then(readSessionOpen);
+  },
+  startPreview(): Promise<{ started: boolean }> {
+    return invoke(INVOKE_CHANNELS.previewStart.name, {}).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('started' in value) || value.started !== true) {
+        throw new Error('The window returned an unexpected preview result.');
+      }
+      return { started: true };
+    });
+  },
+  stopPreview(): Promise<{ stopped: boolean }> {
+    return invoke(INVOKE_CHANNELS.previewStop.name, {}).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('stopped' in value) || typeof value.stopped !== 'boolean') {
+        throw new Error('The window returned an unexpected preview result.');
+      }
+      return { stopped: value.stopped };
+    });
+  },
   setConsent(granted: unknown): Promise<ConsentState> {
     if (typeof granted !== 'boolean') {
-      return Promise.reject(new Error('Consent was not a yes or no.'));
+      return rejectInvalidRequest();
     }
-    return ipcRenderer.invoke(CONSENT_CHANNEL, { granted }).then(readConsentState);
+    return invoke(INVOKE_CHANNELS.consentSet.name, { granted }).then(readConsentState);
   },
-  startSession(timeControl: unknown): Promise<{ sessionId: string }> {
+  startSession(timeControl: unknown): Promise<{ sessionId: string; startedAtEpochMs: number }> {
     if (typeof timeControl !== 'string') {
-      return Promise.reject(new Error('Choose a time control before starting.'));
+      return rejectInvalidRequest();
     }
-    return ipcRenderer.invoke(SESSION_START_CHANNEL, { timeControl }).then((value: unknown) => {
-      if (typeof value !== 'object' || value === null || !('sessionId' in value) || typeof value.sessionId !== 'string') {
+    return invoke(INVOKE_CHANNELS.sessionStart.name, { timeControl }).then((value: unknown) => {
+      if (
+        typeof value !== 'object' ||
+        value === null ||
+        !('sessionId' in value) ||
+        typeof value.sessionId !== 'string' ||
+        !('startedAtEpochMs' in value) ||
+        typeof value.startedAtEpochMs !== 'number'
+      ) {
         throw new Error('The window returned an unexpected session.');
       }
-      return { sessionId: value.sessionId };
+      return { sessionId: value.sessionId, startedAtEpochMs: value.startedAtEpochMs };
     });
   },
   stopSession(): Promise<{ id: string }> {
-    return ipcRenderer.invoke(SESSION_STOP_CHANNEL, {}).then((value: unknown) => {
+    return invoke(INVOKE_CHANNELS.sessionStop.name, {}).then((value: unknown) => {
       if (
         typeof value !== 'object' ||
         value === null ||
@@ -100,9 +342,9 @@ contextBridge.exposeInMainWorld('chesspulse', {
         // A bad batch is dropped. The stored trace is unchanged.
       }
     };
-    ipcRenderer.on(SAMPLE_CHANNEL, handler);
+    ipcRenderer.on(EVENT_CHANNELS.samples, handler);
     return () => {
-      ipcRenderer.removeListener(SAMPLE_CHANNEL, handler);
+      ipcRenderer.removeListener(EVENT_CHANNELS.samples, handler);
     };
   },
   onValidation(listener: (message: ValidationMessage) => void): () => void {
@@ -113,9 +355,9 @@ contextBridge.exposeInMainWorld('chesspulse', {
         // A bad hint is dropped. The strip keeps its own state.
       }
     };
-    ipcRenderer.on(VALIDATION_CHANNEL, handler);
+    ipcRenderer.on(EVENT_CHANNELS.validation, handler);
     return () => {
-      ipcRenderer.removeListener(VALIDATION_CHANNEL, handler);
+      ipcRenderer.removeListener(EVENT_CHANNELS.validation, handler);
     };
   },
   onSdkError(listener: (error: SdkError) => void): () => void {
@@ -126,9 +368,9 @@ contextBridge.exposeInMainWorld('chesspulse', {
         // A bad error is dropped. The session controls still work.
       }
     };
-    ipcRenderer.on(SDK_ERROR_CHANNEL, handler);
+    ipcRenderer.on(EVENT_CHANNELS.sdkError, handler);
     return () => {
-      ipcRenderer.removeListener(SDK_ERROR_CHANNEL, handler);
+      ipcRenderer.removeListener(EVENT_CHANNELS.sdkError, handler);
     };
   },
   onPreview(listener: (frame: PreviewFrame) => void): () => void {
@@ -139,16 +381,16 @@ contextBridge.exposeInMainWorld('chesspulse', {
         // A bad frame is dropped. The next one is a fresh copy.
       }
     };
-    ipcRenderer.on(PREVIEW_CHANNEL, handler);
+    ipcRenderer.on(EVENT_CHANNELS.preview, handler);
     return () => {
-      ipcRenderer.removeListener(PREVIEW_CHANNEL, handler);
+      ipcRenderer.removeListener(EVENT_CHANNELS.preview, handler);
     };
   },
   setBetweenGames(active: unknown): Promise<{ betweenGames: boolean }> {
     if (typeof active !== 'boolean') {
-      return Promise.reject(new Error('The game boundary must be between games or playing.'));
+      return rejectInvalidRequest();
     }
-    return ipcRenderer.invoke(COACH_GAP_CHANNEL, { betweenGames: active }).then((value: unknown) => {
+    return invoke(INVOKE_CHANNELS.coachGap.name, { betweenGames: active }).then((value: unknown) => {
       if (
         typeof value !== 'object' ||
         value === null ||
@@ -168,14 +410,53 @@ contextBridge.exposeInMainWorld('chesspulse', {
         // A malformed message is dropped; no number from it reaches the page.
       }
     };
-    ipcRenderer.on(COACH_MESSAGE_CHANNEL, handler);
+    ipcRenderer.on(EVENT_CHANNELS.coachMessage, handler);
     return () => {
-      ipcRenderer.removeListener(COACH_MESSAGE_CHANNEL, handler);
+      ipcRenderer.removeListener(EVENT_CHANNELS.coachMessage, handler);
+    };
+  },
+  onSessionEnded(listener: (event: SessionEnded) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      try {
+        listener(readSessionEnded(value));
+      } catch {
+        // A malformed terminal event is dropped; the session controls remain usable.
+      }
+    };
+    ipcRenderer.on(EVENT_CHANNELS.sessionEnded, handler);
+    return () => {
+      ipcRenderer.removeListener(EVENT_CHANNELS.sessionEnded, handler);
+    };
+  },
+  onSessionStarted(listener: (event: SessionStarted) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      try {
+        listener(readSessionStarted(value));
+      } catch {
+        // A malformed start event is dropped; the invoke reply still adopts the session.
+      }
+    };
+    ipcRenderer.on(EVENT_CHANNELS.sessionStarted, handler);
+    return () => {
+      ipcRenderer.removeListener(EVENT_CHANNELS.sessionStarted, handler);
+    };
+  },
+  onReportProgress(listener: (progress: ReportProgress) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      try {
+        listener(readReportProgress(value));
+      } catch {
+        // A malformed progress event is dropped. The build still resolves or rejects.
+      }
+    };
+    ipcRenderer.on(EVENT_CHANNELS.reportProgress, handler);
+    return () => {
+      ipcRenderer.removeListener(EVENT_CHANNELS.reportProgress, handler);
     };
   },
   requestInsight(request: unknown): Promise<unknown> {
     if (typeof request !== 'object' || request === null) {
-      return Promise.reject(new Error('The AI reading needs a session, provider, and question.'));
+      return rejectInvalidRequest();
     }
     const value = request as { sessionId?: unknown; provider?: unknown; text?: unknown };
     if (
@@ -183,9 +464,9 @@ contextBridge.exposeInMainWorld('chesspulse', {
       typeof value.provider !== 'string' ||
       typeof value.text !== 'string'
     ) {
-      return Promise.reject(new Error('The AI reading needs a session, provider, and question.'));
+      return rejectInvalidRequest();
     }
-    return ipcRenderer.invoke(INSIGHT_REQUEST_CHANNEL, request).then((result: unknown) => {
+    return invoke(INVOKE_CHANNELS.insightRequest.name, request).then((result: unknown) => {
       if (typeof result !== 'object' || result === null || !('disabled' in result) || typeof result.disabled !== 'boolean') {
         throw new Error('The window returned an unexpected AI reading.');
       }
@@ -194,9 +475,9 @@ contextBridge.exposeInMainWorld('chesspulse', {
   },
   cancelInsight(sessionId: unknown): Promise<{ cancelled: boolean }> {
     if (typeof sessionId !== 'string' || sessionId.length === 0) {
-      return Promise.reject(new Error('Choose a session to cancel.'));
+      return rejectInvalidRequest();
     }
-    return ipcRenderer.invoke(INSIGHT_CANCEL_CHANNEL, { sessionId }).then((value: unknown) => {
+    return invoke(INVOKE_CHANNELS.insightCancel.name, { sessionId }).then((value: unknown) => {
       if (typeof value !== 'object' || value === null || !('cancelled' in value) || typeof value.cancelled !== 'boolean') {
         throw new Error('The window returned an unexpected cancellation.');
       }
@@ -205,9 +486,9 @@ contextBridge.exposeInMainWorld('chesspulse', {
   },
   validatePgns(slots: unknown): Promise<unknown> {
     if (!Array.isArray(slots) || !slots.every((item) => typeof item === 'string')) {
-      return Promise.reject(new Error('Paste entries must be text.'));
+      return rejectInvalidRequest();
     }
-    return ipcRenderer.invoke(PASTE_VALIDATE_CHANNEL, { slots }).then((value: unknown) => {
+    return invoke(INVOKE_CHANNELS.pasteValidate.name, { slots }).then((value: unknown) => {
       if (typeof value !== 'object' || value === null || !('state' in value) || !('slots' in value)) {
         throw new Error('The window returned an unexpected paste validation.');
       }
@@ -216,16 +497,63 @@ contextBridge.exposeInMainWorld('chesspulse', {
   },
   buildReport(sessionId: unknown, pgns: unknown): Promise<unknown> {
     if (typeof sessionId !== 'string' || sessionId.length === 0) {
-      return Promise.reject(new Error('No session is selected for this report.'));
+      return rejectInvalidRequest();
     }
     if (!Array.isArray(pgns) || !pgns.every((item) => typeof item === 'string')) {
-      return Promise.reject(new Error('Paste entries must be text.'));
+      return rejectInvalidRequest();
     }
-    return ipcRenderer.invoke(REPORT_BUILD_CHANNEL, { sessionId, pgns }).then((value: unknown) => {
+    return invoke(INVOKE_CHANNELS.reportBuild.name, { sessionId, pgns }).then((value: unknown) => {
       if (typeof value !== 'object' || value === null || !('ok' in value) || typeof value.ok !== 'boolean') {
         throw new Error('The window returned an unexpected report.');
       }
       return value;
+    });
+  },
+  cancelReport(sessionId: unknown): Promise<{ cancelled: boolean }> {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      return rejectInvalidRequest();
+    }
+    return invoke(INVOKE_CHANNELS.reportCancel.name, { sessionId }).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('cancelled' in value) || typeof value.cancelled !== 'boolean') {
+        throw new Error('The window returned an unexpected cancellation.');
+      }
+      return { cancelled: value.cancelled };
+    });
+  },
+  copyDiagnostics(): Promise<{ copied: true }> {
+    return invoke(INVOKE_CHANNELS.diagnosticsCopy.name, {}).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('copied' in value) || value.copied !== true) {
+        throw new Error('The window returned an unexpected diagnostics result.');
+      }
+      return { copied: true };
+    });
+  },
+  deleteSession(sessionId: unknown): Promise<{ deleted: boolean }> {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      return rejectInvalidRequest();
+    }
+    return invoke(INVOKE_CHANNELS.sessionDelete.name, { sessionId }).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('deleted' in value) || typeof value.deleted !== 'boolean') {
+        throw new Error('The window returned an unexpected deletion result.');
+      }
+      return { deleted: value.deleted };
+    });
+  },
+  exportReport(
+    sessionId: unknown,
+  ): Promise<{ exported: false } | { exported: true; path: string }> {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      return rejectInvalidRequest();
+    }
+    return invoke(INVOKE_CHANNELS.reportExport.name, { sessionId }).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('exported' in value) || typeof value.exported !== 'boolean') {
+        throw new Error('The window returned an unexpected export result.');
+      }
+      if (value.exported === false) return { exported: false };
+      if (!('path' in value) || typeof value.path !== 'string' || value.path.length === 0) {
+        throw new Error('The window returned an unexpected export result.');
+      }
+      return { exported: true, path: value.path };
     });
   },
 });
@@ -294,6 +622,47 @@ function readCoachMessage(value: unknown): CoachMessage {
     deltaBpm: record.deltaBpm,
     text: record.text,
   };
+}
+
+function readSessionEnded(value: unknown): SessionEnded {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('The window returned an unexpected session end.');
+  }
+  const record = value as { sessionId?: unknown; reason?: unknown; message?: unknown };
+  if (
+    typeof record.sessionId !== 'string' ||
+    (record.reason !== 'storage' && record.reason !== 'limit') ||
+    typeof record.message !== 'string'
+  ) {
+    throw new Error('The window returned an unexpected session end.');
+  }
+  return { sessionId: record.sessionId, reason: record.reason, message: record.message };
+}
+
+function readSessionStarted(value: unknown): SessionStarted {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('The window returned an unexpected session start.');
+  }
+  const record = value as { sessionId?: unknown; startedAtEpochMs?: unknown };
+  if (typeof record.sessionId !== 'string' || typeof record.startedAtEpochMs !== 'number') {
+    throw new Error('The window returned an unexpected session start.');
+  }
+  return { sessionId: record.sessionId, startedAtEpochMs: record.startedAtEpochMs };
+}
+
+function readReportProgress(value: unknown): ReportProgress {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('The window returned unexpected report progress.');
+  }
+  const record = value as { sessionId?: unknown; scored?: unknown; total?: unknown };
+  if (
+    typeof record.sessionId !== 'string' ||
+    typeof record.scored !== 'number' ||
+    typeof record.total !== 'number'
+  ) {
+    throw new Error('The window returned unexpected report progress.');
+  }
+  return { sessionId: record.sessionId, scored: record.scored, total: record.total };
 }
 
 function readSdkError(value: unknown): SdkError {

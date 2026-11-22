@@ -2,53 +2,66 @@
 // Why: the renderer never supplies grounding statistics, and one session has at most one active call.
 // Removed: a stale or forged renderer payload could reach a provider without cancellation or an audit id.
 import { randomUUID } from 'node:crypto';
-import { ipcMain } from 'electron';
-import {
-  insightCancelRequestSchema,
-  insightRequestSchema,
-  insightResultSchema,
-} from '../shared/contracts.js';
+import { insightResultSchema } from '../shared/contracts.js';
+import { AppError, toAppError } from '../shared/errors.js';
 import { requestInsight } from './ai/service.js';
+import { AiProviderError } from './ai/providers.js';
+import { GroundingError } from './ai/grounding.js';
+import { registerInvokeChannel } from './ipc-registry.js';
 import { log, logError } from './log.js';
+import { reportAppError } from './report-errors.js';
 import { withReportExclusion } from './report-lock.js';
 import { defaultDataRoot, readGames, readReport } from './store.js';
-
-export const INSIGHT_REQUEST_CHANNEL = 'cp:insight:request';
-export const INSIGHT_CANCEL_CHANNEL = 'cp:insight:cancel';
 
 export function registerInsightHandler(dataRoot: () => string = defaultDataRoot, env: NodeJS.ProcessEnv = process.env): void {
   const active = new Map<string, AbortController>();
 
-  ipcMain.handle(INSIGHT_REQUEST_CHANNEL, async (_event, payload: unknown) => {
-    const parsed = insightRequestSchema.safeParse(payload);
-    if (!parsed.success) throw new Error('Choose a session, provider, and question under 4 KB.');
-    if (active.has(parsed.data.sessionId)) throw new Error('An AI reading is already running for this session.');
+  registerInvokeChannel('insightRequest', async (_event, payload) => {
+    if (active.has(payload.sessionId)) throw new AppError('session_busy');
     const requestId = randomUUID();
     const controller = new AbortController();
-    active.set(parsed.data.sessionId, controller);
+    active.set(payload.sessionId, controller);
     try {
-      const artifacts = await withReportExclusion(async () => ({
-        report: await readReport(dataRoot(), parsed.data.sessionId),
-        pgns: await readGames(dataRoot(), parsed.data.sessionId),
-      }), controller.signal);
+      const artifacts = await readArtifacts(dataRoot(), payload.sessionId, controller.signal).catch(
+        (error: unknown) => {
+          throw reportAppError(error);
+        },
+      );
+      // Provider and grounding failures carry their own meaning; anything else is a report fault.
       const result = insightResultSchema.parse(
-        await requestInsight(parsed.data, artifacts.report, artifacts.pgns, env, { signal: controller.signal }),
+        await requestInsight(payload, artifacts.report, artifacts.pgns, env, { signal: controller.signal }).catch(
+          (error: unknown) => {
+            if (error instanceof AppError) throw error;
+            if (error instanceof AiProviderError) throw new AppError(error.code, { cause: error });
+            if (error instanceof GroundingError) throw new AppError('ai_ungrounded', { cause: error });
+            throw toAppError(error, 'report_failed');
+          },
+        ),
       );
       log(`[chesspulse] AI reading ${requestId} ${result.disabled ? 'disabled' : 'ready'}`);
       return result;
     } catch (error) {
-      logError(`[chesspulse] AI reading ${requestId} failed`);
+      logError(`[chesspulse] AI reading ${requestId} failed: ${error instanceof Error ? error.message : 'unknown error'}`);
       throw error;
     } finally {
-      if (active.get(parsed.data.sessionId) === controller) active.delete(parsed.data.sessionId);
+      if (active.get(payload.sessionId) === controller) active.delete(payload.sessionId);
     }
   });
 
-  ipcMain.handle(INSIGHT_CANCEL_CHANNEL, (_event, payload: unknown) => {
-    const parsed = insightCancelRequestSchema.safeParse(payload);
-    if (!parsed.success) throw new Error('Choose a session to cancel.');
-    const controller = active.get(parsed.data.sessionId);
+  registerInvokeChannel('insightCancel', (_event, payload) => {
+    const controller = active.get(payload.sessionId);
     controller?.abort();
     return { cancelled: controller !== undefined };
   });
+}
+
+function readArtifacts(
+  root: string,
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<{ report: Awaited<ReturnType<typeof readReport>>; pgns: string[] }> {
+  return withReportExclusion(async () => ({
+    report: await readReport(root, sessionId),
+    pgns: await readGames(root, sessionId),
+  }), signal);
 }

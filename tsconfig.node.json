@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.electron.json",
+  "compilerOptions": {
+    "outDir": "dist-electron"
+  },
+  "include": ["src/main", "src/shared"]
+}

@@ -15,5 +15,5 @@
     "useUnknownInCatchVariables": true
   },
   "include": ["src/renderer", "src/shared"],
-  "exclude": ["src/shared/**/*.test.ts"]
+  "exclude": ["src/shared/**/*.test.ts", "src/renderer/**/*.test.ts"]
 }

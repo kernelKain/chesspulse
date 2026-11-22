@@ -8,6 +8,7 @@ import {
   type InsightResult,
   type Report,
 } from '../../shared/contracts.js';
+import { digestGames } from '../store.js';
 import { readAiConfig } from './config.js';
 import { groundInsight } from './grounding.js';
 import { AiProviderError, callProvider } from './providers.js';
@@ -29,9 +30,14 @@ export async function requestInsight(
   if (!parsed.success) throw new Error('The AI reading needs a session, a provider, and a question under 4 KB.');
   const games = reportBuildRequestSchema.safeParse({ sessionId: parsed.data.sessionId, pgns });
   if (!games.success) throw new Error('The AI reading needs up to 20 PGNs under 2 MB.');
-  const stored = report === null ? null : reportSchema.safeParse(report);
-  if (!stored?.success || stored.data.sessionId !== parsed.data.sessionId) {
-    throw new Error('No computed session data was supplied. The AI reading stays off.');
+  if (report === null) throw new Error('No computed session data was supplied. The AI reading stays off.');
+  const stored = reportSchema.safeParse(report);
+  if (
+    !stored.success
+    || stored.data.sessionId !== parsed.data.sessionId
+    || stored.data.gamesDigest !== digestGames(games.data.pgns)
+  ) {
+    throw new Error('The stored report and PGNs are stale or mismatched. Build the report again before requesting AI.');
   }
   const configured = readAiConfig(env, parsed.data.provider);
   if (configured.disabled) return { disabled: true, reason: configured.reason };
@@ -63,7 +69,7 @@ export async function requestInsight(
       output = await callProvider(configured.config, prompt, fetchImpl, controller.signal);
     } catch (error) {
       const failure = options.signal?.aborted
-        ? new AiProviderError('The AI reading was cancelled. Nothing in this report depends on it.', false)
+        ? new AiProviderError('The AI reading was cancelled. Nothing in this report depends on it.', false, 'ai_cancelled')
         : providerFailure(error);
       if (!failure.retryable || attempt === 1) throw failure;
       continue;
@@ -78,7 +84,7 @@ export async function requestInsight(
       text: groundInsight(summary, output),
     };
   }
-  throw new Error('The AI provider did not respond. Nothing in this report depends on it.');
+  throw new AiProviderError('The AI provider did not respond. Nothing in this report depends on it.', true, 'ai_unavailable');
 }
 
 function computedSummary(report: Report): unknown {
@@ -103,7 +109,7 @@ function computedSummary(report: Report): unknown {
 function providerFailure(error: unknown): AiProviderError {
   if (error instanceof AiProviderError) return error;
   if (error instanceof Error && error.name === 'AbortError') {
-    return new AiProviderError('The AI provider timed out. Nothing in this report depends on it.', false);
+    return new AiProviderError('The AI provider timed out. Nothing in this report depends on it.', false, 'ai_unavailable');
   }
-  return new AiProviderError('The AI provider could not be reached. Nothing in this report depends on it.', true);
+  return new AiProviderError('The AI provider could not be reached. Nothing in this report depends on it.', true, 'ai_unavailable');
 }

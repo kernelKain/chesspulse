@@ -3,9 +3,14 @@
 // Removed: provider payloads would be unvalidated and errors could leak secrets or response data.
 import { z } from 'zod';
 import type { AiProvider } from '../../shared/contracts.js';
+import type { AppErrorCode } from '../../shared/errors.js';
 import type { AiConfiguration } from './config.js';
 
 export type { AiConfiguration } from './config.js';
+export type AiFailureCode = Extract<
+  AppErrorCode,
+  'ai_rejected_key' | 'ai_rate_limited' | 'ai_unavailable' | 'ai_bad_response' | 'ai_cancelled'
+>;
 
 const SYSTEM_PROMPT = [
   'Write a brief post-game chess session reading from the supplied PGN and locally computed statistics.',
@@ -18,8 +23,10 @@ export class AiProviderError extends Error {
   constructor(
     message: string,
     readonly retryable: boolean,
+    readonly code: AiFailureCode = 'ai_unavailable',
   ) {
     super(message);
+    this.name = 'AiProviderError';
   }
 }
 
@@ -44,7 +51,7 @@ export async function callProvider(
   try {
     value = JSON.parse(body);
   } catch {
-    throw new AiProviderError('The AI provider returned an unreadable response.', false);
+    throw new AiProviderError('The AI provider returned an unreadable response.', false, 'ai_bad_response');
   }
   return parseProviderText(config.provider, value);
 }
@@ -65,7 +72,7 @@ async function readBoundedBody(response: Response): Promise<string> {
       } catch {
         // The size refusal is the useful error even if stream cleanup fails.
       }
-      throw new AiProviderError('The AI provider returned an unreadable response.', false);
+      throw new AiProviderError('The AI provider returned an unreadable response.', false, 'ai_bad_response');
     }
     text += decoder.decode(chunk.value, { stream: true });
   }
@@ -99,8 +106,8 @@ function providerRequest(config: AiConfiguration, prompt: string, signal?: Abort
     headers.Authorization = `Bearer ${config.key}`;
     body = {
       model: config.model,
-      // Ollama's OpenAI-compatible custom endpoint documents max_tokens, not the newer native field.
-      ...(config.provider === 'custom' ? { max_tokens: 500 } : { max_completion_tokens: 500 }),
+      // OpenAI recommends max_completion_tokens; OpenCode's OpenAI-compatible examples use max_tokens.
+      ...(config.provider === 'openai' ? { max_completion_tokens: 500 } : { max_tokens: 500 }),
       stream: false,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
@@ -111,10 +118,14 @@ function providerRequest(config: AiConfiguration, prompt: string, signal?: Abort
   return { url, init: { method: 'POST', headers, body: JSON.stringify(body), signal, redirect: 'error' } };
 }
 
+const openAiMessage = z.object({
+  content: z.string().nullable().optional(),
+  reasoning: z.unknown().optional(),
+  reasoning_content: z.unknown().optional(),
+  refusal: z.string().nullable().optional(),
+});
 const openAiResponse = z.object({
-  choices: z.array(
-    z.object({ message: z.object({ content: z.string().min(1) }) }),
-  ).min(1),
+  choices: z.array(z.object({ message: openAiMessage })).min(1),
 });
 const textBlock = z.object({ type: z.literal('text'), text: z.string().min(1) });
 const anthropicResponse = z.object({ content: z.array(z.unknown()) });
@@ -145,21 +156,40 @@ function parseProviderText(provider: AiProvider, value: unknown): string {
     }
   } else {
     const parsed = openAiResponse.safeParse(value);
-    if (parsed.success) text = parsed.data.choices[0].message.content;
+    if (parsed.success) {
+      const message = parsed.data.choices[0]?.message;
+      const refusal = message?.refusal?.trim() ?? '';
+      const hasReasoning = message?.reasoning != null || message?.reasoning_content != null;
+      if (message?.content && message.content.trim().length > 0) {
+        text = message.content;
+      } else if (refusal.length > 0) {
+        throw new AiProviderError(
+          'The AI provider refused the request. Nothing in this report depends on it.',
+          false,
+          'ai_bad_response',
+        );
+      } else if (hasReasoning) {
+        throw new AiProviderError(
+          'The AI provider returned reasoning but no final answer. Try a different model.',
+          false,
+          'ai_bad_response',
+        );
+      }
+    }
   }
-  if (!text.trim()) throw new AiProviderError('The AI provider returned an unreadable response.', false);
+  if (!text.trim()) throw new AiProviderError('The AI provider returned an unreadable response.', false, 'ai_bad_response');
   return text;
 }
 
 function statusError(status: number): AiProviderError {
   if (status === 401 || status === 403) {
-    return new AiProviderError('The AI provider rejected the key. Check CP_AI_KEY.', false);
+    return new AiProviderError('The AI provider rejected the key. Check CP_AI_KEY.', false, 'ai_rejected_key');
   }
   if (status === 429) {
-    return new AiProviderError('The AI provider rate limit was reached. Try again later.', false);
+    return new AiProviderError('The AI provider rate limit was reached. Try again later.', false, 'ai_rate_limited');
   }
   if (status >= 500) {
-    return new AiProviderError('The AI provider is unavailable. Nothing in this report depends on it.', true);
+    return new AiProviderError('The AI provider is unavailable. Nothing in this report depends on it.', true, 'ai_unavailable');
   }
-  return new AiProviderError('The AI provider rejected the request. Check CP_AI_MODEL and the provider settings.', false);
+  return new AiProviderError('The AI provider rejected the request. Check CP_AI_MODEL and the provider settings.', false, 'ai_bad_response');
 }

@@ -4,12 +4,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PreviewFrame } from '../shared/contracts';
 import { lightNote, previewBoost } from '../shared/preview';
+import { COPY } from './copy';
 
 /** How long without a frame before the preview admits it is waiting. */
 const STALE_MS = 2_000;
 const LIGHT_UPDATE_MS = 500;
 
-export function CameraPreview({ sensing }: { sensing: boolean }) {
+export function CameraPreview({ active, guide = false }: { active: boolean; guide?: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastFrameAt = useRef(0);
   const lastLightAt = useRef(0);
@@ -40,7 +41,7 @@ export function CameraPreview({ sensing }: { sensing: boolean }) {
   }, [bridge]);
 
   useEffect(() => {
-    if (!sensing) {
+    if (!active) {
       setStale(false);
       return undefined;
     }
@@ -48,26 +49,34 @@ export function CameraPreview({ sensing }: { sensing: boolean }) {
       setStale(Date.now() - lastFrameAt.current > STALE_MS);
     }, 500);
     return () => window.clearInterval(timer);
-  }, [sensing]);
+  }, [active]);
 
   const boost = previewBoost(light);
 
   return (
     <figure className="camera">
-      <canvas
-        ref={canvasRef}
-        className="camera-video"
-        width={320}
-        height={180}
-        style={boost > 1 ? { filter: `brightness(${boost.toFixed(2)}) contrast(1.15)` } : undefined}
-        role="img"
-        aria-label="Camera preview. Nothing is recorded."
-      />
-      <figcaption className="hint">
-        {!sensing
-          ? 'The camera opens when you start sensing.'
+      <div className="camera-frame">
+        <canvas
+          ref={canvasRef}
+          className="camera-video"
+          width={320}
+          height={180}
+          style={boost > 1 ? { filter: `brightness(${boost.toFixed(2)}) contrast(1.15)` } : undefined}
+          role="img"
+          aria-label={COPY.camera.previewAria}
+        />
+        {guide ? (
+          <div className="framing-guide" aria-hidden="true">
+            <div className="face-outline" />
+            <div className="chest-line" />
+          </div>
+        ) : null}
+      </div>
+      <figcaption className="hint" aria-live="polite" aria-atomic="true">
+        {!active
+          ? COPY.camera.closed
           : !hasFrame || stale
-            ? 'Waiting for the camera…'
+            ? COPY.camera.waiting
             : lightNote(light)}
       </figcaption>
     </figure>

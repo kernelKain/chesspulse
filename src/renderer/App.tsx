@@ -1,51 +1,113 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import {
+  appStateSchema,
   coachMessageSchema,
   insightResultSchema,
+  reportProgressSchema,
   reportResultSchema,
   sampleBatchSchema,
+  sessionEndedSchema,
+  sessionListResultSchema,
+  sessionOpenResultSchema,
+  sessionStartedSchema,
+  setupStatusSchema,
   type AiProvider,
   type CoachMessage,
   type PasteValidation,
   type PulseSample,
-  type ReportResult,
   type SessionMeta,
+  type SessionSummary,
   type ValidationMessage,
 } from '../shared/contracts';
-import { CONFIDENCE_FLOOR } from '../shared/sensing';
+import {
+  currentSessionId,
+  flowReducer,
+  initialFlowState,
+  sensingHint,
+  statusFor,
+  type StatusLine,
+} from '../shared/flow';
+import { appErrorInfo } from '../shared/errors';
+import {
+  framingFromValidation,
+  UNKNOWN_FRAMING,
+} from '../shared/framing';
+import {
+  readExplainerSeen,
+  rememberExplainerSeen,
+  type PreferenceStore,
+} from '../shared/onboarding';
+import {
+  formatElapsedMs,
+  limitWarning,
+  signalQuality,
+  signalStale,
+} from '../shared/sensing';
+import {
+  keyStatusFromChecks,
+  setupGate,
+  type KeyStatus,
+  type PreviewStatus,
+} from '../shared/setup';
 import { BandBars } from './BandBars';
+import { COPY } from './copy';
+import { CameraOpenIndicator } from './CameraOpenIndicator';
 import { CameraPreview } from './CameraPreview';
 import { CoachLine } from './CoachLine';
+import { Explainer } from './Explainer';
 import { GameList } from './GameList';
 import { InsightPanel, type InsightViewState } from './InsightPanel';
+import { openKeyboardHelp } from './KeyboardHelp';
+import { readIpcError } from './ipc-error';
 import { PasteScreen } from './PasteScreen';
+import { RefusalPanel } from './RefusalPanel';
+import { ReviewProgress } from './ReviewProgress';
+import { SensingControls } from './SensingControls';
 import { SensingStrip } from './SensingStrip';
+import { SessionList } from './SessionList';
+import { SetupScreen } from './SetupScreen';
 import { Timeline } from './Timeline';
 import { VerdictLine } from './VerdictLine';
 
 const TIME_CONTROLS = ['1+0', '3+2', '10+0'] as const;
 
-type Phase = 'idle' | 'sensing' | 'stopped' | 'paste' | 'report';
+/** Reading the page's own storage must never be able to stop the page from rendering. */
+function preferenceStore(): PreferenceStore | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
 
 export function App() {
-  const [granted, setGranted] = useState(false);
+  const [flow, dispatch] = useReducer(flowReducer, undefined, () =>
+    initialFlowState(readExplainerSeen(preferenceStore())),
+  );
   const [timeControl, setTimeControl] = useState<(typeof TIME_CONTROLS)[number]>('3+2');
-  const [phase, setPhase] = useState<Phase>('idle');
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [pasteSlots, setPasteSlots] = useState<string[]>([]);
-  const [reportResult, setReportResult] = useState<ReportResult | null>(null);
-  const [reportBuilding, setReportBuilding] = useState(false);
-  const [reportError, setReportError] = useState<string | null>(null);
+  const [gapPending, setGapPending] = useState(false);
   const [samples, setSamples] = useState<PulseSample[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [validation, setValidation] = useState<ValidationMessage | null>(null);
-  const [sdkError, setSdkError] = useState<string | null>(null);
-  const [betweenGames, setBetweenGames] = useState(false);
-  const [gapPending, setGapPending] = useState(false);
   const [coachMessage, setCoachMessage] = useState<CoachMessage | null>(null);
   const [insightState, setInsightState] = useState<InsightViewState>({ status: 'idle' });
-  const [note, setNote] = useState('The camera stays off until you consent.');
-  const [error, setError] = useState<string | null>(null);
+  const [setupKey, setSetupKey] = useState<{ status: KeyStatus; detail: string }>({
+    status: 'loading',
+    detail: COPY.setup.checkingKey,
+  });
+  const [preview, setPreview] = useState<PreviewStatus>('idle');
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewAttempt, setPreviewAttempt] = useState(0);
+  const [starting, setStarting] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [confirmingStop, setConfirmingStop] = useState(false);
+  const [lastSampleAtMs, setLastSampleAtMs] = useState<number | null>(null);
+  const [library, setLibrary] = useState<{
+    status: 'idle' | 'loading' | 'ready' | 'error';
+    sessions: SessionSummary[];
+    unreadable: number;
+  }>({ status: 'idle', sessions: [], unreadable: 0 });
+  const [libraryNonce, setLibraryNonce] = useState(0);
   const bridge = window.chesspulse;
   const grantedNow = useRef(false);
   const startPending = useRef(false);
@@ -53,39 +115,242 @@ export function App() {
   const reportRequestSeq = useRef(0);
   const insightRequestSeq = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
+  const terminalSessionRef = useRef<string | null>(null);
+  const supersededSessions = useRef<Set<string>>(new Set());
+  const screenRef = useRef(flow.screen);
+  const librarySeq = useRef(0);
+  const openSessionSeq = useRef(0);
+  const stoppedSessionRef = useRef<string | null>(null);
+  const hydrationSeq = useRef(0);
+  const previewSeq = useRef(0);
+  const consentQueue = useRef<Promise<void>>(Promise.resolve());
 
   function resetInsight(): void {
     insightRequestSeq.current += 1;
     setInsightState({ status: 'idle' });
   }
 
-  function adoptSession(nextId: string): void {
+  function adoptSession(nextId: string, startedAtEpochMs: number): void {
     resetInsight();
-    setBetweenGames(false);
-    setGapPending(false);
     setCoachMessage(null);
     if (sessionIdRef.current === nextId) return;
+    if (sessionIdRef.current) supersededSessions.current.add(sessionIdRef.current);
     sessionIdRef.current = nextId;
+    terminalSessionRef.current = null;
     reportRequestSeq.current += 1;
-    setSessionId(nextId);
-    setError(null);
-    setPasteSlots([]);
-    setReportResult(null);
-    setReportBuilding(false);
-    setReportError(null);
+    // The error handler runs before the screen effect, so the ref must move with the session.
+    screenRef.current = 'sensing';
+    openSessionSeq.current += 1;
+    stoppedSessionRef.current = null;
+    dispatch({ type: 'sessionStarted', sessionId: nextId, startedAtEpochMs });
     setSamples([]);
     setSelectedIndex(null);
     setValidation(null);
-    setSdkError(null);
+    setLastSampleAtMs(null);
   }
+
+  function settleSession(nextId: string, notice: string): void {
+    resetInsight();
+    setCoachMessage(null);
+    if (sessionIdRef.current && sessionIdRef.current !== nextId) {
+      supersededSessions.current.add(sessionIdRef.current);
+    }
+    sessionIdRef.current = nextId;
+    reportRequestSeq.current += 1;
+    screenRef.current = 'stopped';
+    stoppedSessionRef.current = nextId;
+    openSessionSeq.current += 1;
+    dispatch({ type: 'sessionStopped', sessionId: nextId, notice });
+  }
+
+  function dismissExplainer(startSetup: boolean): void {
+    rememberExplainerSeen(preferenceStore());
+    dispatch({ type: 'explainerDismissed' });
+    if (startSetup) dispatch({ type: 'openSetup' });
+  }
+
+  // What: one load-time read of main's consent and live-session state.
+  // Why: a reloaded page must not render consent off while main still holds it, nor forget a session.
+  useEffect(() => {
+    if (!bridge) return;
+    // Capture the generation before the read. A consent action that lands while it is in flight
+    // is newer than the snapshot, so its reply must be ignored rather than undoing the action.
+    const seq = hydrationSeq.current;
+    void bridge
+      .getAppState()
+      .then((raw) => {
+        if (seq !== hydrationSeq.current) return;
+        const parsed = appStateSchema.safeParse(raw);
+        if (!parsed.success) return;
+        const { consent, session } = parsed.data;
+        grantedNow.current = consent.granted;
+        if (
+          session.active &&
+          session.sessionId &&
+          session.startedAtEpochMs !== null &&
+          !terminalSessionRef.current &&
+          !stoppedSessionRef.current
+        ) {
+          sessionIdRef.current = session.sessionId;
+          terminalSessionRef.current = null;
+        }
+        dispatch({
+          type: 'hydrated',
+          consent: consent.granted,
+          session:
+            session.active && session.sessionId && session.startedAtEpochMs !== null
+              ? {
+                  id: session.sessionId,
+                  startedAtEpochMs: session.startedAtEpochMs,
+                  betweenGames: session.betweenGames,
+                  markedGames: session.markedGames,
+                }
+              : null,
+        });
+      })
+      .catch(() => {
+        // A failed state read leaves the page in its honest default: camera off, Home.
+      });
+  }, [bridge]);
+
+  // The consent switch follows the reducer even when main changes it behind the page.
+  useEffect(() => {
+    grantedNow.current = flow.consent;
+  }, [flow.consent]);
+
+  useEffect(() => {
+    screenRef.current = flow.screen;
+  }, [flow.screen]);
+
+  // The clock is the page's display only; the stored header and the main-process timer remain the
+  // authority for duration and the 90-minute stop.
+  useEffect(() => {
+    if (!flow.session) return undefined;
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [flow.session?.id]);
+
+  useEffect(() => {
+    setConfirmingStop(false);
+  }, [flow.session?.id, flow.screen]);
+
+  // Home and Sessions read the stored library. A reload or a delete refreshes it; a late response
+  // from a previous visit is ignored by the sequence.
+  useEffect(() => {
+    if (flow.screen !== 'home' && flow.screen !== 'sessions') return;
+    if (!bridge) {
+      setLibrary({ status: 'error', sessions: [], unreadable: 0 });
+      return;
+    }
+    const seq = ++librarySeq.current;
+    setLibrary((current) => ({ ...current, status: 'loading' }));
+    void bridge
+      .listSessions()
+      .then((raw) => {
+        if (seq !== librarySeq.current) return;
+        const parsed = sessionListResultSchema.safeParse(raw);
+        if (!parsed.success) {
+          setLibrary({ status: 'error', sessions: [], unreadable: 0 });
+          return;
+        }
+        setLibrary({
+          status: 'ready',
+          sessions: parsed.data.sessions,
+          unreadable: parsed.data.unreadable,
+        });
+      })
+      .catch(() => {
+        if (seq === librarySeq.current) {
+          setLibrary({ status: 'error', sessions: [], unreadable: 0 });
+        }
+      });
+  }, [flow.screen, bridge, libraryNonce]);
+
+  // Setup asks the doctor once per visit. The key row is the same check the CLI prints.
+  useEffect(() => {
+    if (flow.screen !== 'setup') {
+      setPreview('idle');
+      setPreviewError(null);
+      // Forget this visit's key result, so returning to Setup does not blink the camera
+      // between a stale "present" and the fresh doctor answer.
+      setSetupKey({ status: 'loading', detail: COPY.setup.checkingKey });
+      return undefined;
+    }
+    if (!bridge) {
+      setSetupKey({
+        status: 'error',
+        detail: COPY.errors.outsideWindow,
+      });
+      return undefined;
+    }
+    let alive = true;
+    setSetupKey({ status: 'loading', detail: COPY.setup.checkingKey });
+    setPreview('idle');
+    setPreviewError(null);
+    setValidation(null);
+    void bridge
+      .getSetupStatus()
+      .then((raw) => {
+        if (!alive) return;
+        const parsed = setupStatusSchema.safeParse(raw);
+        if (!parsed.success) {
+          setSetupKey({ status: 'error', detail: COPY.errors.keyUnexpected });
+          return;
+        }
+        setSetupKey(keyStatusFromChecks(parsed.data.checks));
+      })
+      .catch(() => {
+        if (alive) setSetupKey({ status: 'error', detail: COPY.errors.keyCheckFailed });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [flow.screen, bridge]);
+
+  // The camera preview exists only on Setup, only after consent, and only once the key is known.
+  // Its cleanup runs on every path that leaves Setup, so no screen retains a live camera.
+  useEffect(() => {
+    if (flow.screen !== 'setup' || !bridge || !flow.consent || setupKey.status !== 'present') {
+      // The previous effect's cleanup owns the stop and clears the state only after release.
+      return undefined;
+    }
+    const seq = ++previewSeq.current;
+    let alive = true;
+    setPreview('starting');
+    setPreviewError(null);
+    setValidation(null);
+    void bridge
+      .startPreview()
+      .then(() => {
+        if (alive) setPreview('running');
+      })
+      .catch((caught: unknown) => {
+        if (!alive) return;
+        setPreview('error');
+        setPreviewError(readIpcError(caught, 'camera_unavailable'));
+      });
+    return () => {
+      alive = false;
+      void bridge
+        .stopPreview()
+        .then(() => {
+          if (previewSeq.current === seq) setPreview('idle');
+        })
+        .catch(() => {
+          // Release was not confirmed. Keep the running state so Help still shows the camera.
+        });
+    };
+  }, [flow.screen, flow.consent, setupKey.status, previewAttempt, bridge]);
 
   useEffect(() => {
     if (!bridge) return undefined;
     return bridge.onSamples((batch) => {
       const parsed = sampleBatchSchema.safeParse(batch);
       if (!parsed.success) return;
+      if (parsed.data.length > 0) setLastSampleAtMs(Date.now());
       setSamples((current) => [...current, ...parsed.data]);
-      setSdkError((current) => (current === null ? current : null));
+      dispatch({ type: 'clearSdkError' });
     });
   }, [bridge]);
 
@@ -101,7 +366,7 @@ export function App() {
     if (!bridge) return undefined;
     return bridge.onValidation((message) => {
       setValidation(message);
-      if (message.code === 0) setSdkError((current) => (current === null ? current : null));
+      if (message.code === 0) dispatch({ type: 'clearSdkError' });
     });
   }, [bridge]);
 
@@ -109,116 +374,224 @@ export function App() {
     if (!bridge) return undefined;
     return bridge.onSdkError((info) => {
       // Kept apart from operation errors, which no sensing event may clear.
-      setSdkError(info.message);
-      if (info.retryable) return;
-      void (async () => {
-        try {
-          const meta = await bridge.stopSession();
-          adoptSession(meta.id);
-          setPhase('stopped');
-          setNote(stoppedNote(meta));
-        } catch {
-          // The session may already be closed. The message above still stands.
-          setPhase('stopped');
-        } finally {
-          // adoptSession clears session-scoped state, so the reason is restored after the stop.
-          setSdkError(info.message);
+      dispatch({ type: 'sdkError', message: info.message });
+      if (!info.retryable) {
+        // A terminal error during the start invoke belongs to the session being opened, not the
+        // preview that main has already released.
+        if (screenRef.current === 'setup' && !startPending.current) {
+          setPreview('error');
+          setPreviewError(info.message);
+        } else {
+          void (async () => {
+            try {
+              const meta = await bridge.stopSession();
+              settleSession(meta.id, stoppedNote(meta));
+            } catch {
+              // Teardown was not confirmed. Keep the sensing controls so the player can retry
+              // instead of hiding a camera that may still be open.
+              dispatch({
+                type: 'error',
+                message: COPY.errors.stopFailedRetry,
+              });
+            }
+          })();
         }
-      })();
+      }
     });
   }, [bridge]);
 
-  const status = error ?? sdkError ?? statusLine(phase, samples, note, validation);
-
-  async function onConsent(): Promise<void> {
-    if (!bridge) {
-      setNote('This page is open outside the ChessPulse window. The camera stays off.');
-      return;
-    }
-    const revoking = grantedNow.current;
-    if (revoking && startPending.current) revokedDuringStart.current = true;
-    let stopFailed = false;
-    if (phase === 'sensing' || (revoking && startPending.current)) {
-      try {
-        const meta = await bridge.stopSession();
-        adoptSession(meta.id);
-        setError(null);
-        setPhase('stopped');
-        setNote(stoppedNote(meta));
-      } catch {
-        stopFailed = true;
-        setError('The session could not be stopped.');
+  useEffect(() => {
+    if (!bridge) return undefined;
+    return bridge.onSessionEnded((event) => {
+      const parsed = sessionEndedSchema.safeParse(event);
+      if (!parsed.success) return;
+      // A late event from a session the page has already replaced must not switch the screen back.
+      if (supersededSessions.current.has(parsed.data.sessionId)) return;
+      if (
+        sessionIdRef.current &&
+        sessionIdRef.current !== parsed.data.sessionId &&
+        screenRef.current === 'sensing'
+      ) {
+        return;
       }
+      settleSession(parsed.data.sessionId, parsed.data.message);
+      terminalSessionRef.current = parsed.data.sessionId;
+      dispatch({ type: 'clearError' });
+    });
+  }, [bridge]);
+
+  useEffect(() => {
+    if (!bridge) return undefined;
+    return bridge.onSessionStarted((event) => {
+      const parsed = sessionStartedSchema.safeParse(event);
+      if (!parsed.success) return;
+      if (terminalSessionRef.current === parsed.data.sessionId) return;
+      if (stoppedSessionRef.current === parsed.data.sessionId) return;
+      if (supersededSessions.current.has(parsed.data.sessionId)) return;
+      if (!grantedNow.current) return;
+      // A page that already adopted a different live session must not switch to a late start event.
+      if (sessionIdRef.current && sessionIdRef.current !== parsed.data.sessionId) return;
+      // The event means main opened a session, which requires consent. Set both before the
+      // session, so a reload that missed the invoke reply does not show an off consent switch.
+      grantedNow.current = true;
+      dispatch({ type: 'consentChanged', granted: true });
+      adoptSession(parsed.data.sessionId, parsed.data.startedAtEpochMs);
+    });
+  }, [bridge]);
+
+  useEffect(() => {
+    if (!bridge) return undefined;
+    return bridge.onReportProgress((progress) => {
+      const parsed = reportProgressSchema.safeParse(progress);
+      if (!parsed.success || parsed.data.sessionId !== sessionIdRef.current) return;
+      dispatch({
+        type: 'reportProgress',
+        scored: parsed.data.scored,
+        total: parsed.data.total,
+      });
+    });
+  }, [bridge]);
+
+  // Focus follows the screen and the first-run explanation, so a click never leaves it on removed
+  // content. A finished or failed report also replaces the heading, so it moves there too.
+  useEffect(() => {
+    const heading = document.querySelector<HTMLElement>('main h1');
+    if (!heading) return;
+    heading.tabIndex = -1;
+    heading.focus();
+  }, [flow.screen, flow.explainerSeen, flow.review?.building]);
+
+  const sessionId = currentSessionId(flow);
+  const framing = validation ? framingFromValidation(validation.code) : UNKNOWN_FRAMING;
+  const gate = setupGate({
+    consent: flow.consent,
+    keyStatus: setupKey.status,
+    keyDetail: setupKey.detail,
+    preview,
+    previewError,
+    framing,
+  });
+  const elapsedMs = flow.session ? Math.max(0, nowMs - flow.session.startedAtEpochMs) : 0;
+  const quality = signalQuality(samples);
+  const qualityLabel = signalStale(lastSampleAtMs, nowMs)
+    ? COPY.errors.noRecentSignal
+    : quality.label;
+  const status = statusFor({
+    error: flow.error,
+    sdkError: flow.sdkError,
+    screen: flow.screen,
+    hint: sensingHint(samples, validation),
+    notice: flow.notice,
+  });
+
+  function onConsent(): Promise<void> {
+    if (!bridge) {
+      dispatch({
+        type: 'notice',
+        message: COPY.errors.outsideWindowCamera,
+      });
+      return Promise.resolve();
     }
-    try {
-      const next = await bridge.setConsent(!grantedNow.current);
-      if (!stopFailed) setError(null);
-      grantedNow.current = next.granted;
-      setGranted(next.granted);
-      if (!next.granted) setNote('The camera stays off until you consent.');
-      else setNote('Consent is on. The camera opens when you start sensing.');
-    } catch {
-      setNote('Consent could not be saved. The camera state is unchanged.');
-    }
+    hydrationSeq.current += 1;
+    const run = consentQueue.current.then(async () => {
+      const revoking = grantedNow.current;
+      if (revoking && startPending.current) revokedDuringStart.current = true;
+      let stopFailed = false;
+      let stopSucceeded = false;
+      if (screenRef.current === 'sensing' || (revoking && startPending.current)) {
+        try {
+          const meta = await bridge.stopSession();
+          stopSucceeded = true;
+          settleSession(meta.id, stoppedNote(meta));
+          dispatch({ type: 'clearError' });
+        } catch {
+          stopFailed = true;
+          dispatch({ type: 'error', message: COPY.errors.stopFailed });
+        }
+      }
+      try {
+        const next = await bridge.setConsent(!grantedNow.current);
+        if (!stopFailed) dispatch({ type: 'clearError' });
+        grantedNow.current = next.granted;
+        dispatch({ type: 'consentChanged', granted: next.granted });
+      } catch {
+        dispatch({
+          type: 'error',
+          message:
+            stopSucceeded && !stopFailed
+              ? COPY.errors.consentChangeNotSaved
+              : COPY.errors.consentNotSaved,
+        });
+      }
+    });
+    consentQueue.current = run.catch(() => undefined);
+    return run;
   }
 
   async function onStart(): Promise<void> {
-    if (!bridge) {
-      setNote('This page is open outside the ChessPulse window. The camera stays off.');
-      return;
-    }
+    if (!bridge || flow.screen !== 'setup' || !gate.canStart || startPending.current) return;
     revokedDuringStart.current = false;
     startPending.current = true;
+    setStarting(true);
+    const seq = openSessionSeq.current;
     try {
       const started = await bridge.startSession(timeControl);
-      adoptSession(started.sessionId);
+      // A terminal event or a different live session may have arrived before this reply.
+      if (terminalSessionRef.current === started.sessionId) return;
+      if (seq !== openSessionSeq.current) return;
+      if (sessionIdRef.current && sessionIdRef.current !== started.sessionId && screenRef.current === 'sensing') {
+        return;
+      }
+      adoptSession(started.sessionId, started.startedAtEpochMs);
       if (revokedDuringStart.current || !grantedNow.current) {
         try {
           const meta = await bridge.stopSession();
-          adoptSession(meta.id);
-          setPhase('stopped');
-          setNote(stoppedNote(meta));
+          settleSession(meta.id, stoppedNote(meta));
         } catch {
-          // Revocation already closed the session, or the start never opened one.
+          // Consent revocation has normally finalized the session already, so stopSession
+          // rejects. The screen must not keep claiming it is sensing a session that is gone.
+          settleSession(started.sessionId, COPY.errors.stoppedAfterConsent);
         }
         return;
       }
-      setPhase('sensing');
-      setNote('Waiting for a face.');
     } catch (caught: unknown) {
       if (!revokedDuringStart.current && grantedNow.current) {
-        setError(ipcErrorText(caught, 'The session did not start. The camera stays off.'));
+        dispatch({ type: 'error', message: readIpcError(caught, 'session_failed') });
+        // Main released the preview before the failed start. Rebuild it so Setup is usable again.
+        setPreview('idle');
+        setPreviewAttempt((attempt) => attempt + 1);
       }
     } finally {
       startPending.current = false;
+      setStarting(false);
     }
   }
 
   async function onStop(): Promise<void> {
-    if (!bridge || phase !== 'sensing') return;
+    if (!bridge || flow.screen !== 'sensing') return;
     try {
       const meta = await bridge.stopSession();
-      adoptSession(meta.id);
-      setError(null);
-      setPhase('stopped');
-      setNote(stoppedNote(meta));
+      // The sessionEnded event may already have settled this session and a report may have started.
+      if (terminalSessionRef.current === meta.id || sessionIdRef.current !== meta.id) return;
+      settleSession(meta.id, stoppedNote(meta));
+      dispatch({ type: 'clearError' });
     } catch {
-      setError('The session could not be stopped.');
+      dispatch({ type: 'error', message: COPY.errors.stopFailed });
     }
   }
 
   async function onGapToggle(): Promise<void> {
-    if (!bridge || phase !== 'sensing' || gapPending) return;
+    if (!bridge || flow.screen !== 'sensing' || gapPending || !flow.session) return;
     setGapPending(true);
-    setError(null);
+    dispatch({ type: 'clearError' });
     // A line from the previous gap must never appear during the next game. Clear before the call
     // so an immediate coach event for the new gap cannot be erased by its own response.
     setCoachMessage(null);
     try {
-      const result = await bridge.setBetweenGames(!betweenGames);
-      setBetweenGames(result.betweenGames);
+      const result = await bridge.setBetweenGames(!flow.session.betweenGames);
+      dispatch({ type: 'gapChanged', betweenGames: result.betweenGames });
     } catch (caught: unknown) {
-      setError(ipcErrorText(caught, 'The game boundary could not be saved.'));
+      dispatch({ type: 'error', message: readIpcError(caught, 'session_failed') });
     } finally {
       setGapPending(false);
     }
@@ -233,7 +606,10 @@ export function App() {
       if (seq !== insightRequestSeq.current) return;
       const parsed = insightResultSchema.safeParse(raw);
       if (!parsed.success) {
-        setInsightState({ status: 'error', message: 'The reading returned an unexpected shape. The report is unchanged.' });
+        setInsightState({
+          status: 'error',
+          message: COPY.errors.insightUnexpected,
+        });
       } else if (parsed.data.disabled) {
         setInsightState({ status: 'disabled', reason: parsed.data.reason });
       } else {
@@ -243,7 +619,7 @@ export function App() {
       if (seq !== insightRequestSeq.current) return;
       setInsightState({
         status: 'error',
-        message: ipcErrorText(caught, 'The provider did not respond. Nothing in this report depends on it.'),
+        message: readIpcError(caught, 'ai_unavailable'),
       });
     }
   }
@@ -260,75 +636,370 @@ export function App() {
   }
 
   async function onPasteContinue(pgns: string[], _validation: PasteValidation): Promise<void> {
-    if (bridge && sessionId) void bridge.cancelInsight(sessionId).catch(() => undefined);
-    resetInsight();
-    const seq = ++reportRequestSeq.current;
-    setPasteSlots(pgns);
-    setReportError(null);
-    setReportResult(null);
-    setPhase('report');
-    if (!bridge || !sessionId) {
-      setReportError('No stored session is available for this report.');
+    if (!sessionId) {
+      dispatch({ type: 'error', message: COPY.errors.noStoredSession });
       return;
     }
-    setReportBuilding(true);
+    if (bridge) void bridge.cancelInsight(sessionId).catch(() => undefined);
+    resetInsight();
+    const seq = ++reportRequestSeq.current;
+    dispatch({ type: 'reportStarted', sessionId, slots: pgns });
+    if (!bridge) {
+      dispatch({ type: 'reportFailed', message: COPY.errors.outsideWindow, sessionId });
+      return;
+    }
     try {
       const raw = await bridge.buildReport(sessionId, pgns);
       if (seq !== reportRequestSeq.current) return;
       const parsed = reportResultSchema.safeParse(raw);
       if (!parsed.success) {
-        setReportError('The report returned an unexpected shape.');
+        dispatch({ type: 'reportFailed', message: COPY.errors.reportUnexpected, sessionId });
         return;
       }
-      setReportResult(parsed.data);
+      dispatch({ type: 'reportReady', result: parsed.data });
     } catch (caught: unknown) {
       if (seq !== reportRequestSeq.current) return;
-      setReportError(caught instanceof Error ? caught.message : 'The report could not be built.');
-    } finally {
-      if (seq === reportRequestSeq.current) setReportBuilding(false);
+      dispatch({ type: 'reportFailed', message: readIpcError(caught, 'report_failed'), sessionId });
     }
   }
 
-  if (phase === 'paste') {
+  async function onCancelReport(): Promise<void> {
+    if (!bridge || !sessionId || !flow.review?.building || flow.review.cancelling) return;
+    const seq = reportRequestSeq.current;
+    dispatch({ type: 'reportCancelRequested' });
+    try {
+      const result = await bridge.cancelReport(sessionId);
+      if (seq !== reportRequestSeq.current) return;
+      if (!result.cancelled) dispatch({ type: 'reportCancelRejected' });
+    } catch {
+      // Let the player retry if the cancel request never reached main.
+      if (seq === reportRequestSeq.current) dispatch({ type: 'reportCancelRejected' });
+    }
+  }
+
+  async function onCopyDiagnostics(): Promise<void> {
+    if (!bridge) {
+      dispatch({
+        type: 'notice',
+        message: COPY.errors.diagnosticsUnavailable,
+      });
+      return;
+    }
+    try {
+      await bridge.copyDiagnostics();
+      dispatch({ type: 'clearError' });
+      dispatch({
+        type: 'notice',
+        message: COPY.errors.diagnosticsCopied,
+      });
+    } catch (caught: unknown) {
+      dispatch({ type: 'error', message: readIpcError(caught, 'internal') });
+    }
+  }
+
+  async function onOpenSession(sessionId: string): Promise<void> {
+    if (!bridge) return;
+    if (flow.session) {
+      dispatch({ type: 'error', message: COPY.errors.stopBeforeOpening });
+      return;
+    }
+    const seq = ++openSessionSeq.current;
+    try {
+      const raw = await bridge.openSession(sessionId);
+      if (seq !== openSessionSeq.current) return;
+      const parsed = sessionOpenResultSchema.safeParse(raw);
+      if (!parsed.success) {
+        dispatch({ type: 'error', message: COPY.errors.unexpectedSession });
+        return;
+      }
+      // A build from the previous review must not land on the newly opened session.
+      if (flow.review?.building) {
+        void bridge.cancelReport(flow.review.sessionId).catch(() => undefined);
+      }
+      resetInsight();
+      reportRequestSeq.current += 1;
+      sessionIdRef.current = sessionId;
+      terminalSessionRef.current = null;
+      stoppedSessionRef.current = null;
+      setSamples([]);
+      setSelectedIndex(null);
+      setLastSampleAtMs(null);
+      setValidation(null);
+      dispatch({
+        type: 'openedSession',
+        sessionId,
+        report: parsed.data.report,
+        games: parsed.data.games,
+      });
+      if (parsed.data.reportError) {
+        dispatch({ type: 'notice', message: reportErrorCopy(parsed.data.reportError) });
+      }
+    } catch (caught: unknown) {
+      if (seq === openSessionSeq.current) {
+        dispatch({ type: 'error', message: readIpcError(caught, 'report_failed') });
+      }
+    }
+  }
+
+  async function onDeleteSession(sessionId: string): Promise<void> {
+    if (!bridge) return;
+    try {
+      const result = await bridge.deleteSession(sessionId);
+      dispatch({ type: 'sessionDeleted', sessionId });
+      dispatch({
+        type: 'notice',
+        message: result.deleted ? COPY.common.notices.sessionDeleted : COPY.common.notices.sessionGone,
+      });
+      setLibraryNonce((nonce) => nonce + 1);
+    } catch (caught: unknown) {
+      dispatch({ type: 'error', message: readIpcError(caught, 'storage_failed') });
+    }
+  }
+
+  async function onExportSession(sessionId: string): Promise<void> {
+    if (!bridge) return;
+    try {
+      const result = await bridge.exportReport(sessionId);
+      dispatch({
+        type: 'notice',
+        message: result.exported ? COPY.common.notices.exported(result.path) : COPY.common.notices.exportCancelled,
+      });
+    } catch (caught: unknown) {
+      dispatch({ type: 'error', message: readIpcError(caught, 'report_failed') });
+    }
+  }
+
+  if (flow.screen === 'home' && !flow.explainerSeen) {
     return (
       <main>
+        <p className="label">{COPY.common.chessPulse}</p>
+        {flow.session ? <p className="indicator">{COPY.camera.sensing}</p> : null}
+        <Explainer showProgress />
+        <StatusRegion status={status} />
+        <div className="actions">
+          <button type="button" className="btn btn-primary" onClick={() => dismissExplainer(true)}>
+            {COPY.common.actions.startSetup}
+          </button>
+          <button type="button" onClick={() => dismissExplainer(false)} className="btn btn-secondary">
+            {COPY.common.actions.skipForNow}
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  if (flow.screen === 'help') {
+    return (
+      <>
+        <CameraOpenIndicator
+          sensing={Boolean(flow.session)}
+          preview={preview === 'running' || preview === 'starting'}
+        />
+        <main>
+          <p className="label">{COPY.common.screenLabels.help}</p>
+          <h1>{COPY.common.actions.help}</h1>
+          <StatusRegion status={status} />
+          <Explainer headingLevel={2} />
+          <div className="actions">
+            <button type="button" className="btn btn-primary" onClick={() => void onCopyDiagnostics()}>
+              {COPY.common.actions.copyDiagnostics}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => openKeyboardHelp()}
+            >
+              {COPY.common.actions.keyboardShortcuts}
+            </button>
+            <button type="button" onClick={() => dispatch({ type: 'closeHelp' })} className="btn btn-secondary">
+              {COPY.common.actions.back}
+            </button>
+          </div>
+        </main>
+      </>
+    );
+  }
+
+  if (flow.screen === 'home') {
+    return (
+      <main>
+        <p className="label">{COPY.common.chessPulse}</p>
+        <h1>{COPY.home.heading}</h1>
+        <StatusRegion status={status} />
+        <p>{COPY.home.intro}</p>
+        <div className="actions">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => dispatch({ type: 'openSetup' })}
+          >
+            {COPY.common.actions.startSession}
+          </button>
+          <button type="button" onClick={() => dispatch({ type: 'openSessions' })} className="btn btn-secondary">
+            {COPY.common.actions.allSessions}
+          </button>
+          <button type="button" onClick={() => dispatch({ type: 'openHelp' })} className="btn btn-secondary">
+            {COPY.common.actions.help}
+          </button>
+        </div>
+        <section className="recent-sessions" aria-labelledby="recent-sessions-heading">
+          <h2 id="recent-sessions-heading">{COPY.home.recentHeading}</h2>
+          {library.status === 'idle' || library.status === 'loading' ? (
+            <p className="loading-state">{COPY.common.loading}</p>
+          ) : library.status === 'error' ? (
+            <>
+              <p>{COPY.common.readError}</p>
+              <button type="button" onClick={() => setLibraryNonce((nonce) => nonce + 1)} className="btn btn-secondary">
+                {COPY.common.actions.tryAgain}
+              </button>
+            </>
+          ) : (
+            <SessionList
+              sessions={library.sessions.slice(0, 3)}
+              heading={COPY.home.recentHeading}
+              emptyMessage={COPY.sessions.emptyRecent}
+              unreadable={library.unreadable}
+              onOpen={(id) => void onOpenSession(id)}
+              onDelete={(id) => void onDeleteSession(id)}
+              onExport={(id) => void onExportSession(id)}
+            />
+          )}
+        </section>
+      </main>
+    );
+  }
+
+  if (flow.screen === 'sessions') {
+    return (
+      <main>
+        <p className="label">{COPY.common.screenLabels.sessions}</p>
+        <h1>{COPY.sessions.heading}</h1>
+        <StatusRegion status={status} />
+        {library.status === 'idle' || library.status === 'loading' ? (
+          <p className="loading-state">{COPY.common.loading}</p>
+        ) : library.status === 'error' ? (
+          <>
+            <p>{COPY.common.readError}</p>
+            <button type="button" onClick={() => setLibraryNonce((nonce) => nonce + 1)} className="btn btn-secondary">
+              {COPY.common.actions.tryAgain}
+            </button>
+          </>
+        ) : (
+          <SessionList
+            sessions={library.sessions}
+            heading={COPY.common.actions.allSessions}
+            emptyMessage={COPY.sessions.empty}
+            unreadable={library.unreadable}
+            onOpen={(id) => void onOpenSession(id)}
+            onDelete={(id) => void onDeleteSession(id)}
+            onExport={(id) => void onExportSession(id)}
+          />
+        )}
+        <div className="actions">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => dispatch({ type: 'openSetup' })}
+          >
+            {COPY.common.actions.startSession}
+          </button>
+          <button type="button" onClick={() => dispatch({ type: 'openHome' })} className="btn btn-secondary">
+            {COPY.common.actions.backToHome}
+          </button>
+          <button type="button" onClick={() => dispatch({ type: 'openHelp' })} className="btn btn-secondary">
+            {COPY.common.actions.help}
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  if (flow.screen === 'setup') {
+    const previewSlot =
+      flow.consent && setupKey.status === 'present' && preview === 'running' ? (
+        <CameraPreview active guide />
+      ) : null;
+    return (
+      <>
+        <CameraOpenIndicator
+          sensing={false}
+          preview={preview === 'running' || preview === 'starting'}
+        />
+        <main>
+          <SetupScreen
+            consent={flow.consent}
+            keyStatus={setupKey.status}
+            keyDetail={setupKey.detail}
+            framing={framing}
+            framingHint={validation && validation.code !== 0 ? validation.hint : null}
+            preview={preview}
+            previewError={previewError}
+            starting={starting}
+            previewSlot={previewSlot}
+            alert={status.tone === 'error' ? <StatusRegion status={status} /> : null}
+            timeControls={TIME_CONTROLS}
+            timeControl={timeControl}
+            gate={gate}
+            onConsent={() => void onConsent()}
+            onTimeControl={(control) => setTimeControl(control as typeof timeControl)}
+            onStart={() => void onStart()}
+            onRetryPreview={() => setPreviewAttempt((attempt) => attempt + 1)}
+            onBack={() => dispatch({ type: 'openHome' })}
+            onHelp={() => dispatch({ type: 'openHelp' })}
+          />
+        </main>
+      </>
+    );
+  }
+
+  if (flow.screen === 'games') {
+    return (
+      <main>
+        {status.tone === 'error' ? <StatusRegion status={status} /> : null}
         <PasteScreen
-          sessionId={sessionId}
-          initialSlots={pasteSlots.length > 0 ? pasteSlots : undefined}
+          initialSlots={flow.draft.length > 0 ? flow.draft : undefined}
           onBack={(currentSlots) => {
-            setPasteSlots(currentSlots);
-            setPhase('stopped');
+            dispatch({ type: 'pasteChanged', slots: currentSlots });
+            dispatch({ type: 'openStopped' });
           }}
           onContinue={(pgns, validation) => {
             void onPasteContinue(pgns, validation);
           }}
+          onHelp={() => dispatch({ type: 'openHelp' })}
+          onSlotsChange={(slots) => dispatch({ type: 'pasteChanged', slots })}
         />
       </main>
     );
   }
 
-  if (phase === 'report') {
+  if (flow.screen === 'review') {
+    const review = flow.review;
     return (
       <main>
-        <p className="label">ChessPulse · Report</p>
-        {reportBuilding ? (
+        <p className="label">{COPY.common.screenLabels.report}</p>
+        {status.tone === 'error' ? <StatusRegion status={status} /> : null}
+        {review?.building ? (
           <>
-            <h1>Building report.</h1>
-            <p aria-live="polite">Scoring positions locally with Stockfish…</p>
+            <h1>{COPY.review.building}</h1>
+            <ReviewProgress
+              progress={review.progress}
+              cancelling={review.cancelling}
+              onCancel={() => void onCancelReport()}
+            />
           </>
-        ) : reportError ? (
+        ) : review?.error ? (
           <>
-            <h1>Report unavailable.</h1>
-            <div className="refusal-panel" role="alert">
-              <p>{reportError}</p>
+            <h1>{COPY.review.unavailable}</h1>
+            <div className="refusal-panel inline-alert" role="alert">
+              <p>{review.error}</p>
             </div>
           </>
-        ) : reportResult && reportResult.ok ? (
+        ) : review?.result?.ok ? (
           <div className="report-layout">
-            <VerdictLine report={reportResult} />
-            <Timeline key={`ok-${reportResult.sessionId}`} result={reportResult} />
-            <BandBars report={reportResult} />
-            <GameList report={reportResult} />
+            <VerdictLine report={review.result} />
+            <Timeline key={`ok-${review.result.sessionId}`} result={review.result} />
+            <BandBars report={review.result} />
+            <GameList report={review.result} />
             <InsightPanel
               state={insightState}
               onRequest={(provider, text) => void onInsightRequest(provider, text)}
@@ -337,108 +1008,111 @@ export function App() {
           </div>
         ) : (
           <>
-            <h1>{reportResult ? 'Review withheld.' : 'Session timeline.'}</h1>
-            <Timeline key={`refusal-${sessionId ?? ''}`} result={reportResult} />
+            <h1>{review?.result ? COPY.review.withheld : COPY.review.timelineOnly}</h1>
+            {review?.result && !review.result.ok ? (
+              <RefusalPanel refusal={review.result} />
+            ) : null}
+            <Timeline key={`refusal-${sessionId ?? ''}`} result={review?.result ?? null} />
           </>
         )}
         <div className="actions">
-          <button type="button" onClick={() => setPhase('paste')}>
-            Edit pasted PGNs
+          <button type="button" onClick={() => dispatch({ type: 'openGames' })} className="btn btn-secondary">
+            {COPY.review.editGames}
           </button>
-          <button type="button" onClick={() => setPhase('stopped')}>
-            Back to session
+          <button type="button" onClick={() => dispatch({ type: 'openStopped' })} className="btn btn-secondary">
+            {COPY.common.actions.backToSession}
+          </button>
+          <button type="button" onClick={() => dispatch({ type: 'openHome' })} className="btn btn-secondary">
+            {COPY.common.actions.home}
+          </button>
+          <button type="button" onClick={() => dispatch({ type: 'openHelp' })} className="btn btn-secondary">
+            {COPY.common.actions.help}
           </button>
         </div>
       </main>
     );
   }
 
+  const sensing = flow.screen === 'sensing';
   return (
-    <main>
-      <p className="label">ChessPulse</p>
-      <h1>{phase === 'sensing' ? 'Sensing.' : phase === 'stopped' ? 'Sensing stopped.' : 'Sensing has not started.'}</h1>
-      {phase === 'sensing' ? <p className="indicator">Sensing</p> : null}
-      <p aria-live="polite" role={error || sdkError ? 'alert' : undefined}>
-        {status}
-      </p>
-      {granted ? <CameraPreview sensing={phase === 'sensing'} /> : null}
-      <SensingStrip samples={samples} selectedIndex={selectedIndex} onSelect={setSelectedIndex} />
-      {phase === 'sensing' && betweenGames ? <CoachLine message={coachMessage} /> : null}
-      {phase === 'idle' ? (
-        <div className="choices" role="group" aria-label="Time control">
-          {TIME_CONTROLS.map((control) => (
-            <button
-              key={control}
-              type="button"
-              aria-pressed={control === timeControl}
-              onClick={() => setTimeControl(control)}
-            >
-              {control}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      <div className="actions">
-        {phase === 'stopped' ? (
-          <button type="button" className="primary-btn" onClick={() => setPhase('paste')}>
-            Paste PGNs
-          </button>
+    <>
+      <CameraOpenIndicator sensing={sensing} preview={false} />
+      <main>
+        <p className="label">{COPY.common.chessPulse}</p>
+        <h1>{sensing ? COPY.sensing.heading : COPY.sensing.stoppedHeading}</h1>
+        <StatusRegion status={status} />
+        {sensing && flow.consent ? <CameraPreview active /> : null}
+        <SensingStrip samples={samples} selectedIndex={selectedIndex} onSelect={setSelectedIndex} />
+        {sensing && flow.session?.betweenGames ? <CoachLine message={coachMessage} /> : null}
+        {sensing && flow.session ? (
+          <SensingControls
+            elapsedLabel={formatElapsedMs(elapsedMs)}
+            limitWarning={limitWarning(elapsedMs)}
+            qualityLabel={qualityLabel}
+            betweenGames={flow.session.betweenGames}
+            markedGames={flow.session.markedGames}
+            gapPending={gapPending}
+            confirmingStop={confirmingStop}
+            onGap={() => void onGapToggle()}
+            onRequestStop={() => setConfirmingStop(true)}
+            onConfirmStop={() => {
+              setConfirmingStop(false);
+              void onStop();
+            }}
+            onKeepSensing={() => setConfirmingStop(false)}
+          />
         ) : null}
-        {phase === 'sensing' ? (
-          <>
-            <button type="button" disabled={gapPending} onClick={() => void onGapToggle()}>
-              {betweenGames ? 'Next game started' : 'Game ended'}
+        <div className="actions">
+          {!sensing ? (
+            <button type="button" className="btn btn-primary" onClick={() => dispatch({ type: 'openGames' })}>
+              {COPY.sensing.pastePgns}
             </button>
-            <button type="button" onClick={() => void onStop()}>
-              Stop sensing
+          ) : null}
+          {!sensing ? (
+            <button type="button" onClick={() => dispatch({ type: 'openHome' })} className="btn btn-secondary">
+              {COPY.common.actions.home}
             </button>
-          </>
-        ) : (
-          <button type="button" disabled={!granted} onClick={() => void onStart()}>
-            Start sensing
+          ) : null}
+          <button type="button" aria-pressed={flow.consent} onClick={() => void onConsent()} className="btn btn-secondary">
+            {flow.consent ? COPY.setup.revokeCamera : COPY.setup.allowCamera}
           </button>
-        )}
-        <button type="button" aria-pressed={granted} onClick={() => void onConsent()}>
-          {granted ? 'Revoke camera consent' : 'Allow the camera'}
-        </button>
-      </div>
-    </main>
+          <button type="button" onClick={() => dispatch({ type: 'openHelp' })} className="btn btn-secondary">
+            {COPY.common.actions.help}
+          </button>
+        </div>
+      </main>
+    </>
   );
 }
 
-function statusLine(
-  phase: Phase,
-  samples: PulseSample[],
-  note: string,
-  validation: ValidationMessage | null,
-): string {
-  if (phase !== 'sensing') return note;
-  if (validation && validation.code !== 0) return validation.hint;
-  if (samples.length === 0) return 'Waiting for a face.';
-  const latest = samples[samples.length - 1];
-  if (!latest.stable || latest.confidence < CONFIDENCE_FLOOR) {
-    return samples.some((sample) => sample.stable && sample.confidence >= CONFIDENCE_FLOOR)
-      ? 'Low confidence.'
-      : 'Validating.';
-  }
-  return 'Sensing.';
+function reportErrorCopy(kind: 'stale' | 'newer' | 'invalid'): string {
+  if (kind === 'stale') return appErrorInfo('report_stale').message;
+  if (kind === 'newer') return appErrorInfo('report_newer').message;
+  return COPY.errors.reportInvalid;
+}
+
+function StatusRegion({ status }: { status: StatusLine }) {
+  // One node, one priority order. `role="alert"` is not swapped in, because assistive tech does
+  // not reliably re-announce an element whose role changes; the live level carries urgency.
+  return (
+    <p className="status-line" role="status" aria-live={status.urgent ? 'assertive' : 'polite'}>
+      {status.text}
+    </p>
+  );
 }
 
 function stoppedNote(meta: SessionMeta): string {
-  const baseline = meta.baselineBpm === undefined ? 'No baseline.' : `Baseline ${formatNumber(meta.baselineBpm)} bpm.`;
-  const coverage = meta.coverage === undefined ? 'No coverage.' : `Coverage ${formatNumber(meta.coverage.pct)}%.`;
+  const baseline =
+    meta.baselineBpm === undefined
+      ? COPY.errors.noBaseline
+      : COPY.errors.baseline(formatNumber(meta.baselineBpm));
+  const coverage =
+    meta.coverage === undefined
+      ? COPY.errors.noCoverage
+      : COPY.errors.coverage(formatNumber(meta.coverage.pct));
   return `${baseline} ${coverage}`;
 }
 
 function formatNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
-
-/** Electron wraps a rejected invoke in "Error invoking remote method …: Error: ", which is not for the player. */
-function ipcErrorText(caught: unknown, fallback: string): string {
-  if (!(caught instanceof Error)) return fallback;
-  const marker = 'Error: ';
-  const at = caught.message.lastIndexOf(marker);
-  const text = (at >= 0 ? caught.message.slice(at + marker.length) : caught.message).trim();
-  return text.length > 0 && !text.startsWith('Error invoking remote method') ? text : fallback;
 }

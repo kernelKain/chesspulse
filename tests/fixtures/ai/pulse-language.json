@@ -1,0 +1,6 @@
+{
+  "name": "measured pulse language stays allowed",
+  "stats": { "elevatedMinutes": 11, "blunders": 8, "elevatedBlunders": 5 },
+  "response": "Your pulse was elevated for 11 minutes, and 5 of your 8 blunders happened there.",
+  "expected": "accept"
+}

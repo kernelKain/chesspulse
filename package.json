@@ -6,12 +6,22 @@
   "main": "dist-electron/main/index.js",
   "scripts": {
     "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.electron.json && node --test dist-electron/shared/contracts.test.js dist-electron/shared/security.test.js dist-electron/shared/sensing.test.js dist-electron/shared/timeline.test.js dist-electron/shared/preview.test.js dist-electron/main/navigation.test.js dist-electron/main/env.test.js dist-electron/main/log.test.js dist-electron/main/permission.test.js dist-electron/main/store.test.js dist-electron/main/session.test.js dist-electron/main/coach.test.js dist-electron/main/ai/grounding.test.js dist-electron/main/ai/providers.test.js dist-electron/main/ai/service.test.js dist-electron/main/capture-samples.test.js dist-electron/main/analysis/pgn.test.js dist-electron/main/analysis/paste.test.js dist-electron/main/analysis/positions.test.js dist-electron/main/analysis/metrics.test.js dist-electron/main/analysis/align.test.js dist-electron/main/engine.test.js dist-electron/main/report.test.js dist-electron/main/report-lock.test.js scripts/vite-ready.test.mjs",
+    "test": "tsc -p tsconfig.node.json && tsc -p tsconfig.renderer-test.json && node scripts/run-tests.mjs",
+    "test:e2e": "npm run build && node --test scripts/e2e/electron.test.mjs",
+    "test:bash": "npm run build && node --test scripts/e2e/bug-bash.mjs",
+    "test:layout": "npm run build && node --test scripts/e2e/layout.test.mjs",
+    "evidence:collect": "node scripts/evidence/collect.mjs",
+    "evidence:limit-build": "node scripts/evidence/limit-build.mjs",
     "test:consent": "npm run build && electron scripts/consent-bridge.mjs",
-    "build": "tsc -p tsconfig.electron.json && vite build",
+    "build": "tsc -p tsconfig.electron.json && vite build && vite build --config vite.preload.mts",
+    "dist": "npm run build && electron-builder --linux AppImage",
     "dev": "node scripts/dev.mjs",
-    "report": "tsc -p tsconfig.electron.json && node dist-electron/main/report.js",
-    "start": "electron ."
+    "report": "tsc -p tsconfig.node.json && node dist-electron/main/report.js",
+    "doctor": "tsc -p tsconfig.node.json && node dist-electron/main/doctor-cli.js",
+    "bench:depth": "tsc -p tsconfig.node.json && node scripts/engine-depth-bench.mjs",
+    "start": "electron .",
+    "check:contrast": "node scripts/contrast-check.mjs",
+    "check:copy": "node scripts/copy-check.mjs"
   },
   "build": {
     "appId": "local.chesspulse.app",
@@ -21,10 +31,38 @@
     },
     "files": [
       "dist/**",
-      "dist-electron/**"
+      "dist-electron/**",
+      "!node_modules/@smartspectra/node-sdk-*/**",
+      "!node_modules/stockfish/bin/stockfish-19.js",
+      "!node_modules/stockfish/bin/stockfish-19.wasm",
+      "!node_modules/stockfish/bin/stockfish-19-single.js",
+      "!node_modules/stockfish/bin/stockfish-19-single.wasm",
+      "!node_modules/stockfish/bin/stockfish-19-lite.js",
+      "!node_modules/stockfish/bin/stockfish-19-lite.wasm",
+      "!node_modules/stockfish/bin/stockfish-19-asm.js"
     ],
+    "extraResources": [
+      {
+        "from": "node_modules/@smartspectra/node-sdk-linux-x64",
+        "to": "smartspectra",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/koffi/**"
+    ],
+    "artifactName": "ChessPulse-${version}-${arch}.${ext}",
     "linux": {
-      "target": "AppImage",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "category": "Utility"
     }
   },
@@ -37,12 +75,15 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
     "electron": "^45.4.1",
     "electron-builder": "^26.18.0",
+    "jsdom": "^29.1.1",
+    "playwright-core": "^1.65.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.8"
   }

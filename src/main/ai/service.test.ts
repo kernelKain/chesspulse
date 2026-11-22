@@ -1,21 +1,36 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import type { Report } from '../../shared/contracts.js';
+import { REPORT_SCHEMA_VERSION, type Report } from '../../shared/contracts.js';
 import { requestInsight } from './service.js';
 
 const ENV = { CP_AI_KEY: 'test-secret', CP_AI_MODEL: 'test-model' };
 const REQUEST = { sessionId: 's1', provider: 'openai', text: 'Review this session.' };
 const PGN = '[White "Untrusted"]\n1. e4 e5';
+
+function digest(pgns: readonly string[]): string {
+  return createHash('sha256').update(JSON.stringify(pgns), 'utf8').digest('hex');
+}
+
 const REPORT: Report = {
   ok: true,
+  schemaVersion: REPORT_SCHEMA_VERSION,
   sessionId: 's1',
+  gamesDigest: digest([PGN]),
   coveragePct: 80,
   baselineBpm: 70,
   verdict: 'Accuracy 71% settled.',
   settled: { band: 'settled', moves: 5, status: 'ok', accuracy: 71 },
   elevated: { band: 'elevated', moves: 0, status: 'insufficient' },
+  engine: {
+    depth: 12,
+    positions: 0,
+    scored: 0,
+    failed: 0,
+    reasons: { timeout: 0, crash: 0, engine: 0, budget: 0 },
+  },
   alignmentMode: 'endtime',
   toleranceSec: 1,
   games: [],
@@ -56,6 +71,40 @@ describe('requestInsight', () => {
     };
     await assert.rejects(requestInsight(REQUEST, null, [PGN], ENV, { fetch: fetchStub }), /No computed session data/);
     await assert.rejects(requestInsight({ ...REQUEST, text: 'x'.repeat(4001) }, REPORT, [PGN], ENV, { fetch: fetchStub }), /AI reading needs/);
+    assert.equal(calls, 0);
+  });
+
+  it('rejects PGNs that do not match the report digest before calling a provider', async () => {
+    let calls = 0;
+    const report = { ...REPORT, gamesDigest: digest([PGN]) };
+
+    await assert.rejects(
+      requestInsight(REQUEST, report, ['[Event "Different"]\n1. d4 d5'], ENV, {
+        fetch: async () => {
+          calls += 1;
+          return completion();
+        },
+      }),
+      /Build the report again/,
+    );
+    assert.equal(calls, 0);
+  });
+
+  it('treats a report without a games digest as stale and makes no provider call', async () => {
+    let calls = 0;
+    const legacyReport = Object.fromEntries(
+      Object.entries(REPORT).filter(([key]) => key !== 'gamesDigest'),
+    ) as Report;
+
+    await assert.rejects(
+      requestInsight(REQUEST, legacyReport, [PGN], ENV, {
+        fetch: async () => {
+          calls += 1;
+          return completion();
+        },
+      }),
+      /Build the report again/,
+    );
     assert.equal(calls, 0);
   });
 
@@ -150,6 +199,23 @@ describe('requestInsight', () => {
       /introduced a number/,
     );
     assert.equal(groundingCalls, 1);
+  });
+
+  it('surfaces a reasoning-only reply as an explicit error without retrying', async () => {
+    let calls = 0;
+    await assert.rejects(
+      requestInsight(REQUEST, REPORT, [PGN], ENV, {
+        fetch: async () => {
+          calls += 1;
+          return new Response(
+            JSON.stringify({ choices: [{ message: { content: null, reasoning_content: 'thought' } }] }),
+            { status: 200 },
+          );
+        },
+      }),
+      /reasoning but no final answer/,
+    );
+    assert.equal(calls, 1);
   });
 
   it('does not repeat a call whose headers time out', async () => {

@@ -1,11 +1,9 @@
 // What: stores the explicit consent flag and answers the page on one channel.
 // Why: the camera permission handler reads this flag, and the page cannot set it by any other path.
 // Removed: revoking consent would not reach the process that grants the camera.
-import { ipcMain } from 'electron';
-import { consentRequestSchema, consentStateSchema } from '../shared/contracts.js';
+import { consentStateSchema } from '../shared/contracts.js';
+import { registerInvokeChannel } from './ipc-registry.js';
 import { grantsMediaPermission } from './permission.js';
-
-const CONSENT_CHANNEL = 'cp:consent:set';
 
 let consentGranted = false;
 
@@ -24,11 +22,9 @@ export interface ConsentOptions {
 }
 
 export function registerConsentHandler(options: ConsentOptions, hooks: ConsentHooks = {}): void {
-  ipcMain.handle(CONSENT_CHANNEL, (event, payload: unknown) => {
-    const parsed = consentRequestSchema.safeParse(payload);
-    if (!parsed.success) throw new Error('Consent was not a yes or no.');
+  registerInvokeChannel('consentSet', (event, payload) => {
     const wasGranted = consentGranted;
-    consentGranted = parsed.data.granted;
+    consentGranted = payload.granted;
     if (wasGranted && !consentGranted) {
       try {
         hooks.onRevoked?.();

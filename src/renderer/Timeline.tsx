@@ -3,6 +3,7 @@
 // Removed: a player could not see pulse, moves, clocks, and endings aligned on one scale or inspect low-coverage gaps.
 import { useId, useState, type KeyboardEvent } from 'react';
 import type { ReportResult } from '../shared/contracts';
+import { COPY } from './copy';
 import {
   buildGameMiniViews,
   buildTimelineView,
@@ -13,6 +14,7 @@ import {
   sampleReadout,
   sampleStatusText,
   sampleTableRows,
+  spaceEndingLabels,
   thinkTimeRatio,
   timeTicks,
   type GameMiniTimelineView,
@@ -74,10 +76,10 @@ export function Timeline({ result }: { result: ReportResult | null }) {
 
   const readoutText =
     view.samples.length === 0
-      ? 'Nothing recorded yet.'
+      ? COPY.strip.empty
       : activeIndex !== null
         ? sampleReadout(view, activeIndex)
-        : `Focus timeline and use left or right arrow keys to step through ${view.samples.length} samples.`;
+        : COPY.timeline.readoutHint(view.samples.length);
 
   const xOf = (tUs: number): number => {
     if (view.stopUs <= view.startUs) return LEFT;
@@ -102,27 +104,27 @@ export function Timeline({ result }: { result: ReportResult | null }) {
   const hasMiniStack = miniViews.length > 0;
 
   return (
-    <section className={`timeline timeline-${view.state}`} aria-label="Session timeline">
+    <section className={`timeline timeline-${view.state}`} aria-label={COPY.timeline.label}>
       <div className="timeline-header">
         <div className="timeline-header-left">
-          <span className="timeline-title">Timeline</span>
+          <span className="timeline-title">{COPY.timeline.title}</span>
           {view.samples.length > 0 ? (
-            <div className="view-toggle" role="group" aria-label="Timeline view">
+            <div className="view-toggle" role="group" aria-label={COPY.timeline.viewLabel}>
               <button
                 type="button"
-                className="small-btn"
+                className="btn btn-quiet btn-small"
                 aria-pressed={mode === 'chart'}
                 onClick={() => setMode('chart')}
               >
-                Chart
+                {COPY.timeline.chart}
               </button>
               <button
                 type="button"
-                className="small-btn"
+                className="btn btn-quiet btn-small"
                 aria-pressed={mode === 'table'}
                 onClick={() => setMode('table')}
               >
-                Table
+                {COPY.timeline.table}
               </button>
             </div>
           ) : null}
@@ -130,8 +132,31 @@ export function Timeline({ result }: { result: ReportResult | null }) {
         {view.confidenceLabel ? (
           <span className="timeline-confidence">{view.confidenceLabel}</span>
         ) : view.state === 'low_coverage' ? (
-          <span className="timeline-confidence tone-warn">Low coverage · raw trace only</span>
+          <span className="timeline-confidence tone-warn">{COPY.timeline.lowCoverage}</span>
         ) : null}
+      </div>
+
+      <div className="timeline-legend" aria-label={COPY.timeline.legend.label}>
+        <span>
+          <i className="legend-line" aria-hidden="true" />
+          {COPY.timeline.legend.pulse}
+        </span>
+        <span>
+          <i className="legend-cpl" aria-hidden="true" />
+          {COPY.timeline.legend.moveError}
+        </span>
+        <span>
+          <i className="legend-think" aria-hidden="true" />
+          {COPY.timeline.legend.think}
+        </span>
+        <span>
+          <i className="legend-hatch" aria-hidden="true" />
+          {COPY.timeline.legend.elevated}
+        </span>
+        <span>
+          <i className="legend-ending" aria-hidden="true">&#9873;</i>
+          {COPY.timeline.legend.ending}
+        </span>
       </div>
 
       {view.state === 'low_confidence' && view.banner ? (
@@ -150,7 +175,7 @@ export function Timeline({ result }: { result: ReportResult | null }) {
               tabIndex={0}
               role="group"
               aria-roledescription="session timeline"
-              aria-label="Pulse, move error, think time, and game endings"
+              aria-label={COPY.timeline.chartAria}
               aria-describedby={keysHintId}
               onKeyDown={onKeyDown}
               onFocus={() => {
@@ -227,22 +252,22 @@ export function Timeline({ result }: { result: ReportResult | null }) {
                 {readoutText}
               </p>
               {view.samples.length > 0 ? (
-                <div className="readout-controls" role="group" aria-label="Step through samples">
+                <div className="readout-controls" role="group" aria-label={COPY.timeline.stepAria}>
                   <button
                     type="button"
-                    className="small-btn"
+                    className="btn btn-quiet btn-small"
                     disabled={activeIndex !== null && activeIndex <= 0}
                     onClick={() => stepSample(-1)}
                   >
-                    Previous sample
+                    {COPY.timeline.previous}
                   </button>
                   <button
                     type="button"
-                    className="small-btn"
+                    className="btn btn-quiet btn-small"
                     disabled={activeIndex !== null && activeIndex >= view.samples.length - 1}
                     onClick={() => stepSample(1)}
                   >
-                    Next sample
+                    {COPY.timeline.next}
                   </button>
                 </div>
               ) : null}
@@ -250,7 +275,7 @@ export function Timeline({ result }: { result: ReportResult | null }) {
           </div>
 
           {hasMiniStack ? (
-            <div className="timeline-mini-stack" aria-label="Per-game timelines">
+            <div className="timeline-mini-stack" aria-label={COPY.timeline.perGame}>
               {miniViews.map((mini) => (
                 <MiniGameTimeline
                   key={mini.game.index}
@@ -262,18 +287,6 @@ export function Timeline({ result }: { result: ReportResult | null }) {
           ) : null}
         </>
       )}
-
-      {view.refusal ? (
-        <div className="refusal-panel" role="alert">
-          <h2>No report for this session.</h2>
-          {view.refusal.measured !== undefined && view.refusal.threshold !== undefined ? (
-            <p className="refusal-metric">
-              Coverage was {view.refusal.measured}%; a review needs {view.refusal.threshold}%.
-            </p>
-          ) : null}
-          <p>{view.refusal.remedy}</p>
-        </div>
-      ) : null}
     </section>
   );
 }
@@ -292,17 +305,17 @@ function TimelineTables({
       {moveRows.length > 0 ? (
         <div className="table-wrap">
           <table className="data-table">
-            <caption>Moves aligned to the session timeline ({moveRows.length})</caption>
+            <caption>{COPY.timeline.captions.moves(moveRows.length)}</caption>
             <thead>
               <tr>
-                <th scope="col">Game</th>
-                <th scope="col">Time</th>
-                <th scope="col">Move</th>
-                <th scope="col">Pulse</th>
-                <th scope="col">Band</th>
-                <th scope="col">CPL</th>
-                <th scope="col">Think</th>
-                <th scope="col">Note</th>
+                <th scope="col">{COPY.timeline.headers.game}</th>
+                <th scope="col">{COPY.timeline.headers.time}</th>
+                <th scope="col">{COPY.timeline.headers.move}</th>
+                <th scope="col">{COPY.timeline.headers.pulse}</th>
+                <th scope="col">{COPY.timeline.headers.band}</th>
+                <th scope="col">{COPY.timeline.headers.cpl}</th>
+                <th scope="col">{COPY.timeline.headers.think}</th>
+                <th scope="col">{COPY.timeline.headers.note}</th>
               </tr>
             </thead>
             <tbody>
@@ -327,16 +340,16 @@ function TimelineTables({
         <table className="data-table">
           <caption>
             {view.state === 'low_coverage'
-              ? `Raw pulse samples (${sampleRows.length}, bands withheld)`
-              : `Pulse samples (${sampleRows.length})`}
+              ? COPY.timeline.captions.rawSamples(sampleRows.length)
+              : COPY.timeline.captions.samples(sampleRows.length)}
           </caption>
           <thead>
             <tr>
-              <th scope="col">Time</th>
-              <th scope="col">Pulse</th>
-              <th scope="col">Confidence</th>
-              <th scope="col">Band / status</th>
-              <th scope="col">Gap before</th>
+              <th scope="col">{COPY.timeline.headers.time}</th>
+              <th scope="col">{COPY.timeline.headers.pulse}</th>
+              <th scope="col">{COPY.timeline.headers.confidence}</th>
+              <th scope="col">{COPY.timeline.headers.bandStatus}</th>
+              <th scope="col">{COPY.timeline.headers.gap}</th>
             </tr>
           </thead>
           <tbody>
@@ -364,7 +377,7 @@ function EmptySvg() {
         0:00
       </text>
       <text className="empty-caption" x={LEFT} y={(PULSE_TOP + PULSE_BOTTOM) / 2}>
-        Nothing recorded yet.
+        {COPY.strip.empty}
       </text>
     </g>
   );
@@ -425,7 +438,7 @@ function ElevatedZone({
       ) : null}
       <line className="threshold-line" x1={LEFT} y1={y} x2={LEFT + PLOT_W} y2={y} />
       <text className="threshold-label" x={LEFT + PLOT_W} y={Math.max(PULSE_TOP + 10, y - 5)} textAnchor="end">
-        Elevated ≥ {formatBpm(thresholdBpm)} bpm
+        {COPY.timeline.elevated(formatBpm(thresholdBpm))}
       </text>
     </g>
   );
@@ -443,7 +456,7 @@ function BaselineHairline({
     <g className="baseline-guide">
       <line className="baseline-line" x1={LEFT} y1={y} x2={LEFT + PLOT_W} y2={y} />
       <text className="baseline-label" x={LEFT + 4} y={Math.min(PULSE_BOTTOM - 4, y + 13)}>
-        Baseline {formatBpm(baselineBpm)} bpm
+        {COPY.timeline.baseline(formatBpm(baselineBpm))}
       </text>
     </g>
   );
@@ -470,16 +483,16 @@ function RailGuides({
         </g>
       ))}
       <text className="rail-label" x={LEFT - 8} y={PULSE_TOP - 10} textAnchor="end">
-        bpm
+        {COPY.timeline.axes.pulse}
       </text>
       {showChessRails ? (
         <>
           <text className="rail-label" x={LEFT - 8} y={THINK_TOP + 14} textAnchor="end">
-            think
+            {COPY.timeline.axes.think}
           </text>
           <line className="rail-sep" x1={LEFT} y1={THINK_BOTTOM + 4} x2={LEFT + PLOT_W} y2={THINK_BOTTOM + 4} />
           <text className="rail-label" x={LEFT - 8} y={CPL_BOTTOM - 2} textAnchor="end">
-            CPL
+            {COPY.timeline.axes.cpl}
           </text>
           <line className="rail-sep" x1={LEFT} y1={CPL_BOTTOM} x2={LEFT + PLOT_W} y2={CPL_BOTTOM} />
         </>
@@ -495,11 +508,24 @@ function EndingRail({
   view: TimelineViewModel;
   xOf: (tUs: number) => number;
 }) {
+  const positions = view.games.map((game) => ({
+    game,
+    mark: endingMark(game.ending),
+    raw: Math.min(LEFT + PLOT_W - 14, Math.max(LEFT + 14, xOf(game.endUs))),
+  }));
+  const ordered = [...positions].sort((left, right) => left.raw - right.raw);
+  const placed = spaceEndingLabels(
+    ordered.map((position) => position.raw),
+    LEFT + 14,
+    LEFT + PLOT_W - 14,
+  );
+  ordered.forEach((position, index) => {
+    position.raw = placed[index];
+  });
   return (
     <g className="ending-rail">
-      {view.games.map((game) => {
-        const mark = endingMark(game.ending);
-        const x = Math.min(LEFT + PLOT_W - 14, Math.max(LEFT + 14, xOf(game.endUs)));
+      {ordered.map(({ game, mark, raw }) => {
+        const x = raw;
         const anchor = x > LEFT + PLOT_W - 96 ? 'end' : 'middle';
         return (
           <g key={game.index} className="ending-mark">
@@ -563,7 +589,7 @@ function CplRail({
       {view.moves.map((move) => {
         if (move.tUs === null) return null;
         const x = xOf(move.tUs);
-        if (move.cpl === null) {
+        if (!move.scored) {
           return (
             <circle
               key={`${move.gameIndex}-${move.moveIndex}`}
@@ -578,12 +604,28 @@ function CplRail({
             </circle>
           );
         }
-        const height = Math.max(3, cplBarRatio(move.cpl) * maxH);
+        if (move.mate) {
+          return (
+            <circle
+              key={`${move.gameIndex}-${move.moveIndex}`}
+              className="cpl-mate"
+              cx={x}
+              cy={CPL_BOTTOM - 5}
+              r={3}
+            >
+              <title>
+                G{move.gameIndex + 1} · {move.san} · mate
+                {move.blunder ? ' (blunder)' : ''}
+              </title>
+            </circle>
+          );
+        }
+        const height = Math.max(3, cplBarRatio(move.cpl ?? 0) * maxH);
         const topY = CPL_BOTTOM - height;
         return (
           <g key={`${move.gameIndex}-${move.moveIndex}`}>
             <title>
-              G{move.gameIndex + 1} · {move.san} · {Math.round(move.cpl)} cpl
+              G{move.gameIndex + 1} · {move.san} · {Math.round(move.cpl ?? 0)} cpl
               {move.blunder ? ' (blunder)' : ''}
             </title>
             <line
@@ -747,15 +789,15 @@ function MiniGameTimeline({
 
   const players =
     mini.game.white || mini.game.black
-      ? `${mini.game.white || 'Unknown'} vs ${mini.game.black || 'Unknown'}`
-      : 'Players unnamed';
+      ? `${mini.game.white || COPY.timeline.mini.unknown} vs ${mini.game.black || COPY.timeline.mini.unknown}`
+      : COPY.timeline.mini.unnamed;
   const currentSample = active !== null ? mini.samples[active] : undefined;
   const readout =
     mini.samples.length === 0
-      ? 'No pulse samples during this game.'
+      ? COPY.timeline.mini.noSamples
       : currentSample
         ? `${formatElapsed(currentSample.tUs, sessionStartUs)} · ${formatBpm(currentSample.bpm)} bpm · ${sampleStatusText(currentSample, mini.elevatedThresholdBpm)}`
-        : `${mini.samples.length} samples · use arrow keys to step`;
+        : COPY.timeline.mini.samples(mini.samples.length);
 
   return (
     <article className="mini-card">
@@ -771,7 +813,7 @@ function MiniGameTimeline({
         className="timeline-frame mini-frame"
         tabIndex={0}
         role="group"
-        aria-label={`Game ${mini.game.index + 1} timeline`}
+        aria-label={COPY.timeline.gameTimeline(mini.game.index)}
         onKeyDown={onKey}
         onFocus={() => {
           if (selected === null && mini.samples.length > 0) setSelected(0);
@@ -839,8 +881,11 @@ function MiniGameTimeline({
           {mini.moves.map((move) => {
             if (move.tUs === null) return null;
             const x = xOf(move.tUs);
-            if (move.cpl === null) {
+            if (!move.scored) {
               return <circle key={`mc-${move.moveIndex}`} className="cpl-unscored" cx={x} cy={MINI_CPL_BOTTOM - 2} r={1.5} />;
+            }
+            if (move.mate) {
+              return <circle key={`mc-${move.moveIndex}`} className="cpl-mate" cx={x} cy={MINI_CPL_BOTTOM - 5} r={2.5} />;
             }
             const h = Math.max(3, cplBarRatio(move.cpl) * (MINI_CPL_BOTTOM - MINI_CPL_TOP));
             return (

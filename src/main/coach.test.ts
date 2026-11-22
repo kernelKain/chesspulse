@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { PulseSample } from '../shared/contracts.js';
-import { BetweenGamesCoach } from './coach.js';
+import { BetweenGamesCoach, COACH_RECENT_WINDOW_US } from './coach.js';
+import { baselineFromSamples } from './session.js';
 
 const START_US = 1_000_000;
 
@@ -14,6 +15,19 @@ function restingMinute(): PulseSample[] {
 }
 
 describe('BetweenGamesCoach', () => {
+  it('counts each transition into the gap and not repeats', () => {
+    const coach = new BetweenGamesCoach(START_US);
+    assert.equal(coach.markedGameCount, 0);
+    coach.setBetweenGames(true);
+    assert.equal(coach.markedGameCount, 1);
+    coach.setBetweenGames(true);
+    assert.equal(coach.markedGameCount, 1);
+    coach.setBetweenGames(false);
+    assert.equal(coach.markedGameCount, 1);
+    coach.setBetweenGames(true);
+    assert.equal(coach.markedGameCount, 2);
+  });
+
   it('stays silent during a game and until the first baseline minute is complete', () => {
     const coach = new BetweenGamesCoach(START_US);
     assert.equal(coach.ingest([...restingMinute(), sample(61_000_000, 90)]), null);
@@ -76,5 +90,57 @@ describe('BetweenGamesCoach', () => {
     coach.setBetweenGames(false);
     assert.notEqual(coach.setBetweenGames(true), null);
     assert.equal(coach.ingest([sample(64_000_000, 92)]), null);
+  });
+
+  it('computes the baseline once when the first minute completes', () => {
+    let calls = 0;
+    const coach = new BetweenGamesCoach(START_US, (samples, startUs) => {
+      calls += 1;
+      return baselineFromSamples(samples, startUs);
+    });
+
+    coach.ingest(restingMinute());
+    assert.equal(calls, 0);
+    coach.ingest([sample(61_000_000, 90)]);
+    assert.equal(calls, 1);
+    coach.ingest([sample(62_000_000, 95)]);
+    coach.setBetweenGames(true);
+    coach.ingest([sample(63_000_000, 95)]);
+    assert.equal(calls, 1);
+  });
+
+  it('keeps the retained window bounded across a long synthetic session', () => {
+    const coach = new BetweenGamesCoach(START_US);
+    const samplesPerMinute = 60;
+    for (let minute = 0; minute < 120; minute += 1) {
+      const batch = Array.from({ length: samplesPerMinute }, (_unused, second) =>
+        sample((minute * samplesPerMinute + second) * 1_000_000, 70),
+      );
+      coach.ingest(batch);
+      assert.ok(
+        coach.retainedSampleCount <= 601,
+        `retained ${coach.retainedSampleCount} samples after minute ${minute}`,
+      );
+    }
+    assert.ok(
+      coach.retainedSampleCount <= COACH_RECENT_WINDOW_US / 1_000_000 + 1,
+      `retained ${coach.retainedSampleCount} samples`,
+    );
+  });
+
+  it('keeps the computed baseline after the baseline minute leaves the window', () => {
+    const coach = new BetweenGamesCoach(START_US);
+    coach.ingest(restingMinute());
+    for (let minute = 1; minute <= 20; minute += 1) {
+      coach.ingest([sample(minute * 60_000_000, 70)]);
+    }
+    coach.setBetweenGames(true);
+    const message = coach.ingest(
+      Array.from({ length: 60 }, (_unused, second) =>
+        sample(20 * 60_000_000 + (second + 1) * 1_000_000, 90),
+      ),
+    );
+    assert.equal(message?.baselineBpm, 70);
+    assert.equal(message?.recentBpm, 90);
   });
 });

@@ -1,0 +1,50 @@
+// What: a test-only TypeScript project for renderer markup and DOM interaction checks.
+// Why: markup tests use `react-dom/server`; S57 added jsdom for focus, keyboard, and click behaviour.
+// Removed: those checks would stay code-reviewed only.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "jsx": "react-jsx",
+    "strict": true,
+    "outDir": "dist-renderer-test",
+    "rootDir": "src",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "useUnknownInCatchVariables": true
+  },
+  "include": [
+    "src/renderer/Explainer.tsx",
+    "src/renderer/Explainer.test.ts",
+    "src/renderer/SetupScreen.tsx",
+    "src/renderer/SetupScreen.test.ts",
+    "src/renderer/SensingControls.tsx",
+    "src/renderer/SensingControls.test.ts",
+    "src/renderer/SensingControls.dom.test.tsx",
+    "src/renderer/SessionList.dom.test.tsx",
+    "src/renderer/KeyboardHelp.tsx",
+    "src/renderer/KeyboardHelp.dom.test.tsx",
+    "src/renderer/Timeline.tsx",
+    "src/renderer/Timeline.dom.test.tsx",
+    "src/renderer/dom-harness.ts",
+    "src/renderer/CameraOpenIndicator.tsx",
+    "src/renderer/CameraOpenIndicator.test.ts",
+    "src/renderer/SessionList.tsx",
+    "src/renderer/SessionList.test.ts",
+    "src/renderer/PasteValidation.tsx",
+    "src/renderer/PasteValidation.test.ts",
+    "src/renderer/RefusalPanel.tsx",
+    "src/renderer/RefusalPanel.test.ts",
+    "src/renderer/ReviewProgress.tsx",
+    "src/renderer/ReviewProgress.test.ts",
+    "src/renderer/VerdictLine.tsx",
+    "src/renderer/VerdictLine.test.ts",
+    "src/shared/onboarding.ts"
+  ]
+}

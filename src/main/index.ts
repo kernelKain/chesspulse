@@ -1,57 +1,72 @@
 // What: the Electron main process. It opens one local window and owns the camera, never the page.
 // Why: the SmartSpectra key and native runtime stay here, so the page receives only numbers.
 // Removed: the renderer would have no desktop process to attach to, and no way to sense.
+// The native override must be the first import: the SDK loads its shared library at import time.
+import './native-runtime.js';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { app, BrowserWindow, session } from 'electron';
 import {
-  coachGapRequestSchema,
   coachMessageSchema,
+  consentStateSchema,
   previewFrameSchema,
+  previewStartResultSchema,
+  previewStopResultSchema,
   sampleBatchSchema,
   sdkErrorSchema,
-  sessionStartRequestSchema,
   sessionStartResultSchema,
-  sessionStopRequestSchema,
+  sessionStartedSchema,
   validationMessageSchema,
   type PreviewFrame,
   type SdkError,
+  type SessionEndReason,
   type SessionMeta,
   type ValidationMessage,
 } from '../shared/contracts.js';
+import { EVENT_CHANNELS } from '../shared/channels.js';
 import { contentSecurityPolicy } from '../shared/security.js';
+import { AppError, toAppError } from '../shared/errors.js';
 import { allowsNavigation } from './navigation.js';
+import { readAppState } from './app-state.js';
 import { startCapture, type CaptureSession } from './capture.js';
 import { BetweenGamesCoach } from './coach.js';
 import { currentConsent, registerConsentHandler } from './consent.js';
-import { loadEnvFile, readSensingKey } from './env.js';
-import { installSafeConsole, log, logError } from './log.js';
+import { loadEnvCandidates, readSensingKey } from './env.js';
+import { installFileLog, installSafeConsole, log, logError } from './log.js';
+import { registerDiagnosticsHandler } from './diagnostics-ipc.js';
+import { runDoctor } from './doctor.js';
 import { registerInsightHandler } from './insight-ipc.js';
+import { registerInvokeChannel } from './ipc-registry.js';
+import { configureIpcSender } from './ipc-sender.js';
+import { registerLibraryHandler } from './library-ipc.js';
 import { registerPasteHandler } from './paste.js';
+import { createPreviewController } from './preview.js';
 import { registerReportHandler } from './report-ipc.js';
+import { registerSetupHandler } from './setup-ipc.js';
 import { grantsMediaPermission } from './permission.js';
 import {
+  activeSessionState,
+  hasActiveSession,
   ingestSamples,
+  isActiveSession,
   recoverInterruptedSessions,
   setSampleSink,
   startSession,
   stopSession,
+  type SessionStopReason,
 } from './session.js';
+import { createSessionStopper } from './session-stop.js';
+import { createShutdownHooks } from './shutdown.js';
 import { defaultDataRoot } from './store.js';
-
-const SESSION_START_CHANNEL = 'cp:session:start';
-const SESSION_STOP_CHANNEL = 'cp:session:stop';
-const SAMPLE_CHANNEL = 'cp:sample:batch';
-const VALIDATION_CHANNEL = 'cp:validation';
-const SDK_ERROR_CHANNEL = 'cp:sdk:error';
-const PREVIEW_CHANNEL = 'cp:preview';
-const COACH_GAP_CHANNEL = 'cp:coach:gap';
-const COACH_MESSAGE_CHANNEL = 'cp:coach:message';
 
 let capture: CaptureSession | null = null;
 let coach: BetweenGamesCoach | null = null;
+/** One camera preview outside a session. Samples are discarded; only frames and hints are published. */
+const preview = createPreviewController(startCapture);
 /** One stop at a time. Every caller shares this promise, so the session is finalized exactly once. */
 let stoppingSession: Promise<SessionMeta> | null = null;
+/** True from admission until the start flow settles; preview must not take the reserved camera. */
+let sessionStarting = false;
 
 function rendererDevOrigin(): string | undefined {
   const devUrl = process.env.CHESSPULSE_RENDERER_URL;
@@ -67,16 +82,20 @@ function rendererDevOrigin(): string | undefined {
 function publishToWindows(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (win.isDestroyed()) continue;
-    win.webContents.send(channel, payload);
+    try {
+      win.webContents.send(channel, payload);
+    } catch {
+      // The window closed between the check and the send. Nothing else consumes this event.
+    }
   }
 }
 
 function publishSamples(samples: readonly unknown[]): void {
   const parsed = sampleBatchSchema.parse(samples);
-  publishToWindows(SAMPLE_CHANNEL, parsed);
+  publishToWindows(EVENT_CHANNELS.samples, parsed);
   // Only batches already committed to the session file can trigger the coach.
   const message = coach?.ingest(parsed);
-  if (message) publishToWindows(COACH_MESSAGE_CHANNEL, coachMessageSchema.parse(message));
+  if (message) publishToWindows(EVENT_CHANNELS.coachMessage, coachMessageSchema.parse(message));
 }
 
 let lastValidationCode: number | null = null;
@@ -87,50 +106,75 @@ function publishValidation(message: ValidationMessage): void {
     lastValidationCode = parsed.code;
     log(`[chesspulse] sensing hint ${parsed.code}: ${parsed.hint}`);
   }
-  publishToWindows(VALIDATION_CHANNEL, parsed);
+  publishToWindows(EVENT_CHANNELS.validation, parsed);
 }
 
 function publishPreview(frame: PreviewFrame): void {
-  publishToWindows(PREVIEW_CHANNEL, previewFrameSchema.parse(frame));
+  publishToWindows(EVENT_CHANNELS.preview, previewFrameSchema.parse(frame));
 }
 
 function publishSdkError(error: SdkError): void {
   const parsed = sdkErrorSchema.parse(error);
   // The page shows this; the terminal keeps the code so a failure can be diagnosed after the fact.
   logError(`[chesspulse] sensing error ${parsed.code}: ${parsed.message} (retryable=${parsed.retryable})`);
-  publishToWindows(SDK_ERROR_CHANNEL, parsed);
+  publishToWindows(EVENT_CHANNELS.sdkError, parsed);
 }
 
 /** The camera is released before the session closes, so the last batch still has a session to land in. */
-async function stopCapture(): Promise<void> {
+async function stopCapture(): Promise<SessionEndReason | undefined> {
   const current = capture;
   capture = null;
   coach = null;
   lastValidationCode = null;
-  if (!current) return;
+  if (!current) return undefined;
   try {
-    await current.stop();
+    return await current.stop();
   } catch {
     // Best effort. Samples already written stay valid; crash recovery closes the header.
+    return undefined;
   }
 }
+
+const sessionStopper = createSessionStopper({
+  stopCapture,
+  stopSession: (reason) => stopSession(defaultDataRoot(), currentAnchor(), reason),
+  publish: (event) => publishToWindows(EVENT_CHANNELS.sessionEnded, event),
+});
 
 /**
  * Releases the camera, then closes the header. The page, consent withdrawal, the window closing
  * and quitting all share one promise: nobody proceeds while the native teardown is still draining,
  * and the session is never finalized twice.
  */
-function stopEverything(reason: 'user' | 'sdkError'): Promise<SessionMeta> {
+function hasAnythingToStop(): boolean {
+  return (
+    hasActiveSession(defaultDataRoot()) ||
+    capture !== null ||
+    stoppingSession !== null ||
+    sessionStarting ||
+    sessionStopper.active()
+  );
+}
+
+function stopEverything(reason: SessionStopReason): Promise<SessionMeta> {
   if (stoppingSession) return stoppingSession;
-  const run = (async () => {
-    await stopCapture();
-    return stopSession(defaultDataRoot(), currentAnchor(), reason);
-  })();
+  const run = sessionStopper.stop(reason);
   stoppingSession = run.finally(() => {
     stoppingSession = null;
   });
   return stoppingSession;
 }
+
+const shutdownHooks = createShutdownHooks({
+  stop: async () => {
+    // A preview-only quit still has to release the camera before the window closes.
+    await preview.stop();
+    if (!hasAnythingToStop()) return;
+    return stopEverything('user');
+  },
+  hasActive: () => capture !== null || stoppingSession !== null || preview.active() || sessionStarting,
+  quit: () => app.quit(),
+});
 
 function appFileUrl(): string {
   return pathToFileURL(path.join(__dirname, '../../dist/index.html')).href;
@@ -141,24 +185,118 @@ function currentAnchor(): { monoUs: number; epochMs: number } {
 }
 
 function registerSessionHandlers(): void {
-  ipcMain.handle(SESSION_START_CHANNEL, async (_event, payload: unknown) => {
-    if (!currentConsent()) throw new Error('The camera stays off until you consent.');
-    const parsed = sessionStartRequestSchema.safeParse(payload);
-    if (!parsed.success) throw new Error('Choose a time control before starting.');
-    if (capture) throw new Error('A session is already running.');
+  registerInvokeChannel('appStateGet', (event) => {
+    const granted = currentConsent();
+    return readAppState({
+      consent: () =>
+        consentStateSchema.parse({
+          granted,
+          cameraAllowed: grantsMediaPermission({
+            permission: 'media',
+            requestingUrl: event.senderFrame?.url,
+            appFileUrl: appFileUrl(),
+            devOrigin: rendererDevOrigin(),
+            consentGranted: granted,
+            isMainFrame: true,
+            mediaTypes: ['video'],
+          }),
+        }),
+      session: () => ({
+        ...activeSessionState(defaultDataRoot()),
+        betweenGames: coach?.isBetweenGames ?? false,
+        markedGames: coach?.markedGameCount ?? 0,
+      }),
+    });
+  });
+  registerInvokeChannel('previewStart', async () => {
+    if (!currentConsent()) throw new AppError('consent_required');
+    if (capture || sessionStarting || hasActiveSession(defaultDataRoot())) {
+      throw new AppError('session_busy');
+    }
+    const apiKey = readSensingKey(process.env);
+    if (!apiKey) throw new AppError('key_missing');
+    lastValidationCode = null;
+    try {
+      await preview.start(
+        {
+          apiKey,
+          anchor: currentAnchor(),
+          events: {
+            // Framing only: preview samples never enter a session or the store.
+            onSamples: () => undefined,
+            onValidation: publishValidation,
+            onError: (error) => {
+              publishSdkError(error);
+              if (!error.retryable) void preview.stop().catch(() => undefined);
+            },
+            onPreview: publishPreview,
+            onEnded: () => undefined,
+          },
+        },
+        () => {
+          // Runs inside the serialized controller, immediately before native capture is created.
+          if (!currentConsent()) throw new AppError('consent_required');
+          if (capture || sessionStarting) throw new AppError('session_busy');
+        },
+      );
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError('camera_unavailable', { cause: error });
+    }
+    return previewStartResultSchema.parse({ started: true });
+  });
+  registerInvokeChannel('previewStop', async () => {
+    try {
+      await preview.stop();
+    } catch (error) {
+      throw new AppError('camera_unavailable', { cause: error });
+    }
+    return previewStopResultSchema.parse({ stopped: true });
+  });
+  async function startSessionFlow(payload: { timeControl: string }): Promise<unknown> {
+    if (!currentConsent()) throw new AppError('consent_required');
+    if (capture) throw new AppError('session_busy');
+    shutdownHooks.beginStart();
+    // The preview and the session cannot own the native camera at the same time.
+    try {
+      await preview.stop();
+    } catch (error) {
+      throw new AppError('camera_unavailable', { cause: error });
+    }
     // A previous stop may still be draining the camera; the SDK is process-global.
     if (stoppingSession) await stoppingSession.catch(() => undefined);
+    if (!shutdownHooks.captureAllowed()) throw new AppError('session_failed');
     const apiKey = readSensingKey(process.env);
-    if (!apiKey) throw new Error('The SmartSpectra key is missing. Add SMARTSPECTRA_API_KEY to .env.');
+    if (!apiKey) throw new AppError('key_missing');
     const anchor = currentAnchor();
     lastValidationCode = null;
-    const meta = await startSession(defaultDataRoot(), anchor, parsed.data.timeControl);
+    if (!hasActiveSession(defaultDataRoot())) sessionStopper.beginSession();
+    const meta = await startSession(defaultDataRoot(), anchor, payload.timeControl, {
+      onLimit: () => {
+        void stopEverything('limit').catch((error: unknown) => {
+          // The session is already in 'stopping', so it cannot accept over-limit samples; the
+          // failure is still recorded so a stop can be retried with the cause visible.
+          logError(
+            `[chesspulse] limit stop failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+          );
+        });
+      },
+    });
+    if (!shutdownHooks.captureAllowed()) {
+      await stopEverything('user').catch(() => undefined);
+      throw new AppError('session_failed');
+    }
+    // A stop can finalize this session while startSession is still awaiting work. If a newer
+    // session is active instead, never stop it and never open capture against A's anchor.
+    if (stoppingSession || !isActiveSession(defaultDataRoot(), meta.id)) {
+      throw new AppError('session_failed');
+    }
     coach = new BetweenGamesCoach(meta.startAnchor.monoUs);
     // Consent can be withdrawn while the header is written. Checked again immediately before the
     // camera opens, with no await in between, so a revocation cannot slip through.
     if (!currentConsent()) {
       await stopEverything('user').catch(() => undefined);
-      throw new Error('The camera stays off until you consent.');
+      throw new AppError('consent_required');
     }
     try {
       capture = startCapture({
@@ -169,26 +307,53 @@ function registerSessionHandlers(): void {
           onValidation: publishValidation,
           onError: publishSdkError,
           onPreview: publishPreview,
+          onEnded: (reason) => {
+            if (reason === 'storage') {
+              void stopEverything('storage').catch((error: unknown) => {
+                logError(
+                  `[chesspulse] storage stop failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+                );
+              });
+            }
+          },
         },
       });
     } catch (error) {
       await stopEverything('sdkError').catch(() => undefined);
-      throw error;
+      throw new AppError('camera_unavailable', { cause: error });
     }
-    return sessionStartResultSchema.parse({ sessionId: meta.id });
+    // Published after capture is open. A page that reloaded during the start invoke can adopt it.
+    publishToWindows(
+      EVENT_CHANNELS.sessionStarted,
+      sessionStartedSchema.parse({ sessionId: meta.id, startedAtEpochMs: meta.startedAtEpochMs }),
+    );
+    return sessionStartResultSchema.parse({
+      sessionId: meta.id,
+      startedAtEpochMs: meta.startedAtEpochMs,
+    });
+  }
+
+  registerInvokeChannel('sessionStart', async (_event, payload) => {
+    if (sessionStarting) throw new AppError('session_busy');
+    sessionStarting = true;
+    try {
+      return await startSessionFlow(payload);
+    } finally {
+      sessionStarting = false;
+    }
   });
-  ipcMain.handle(SESSION_STOP_CHANNEL, async (_event, payload: unknown) => {
-    const parsed = sessionStopRequestSchema.safeParse(payload ?? {});
-    if (!parsed.success) throw new Error('Stop does not take any details.');
-    return stopEverything('user');
+  registerInvokeChannel('sessionStop', async () => {
+    // A stop wins over a start that is still waiting on preview release.
+    shutdownHooks.cancelStart();
+    return stopEverything('user').catch((error: unknown) => {
+      throw toAppError(error, 'session_failed');
+    });
   });
-  ipcMain.handle(COACH_GAP_CHANNEL, (_event, payload: unknown) => {
-    const parsed = coachGapRequestSchema.safeParse(payload);
-    if (!parsed.success) throw new Error('Mark the game boundary as either between games or playing.');
-    if (!coach) throw new Error('Start sensing before marking a game boundary.');
-    const message = coach.setBetweenGames(parsed.data.betweenGames);
-    if (message) publishToWindows(COACH_MESSAGE_CHANNEL, coachMessageSchema.parse(message));
-    return parsed.data;
+  registerInvokeChannel('coachGap', (_event, payload) => {
+    if (!coach) throw new AppError('session_not_running');
+    const message = coach.setBetweenGames(payload.betweenGames);
+    if (message) publishToWindows(EVENT_CHANNELS.coachMessage, coachMessageSchema.parse(message));
+    return payload;
   });
 }
 
@@ -286,23 +451,40 @@ function createWindow(): void {
 installSafeConsole();
 
 app.whenReady().then(async () => {
-  const env = loadEnvFile(path.join(app.getAppPath(), '.env'), process.env);
+  const besideExecutable = process.env.APPIMAGE
+    ? path.dirname(process.env.APPIMAGE)
+    : path.dirname(app.getPath('exe'));
+  const env = loadEnvCandidates(
+    [
+      process.env.CHESSPULSE_ENV_FILE ?? '',
+      app.isPackaged ? path.join(besideExecutable, '.env') : path.join(app.getAppPath(), '.env'),
+      app.isPackaged ? path.join(app.getPath('userData'), '.env') : '',
+    ],
+    process.env,
+  );
+  installFileLog({ root: defaultDataRoot(), env: process.env });
+  log('[chesspulse] application ready');
   if (env.found && env.loadedKeys.length > 0) {
     log(`[chesspulse] loaded ${env.loadedKeys.length} setting(s) from .env`);
   }
   installSessionGuards();
+  configureIpcSender({ appFileUrl: appFileUrl(), devOrigin: rendererDevOrigin() });
   registerConsentHandler(
     { appFileUrl: appFileUrl(), devOrigin: rendererDevOrigin() },
     {
-      onRevoked: () => {
-        void stopEverything('user').catch(() => undefined);
-      },
+      onRevoked: shutdownHooks.onConsentRevoked,
     },
   );
   registerSessionHandlers();
   registerPasteHandler();
   registerReportHandler();
   registerInsightHandler();
+  registerLibraryHandler(defaultDataRoot);
+  registerDiagnosticsHandler(defaultDataRoot, {
+    doctorLines: async () =>
+      (await runDoctor({ env: process.env, envFile: env, dataRoot: defaultDataRoot() })).lines,
+  });
+  registerSetupHandler({ env: process.env, envFile: env, dataRoot: defaultDataRoot() });
   setSampleSink(defaultDataRoot(), publishSamples);
   try {
     const recovery = await recoverInterruptedSessions(defaultDataRoot());
@@ -318,20 +500,12 @@ app.whenReady().then(async () => {
   });
 });
 
-let quitting = false;
-
 app.on('before-quit', (event) => {
-  if (quitting) return;
-  if (!capture && !stoppingSession) return;
-  event.preventDefault();
-  quitting = true;
-  void stopEverything('user')
-    .catch(() => undefined)
-    .finally(() => app.quit());
+  shutdownHooks.onBeforeQuit(event);
 });
 
 app.on('window-all-closed', () => {
   // Closing the last window ends the session, on every platform. Quitting then waits for it.
-  void stopEverything('user').catch(() => undefined);
+  shutdownHooks.onWindowAllClosed();
   if (process.platform !== 'darwin') app.quit();
 });
