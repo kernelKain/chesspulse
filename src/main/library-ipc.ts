@@ -16,7 +16,7 @@ import { withReportExclusion } from './report-lock.js';
 import { exportResult, writeReportExport } from './report-export.js';
 import { activeSessionState } from './session.js';
 import { listSessionSummaries, openStoredSession } from './session-library.js';
-import { defaultDataRoot, deleteSession, readReport } from './store.js';
+import { defaultDataRoot, deleteSession, digestGames, readGames, readReport } from './store.js';
 
 export function registerLibraryHandler(dataRoot: () => string = defaultDataRoot): void {
   registerInvokeChannel('sessionsList', async () =>
@@ -39,7 +39,14 @@ export function registerLibraryHandler(dataRoot: () => string = defaultDataRoot)
   });
 
   registerInvokeChannel('reportExport', async (_event, payload) => {
-    const report = await readReport(dataRoot(), payload.sessionId).catch((error: unknown) => {
+    const report = await withReportExclusion(async () => {
+      const current = await readReport(dataRoot(), payload.sessionId);
+      const games = await readGames(dataRoot(), payload.sessionId).catch(() => null);
+      if (games !== null && digestGames(games) !== current.gamesDigest) {
+        throw new AppError('report_stale');
+      }
+      return current;
+    }).catch((error: unknown) => {
       throw reportAppError(error);
     });
     const choice = await dialog.showSaveDialog({

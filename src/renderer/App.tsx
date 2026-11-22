@@ -117,6 +117,10 @@ export function App() {
   const supersededSessions = useRef<Set<string>>(new Set());
   const screenRef = useRef(flow.screen);
   const librarySeq = useRef(0);
+  const openSessionSeq = useRef(0);
+  const stoppedSessionRef = useRef<string | null>(null);
+  const hydrationSeq = useRef(0);
+  const consentQueue = useRef<Promise<void>>(Promise.resolve());
 
   function resetInsight(): void {
     insightRequestSeq.current += 1;
@@ -133,6 +137,8 @@ export function App() {
     reportRequestSeq.current += 1;
     // The error handler runs before the screen effect, so the ref must move with the session.
     screenRef.current = 'sensing';
+    openSessionSeq.current += 1;
+    stoppedSessionRef.current = null;
     dispatch({ type: 'sessionStarted', sessionId: nextId, startedAtEpochMs });
     setSamples([]);
     setSelectedIndex(null);
@@ -149,6 +155,8 @@ export function App() {
     sessionIdRef.current = nextId;
     reportRequestSeq.current += 1;
     screenRef.current = 'stopped';
+    stoppedSessionRef.current = nextId;
+    openSessionSeq.current += 1;
     dispatch({ type: 'sessionStopped', sessionId: nextId, notice });
   }
 
@@ -167,15 +175,25 @@ export function App() {
       .then((raw) => {
         const parsed = appStateSchema.safeParse(raw);
         if (!parsed.success) return;
+        const seq = hydrationSeq.current;
         const { consent, session } = parsed.data;
-        grantedNow.current = consent.granted;
-        if (session.active && session.sessionId && session.startedAtEpochMs !== null) {
+        // A consent action that landed while this read was in flight is newer than the snapshot.
+        const consentValue = seq === hydrationSeq.current ? consent.granted : grantedNow.current;
+        if (seq === hydrationSeq.current) grantedNow.current = consentValue;
+        if (
+          session.active &&
+          session.sessionId &&
+          session.startedAtEpochMs !== null &&
+          seq === hydrationSeq.current &&
+          !terminalSessionRef.current &&
+          !stoppedSessionRef.current
+        ) {
           sessionIdRef.current = session.sessionId;
           terminalSessionRef.current = null;
         }
         dispatch({
           type: 'hydrated',
-          consent: consent.granted,
+          consent: consentValue,
           session:
             session.active && session.sessionId && session.startedAtEpochMs !== null
               ? {
@@ -361,17 +379,12 @@ export function App() {
               const meta = await bridge.stopSession();
               settleSession(meta.id, stoppedNote(meta));
             } catch {
-              // The session may already be closed. The message above still stands, and the screen
-              // must not keep claiming it is sensing.
-              if (sessionIdRef.current) {
-                dispatch({
-                  type: 'sessionStopped',
-                  sessionId: sessionIdRef.current,
-                  notice: 'The session stopped after a sensing error.',
-                });
-              } else {
-                dispatch({ type: 'openStopped' });
-              }
+              // Teardown was not confirmed. Keep the sensing controls so the player can retry
+              // instead of hiding a camera that may still be open.
+              dispatch({
+                type: 'error',
+                message: 'The session could not be stopped. Try Stop again.',
+              });
             }
           })();
         }
@@ -386,6 +399,13 @@ export function App() {
       if (!parsed.success) return;
       // A late event from a session the page has already replaced must not switch the screen back.
       if (supersededSessions.current.has(parsed.data.sessionId)) return;
+      if (
+        sessionIdRef.current &&
+        sessionIdRef.current !== parsed.data.sessionId &&
+        screenRef.current === 'sensing'
+      ) {
+        return;
+      }
       settleSession(parsed.data.sessionId, parsed.data.message);
       terminalSessionRef.current = parsed.data.sessionId;
       dispatch({ type: 'clearError' });
@@ -454,38 +474,48 @@ export function App() {
     notice: flow.notice,
   });
 
-  async function onConsent(): Promise<void> {
+  function onConsent(): Promise<void> {
     if (!bridge) {
       dispatch({
         type: 'notice',
         message: 'This page is open outside the ChessPulse window. The camera stays off.',
       });
-      return;
+      return Promise.resolve();
     }
-    const revoking = grantedNow.current;
-    if (revoking && startPending.current) revokedDuringStart.current = true;
-    let stopFailed = false;
-    if (flow.screen === 'sensing' || (revoking && startPending.current)) {
-      try {
-        const meta = await bridge.stopSession();
-        settleSession(meta.id, stoppedNote(meta));
-        dispatch({ type: 'clearError' });
-      } catch {
-        stopFailed = true;
-        dispatch({ type: 'error', message: 'The session could not be stopped.' });
+    hydrationSeq.current += 1;
+    const run = consentQueue.current.then(async () => {
+      const revoking = grantedNow.current;
+      if (revoking && startPending.current) revokedDuringStart.current = true;
+      let stopFailed = false;
+      let stopSucceeded = false;
+      if (screenRef.current === 'sensing' || (revoking && startPending.current)) {
+        try {
+          const meta = await bridge.stopSession();
+          stopSucceeded = true;
+          settleSession(meta.id, stoppedNote(meta));
+          dispatch({ type: 'clearError' });
+        } catch {
+          stopFailed = true;
+          dispatch({ type: 'error', message: 'The session could not be stopped.' });
+        }
       }
-    }
-    try {
-      const next = await bridge.setConsent(!grantedNow.current);
-      if (!stopFailed) dispatch({ type: 'clearError' });
-      grantedNow.current = next.granted;
-      dispatch({ type: 'consentChanged', granted: next.granted });
-    } catch {
-      dispatch({
-        type: 'notice',
-        message: 'Consent could not be saved. The camera state is unchanged.',
-      });
-    }
+      try {
+        const next = await bridge.setConsent(!grantedNow.current);
+        if (!stopFailed) dispatch({ type: 'clearError' });
+        grantedNow.current = next.granted;
+        dispatch({ type: 'consentChanged', granted: next.granted });
+      } catch {
+        dispatch({
+          type: 'error',
+          message:
+            stopSucceeded && !stopFailed
+              ? 'The session stopped, but the consent change was not saved.'
+              : 'Consent could not be saved. The camera state is unchanged.',
+        });
+      }
+    });
+    consentQueue.current = run.catch(() => undefined);
+    return run;
   }
 
   async function onStart(): Promise<void> {
@@ -493,11 +523,16 @@ export function App() {
     revokedDuringStart.current = false;
     startPending.current = true;
     setStarting(true);
+    const seq = openSessionSeq.current;
     try {
       const started = await bridge.startSession(timeControl);
-      adoptSession(started.sessionId, started.startedAtEpochMs);
-      // A terminal event may have arrived before the start response completed.
+      // A terminal event or a different live session may have arrived before this reply.
       if (terminalSessionRef.current === started.sessionId) return;
+      if (seq !== openSessionSeq.current) return;
+      if (sessionIdRef.current && sessionIdRef.current !== started.sessionId && screenRef.current === 'sensing') {
+        return;
+      }
+      adoptSession(started.sessionId, started.startedAtEpochMs);
       if (revokedDuringStart.current || !grantedNow.current) {
         try {
           const meta = await bridge.stopSession();
@@ -526,6 +561,8 @@ export function App() {
     if (!bridge || flow.screen !== 'sensing') return;
     try {
       const meta = await bridge.stopSession();
+      // The sessionEnded event may already have settled this session and a report may have started.
+      if (terminalSessionRef.current === meta.id || sessionIdRef.current !== meta.id) return;
       settleSession(meta.id, stoppedNote(meta));
       dispatch({ type: 'clearError' });
     } catch {
@@ -598,7 +635,7 @@ export function App() {
     const seq = ++reportRequestSeq.current;
     dispatch({ type: 'reportStarted', sessionId, slots: pgns });
     if (!bridge) {
-      dispatch({ type: 'reportFailed', message: 'This page is open outside the ChessPulse window.' });
+      dispatch({ type: 'reportFailed', message: 'This page is open outside the ChessPulse window.', sessionId });
       return;
     }
     try {
@@ -606,13 +643,13 @@ export function App() {
       if (seq !== reportRequestSeq.current) return;
       const parsed = reportResultSchema.safeParse(raw);
       if (!parsed.success) {
-        dispatch({ type: 'reportFailed', message: 'The report returned an unexpected shape.' });
+        dispatch({ type: 'reportFailed', message: 'The report returned an unexpected shape.', sessionId });
         return;
       }
       dispatch({ type: 'reportReady', result: parsed.data });
     } catch (caught: unknown) {
       if (seq !== reportRequestSeq.current) return;
-      dispatch({ type: 'reportFailed', message: readIpcError(caught, 'report_failed') });
+      dispatch({ type: 'reportFailed', message: readIpcError(caught, 'report_failed'), sessionId });
     }
   }
 
@@ -656,8 +693,10 @@ export function App() {
       dispatch({ type: 'error', message: 'Stop the current session before opening another.' });
       return;
     }
+    const seq = ++openSessionSeq.current;
     try {
       const raw = await bridge.openSession(sessionId);
+      if (seq !== openSessionSeq.current) return;
       const parsed = sessionOpenResultSchema.safeParse(raw);
       if (!parsed.success) {
         dispatch({ type: 'error', message: 'The saved session returned an unexpected shape.' });
@@ -671,6 +710,11 @@ export function App() {
       reportRequestSeq.current += 1;
       sessionIdRef.current = sessionId;
       terminalSessionRef.current = null;
+      stoppedSessionRef.current = null;
+      setSamples([]);
+      setSelectedIndex(null);
+      setLastSampleAtMs(null);
+      setValidation(null);
       dispatch({
         type: 'openedSession',
         sessionId,
@@ -764,7 +808,7 @@ export function App() {
         <StatusRegion status={status} />
         <p>
           Start a session, play on chess.com, then paste your games to see your pulse next to your
-          moves. Nothing is recorded during play.
+          moves. Only numeric pulse samples are stored during play; no video or image is saved.
         </p>
         <div className="actions">
           <button

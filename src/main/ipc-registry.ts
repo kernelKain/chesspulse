@@ -9,6 +9,8 @@ import {
   type InvokePayload,
 } from '../shared/channels.js';
 import { guardIpcHandler } from './ipc-guard.js';
+import { isAuthorizedSender } from './ipc-sender.js';
+import { AppError } from '../shared/errors.js';
 
 export type RegisteredHandler<K extends InvokeChannelKey> = (
   event: IpcMainInvokeEvent,
@@ -24,7 +26,10 @@ export function registerInvokeChannel<K extends InvokeChannelKey>(
     entry.name,
     guardIpcHandler(
       entry.name,
-      (event, payload) => handler(event, parseInvokePayload(key, payload)),
+      (event, payload) => {
+        if (!isAuthorizedSender(event)) throw new AppError('invalid_request');
+        return handler(event, parseInvokePayload(key, payload));
+      },
       entry.fallback,
     ),
   );

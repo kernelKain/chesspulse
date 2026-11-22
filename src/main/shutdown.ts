@@ -23,9 +23,16 @@ export function createShutdownHooks(deps: ShutdownDependencies): ShutdownHooks {
   let captureDesired = false;
   let quitting = false;
   let exitAllowed = false;
-  const beginStop = (): Promise<unknown> => {
+  let teardownFailed = false;
+  const beginStop = (): Promise<boolean> => {
     captureDesired = false;
-    return deps.stop().catch(() => undefined);
+    return deps.stop().then(
+      () => {
+        teardownFailed = false;
+        return true;
+      },
+      () => false,
+    );
   };
 
   return {
@@ -45,14 +52,20 @@ export function createShutdownHooks(deps: ShutdownDependencies): ShutdownHooks {
     },
     onBeforeQuit(event) {
       if (exitAllowed) return;
-      if (!deps.hasActive()) {
+      if (!deps.hasActive() && !teardownFailed) {
         exitAllowed = true;
         return;
       }
       event.preventDefault();
       if (quitting) return;
       quitting = true;
-      void beginStop().finally(() => {
+      void beginStop().then((ok) => {
+        if (!ok) {
+          // Keep the process alive so the player can retry; never report a failed stop as success.
+          teardownFailed = true;
+          quitting = false;
+          return;
+        }
         exitAllowed = true;
         deps.quit();
       });

@@ -92,7 +92,7 @@ describe('groundInsight', () => {
   });
 
   it('rejects present-tense and contracted mental-state claims', () => {
-    for (const text of ['You are stressed.', "You're stressed.", 'You seem anxious.', 'You stay focused.']) {
+    for (const text of ['You are stressed.', "You're stressed.", 'You seem anxious.', 'You stay focused.', 'You feel stressed.', 'You feel very tired.']) {
       assert.throws(() => groundInsight({}, text), /diagnostic or mental-state/);
     }
   });
@@ -115,6 +115,8 @@ describe('groundInsight', () => {
 
   it('rejects a named-disease diagnosis without the general vocabulary', () => {
     assert.throws(() => groundInsight({}, 'You have diabetes.'), /diagnostic or mental-state/);
+    assert.throws(() => groundInsight({}, 'You have insomnia.'), /diagnostic or mental-state/);
+    assert.throws(() => groundInsight({}, 'You are suffering from burnout.'), /diagnostic or mental-state/);
     assert.equal(
       groundInsight({ baselineBpm: 70 }, 'Your pulse was 70 bpm.'),
       'Your pulse was 70 bpm.',

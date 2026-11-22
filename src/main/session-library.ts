@@ -10,12 +10,14 @@ import {
 } from '../shared/contracts.js';
 import {
   StoredReportError,
+  digestGames,
   hasSavedReport,
   listSessions,
   readGames,
   readMeta,
   readReport,
 } from './store.js';
+import { withReportExclusion } from './report-lock.js';
 
 export interface SessionLibraryResult {
   sessions: SessionSummary[];
@@ -56,20 +58,28 @@ function reportErrorKind(error: unknown): SessionReportError | null {
 
 export async function openStoredSession(root: string, sessionId: string): Promise<SessionOpenResult> {
   await readMeta(root, sessionId);
-  let report: Report | null = null;
-  let reportError: SessionReportError | null = null;
-  try {
-    report = await readReport(root, sessionId);
-  } catch (error) {
-    reportError = reportErrorKind(error);
-    if (!reportError && !(error instanceof StoredReportError)) throw error;
-  }
-  let games: string[] = [];
-  try {
-    games = await readGames(root, sessionId);
-  } catch {
-    // A missing or invalid PGN batch leaves Games empty and the player can paste again.
-    games = [];
-  }
-  return { report, reportError, games };
+  return withReportExclusion(async () => {
+    let report: Report | null = null;
+    let reportError: SessionReportError | null = null;
+    try {
+      report = await readReport(root, sessionId);
+    } catch (error) {
+      reportError = reportErrorKind(error);
+      if (!reportError && !(error instanceof StoredReportError)) throw error;
+    }
+    let games: string[] = [];
+    try {
+      games = await readGames(root, sessionId);
+    } catch {
+      // A missing or invalid PGN batch leaves Games empty and the player can paste again.
+      games = [];
+    }
+    // The two files are separate writes. A digest mismatch means they are from different
+    // builds; refuse the report and ask for a rebuild rather than render mixed data.
+    if (report && games.length > 0 && digestGames(games) !== report.gamesDigest) {
+      report = null;
+      reportError = 'stale';
+    }
+    return { report, reportError, games };
+  });
 }

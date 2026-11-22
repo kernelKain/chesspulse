@@ -55,7 +55,9 @@ export function createPreviewController(start: PreviewStarter): PreviewControlle
         try {
           await capture.stop();
         } catch {
-          // The controller has already forgotten it. The SDK's destroy path releases the handle.
+          // Release was not confirmed. Keep ownership so a queued start cannot open another
+          // capture and active() stays true until a later stop succeeds.
+          current = capture;
         } finally {
           stopping -= 1;
         }

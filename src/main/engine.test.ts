@@ -53,6 +53,31 @@ describe('createEngine', { concurrency: false }, () => {
     }
   });
 
+  it('invalidates an idle worker that fails after a successful evaluation', async () => {
+    let spawned = 0;
+    const spawnWorker = (): Worker => {
+      spawned += 1;
+      if (spawned === 1) {
+        return new Worker(
+          "const { parentPort } = require('node:worker_threads'); parentPort.on('message', (msg) => { parentPort.postMessage({ type: 'eval', id: msg.id, scoreCp: 20, bestmove: 'e2e4' }); setTimeout(() => { throw new Error('idle crash'); }, 20); });",
+          { eval: true },
+        );
+      }
+      return new Worker(path.join(process.cwd(), 'dist-electron/main/engine-worker.js'));
+    };
+    const engine = createEngine({ depth: 4, spawnWorker });
+    try {
+      const first = await engine.evaluate(START_FEN);
+      assert.equal(first.evalFailed, false);
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      const second = await engine.evaluate(START_FEN);
+      assert.equal(second.evalFailed, false);
+      assert.equal(spawned, 2);
+    } finally {
+      await engine.close();
+    }
+  });
+
   it('restarts a crashed worker once and retries the same position', async () => {
     let spawned = 0;
     const spawnWorker = (): Worker => {

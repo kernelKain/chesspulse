@@ -415,15 +415,21 @@ describe('session store', () => {
 
     const storedReport = await readReport(root, meta.id);
     const storedGames = await readGames(root, meta.id);
+    // A failed report rename rolls the PGN file back to the previous coherent pair.
     assert.deepEqual(storedReport, oldReport);
-    assert.deepEqual(storedGames, newPgns);
-    assert.notEqual(storedReport.gamesDigest, digestGames(storedGames));
+    assert.deepEqual(storedGames, oldPgns);
+    assert.equal(storedReport.gamesDigest, digestGames(storedGames));
+
+    // A hand-edited PGN batch still produces a detectable mismatch.
+    await saveGames(root, meta.id, newPgns);
+    const mismatchedGames = await readGames(root, meta.id);
+    assert.notEqual(storedReport.gamesDigest, digestGames(mismatchedGames));
     let calls = 0;
     await assert.rejects(
       requestInsight(
         { sessionId: meta.id, provider: 'openai', text: 'Review this session.' },
         storedReport,
-        storedGames,
+        mismatchedGames,
         { CP_AI_KEY: 'test-secret', CP_AI_MODEL: 'test-model' },
         {
           fetch: async () => {

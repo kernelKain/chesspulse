@@ -37,6 +37,7 @@ import { registerDiagnosticsHandler } from './diagnostics-ipc.js';
 import { runDoctor } from './doctor.js';
 import { registerInsightHandler } from './insight-ipc.js';
 import { registerInvokeChannel } from './ipc-registry.js';
+import { configureIpcSender } from './ipc-sender.js';
 import { registerLibraryHandler } from './library-ipc.js';
 import { registerPasteHandler } from './paste.js';
 import { createPreviewController } from './preview.js';
@@ -446,6 +447,7 @@ app.whenReady().then(async () => {
     log(`[chesspulse] loaded ${env.loadedKeys.length} setting(s) from .env`);
   }
   installSessionGuards();
+  configureIpcSender({ appFileUrl: appFileUrl(), devOrigin: rendererDevOrigin() });
   registerConsentHandler(
     { appFileUrl: appFileUrl(), devOrigin: rendererDevOrigin() },
     {

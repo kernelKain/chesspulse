@@ -27,11 +27,36 @@ function resolveColor(value) {
 function hexToRgb(hex) {
   hex = hex.trim();
   if (hex.startsWith('#')) {
-    if (hex.length === 4) {
-      hex = '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+    let h = hex.slice(1);
+    // 3-digit shorthand
+    if (h.length === 3) {
+      h = h.split('').map((c) => c + c).join('');
     }
-    const n = parseInt(hex.slice(1), 16);
+    // 8-digit #rrggbbaa: ignore alpha
+    if (h.length === 8) {
+      h = h.slice(0, 6);
+    }
+    // 4-digit #rgba shorthand
+    if (h.length === 4) {
+      h = h.split('').map((c) => c + c).join('').slice(0, 6);
+    }
+    if (h.length !== 6) {
+      return null;
+    }
+    if (!/^[0-9a-fA-F]{6}$/.test(h)) {
+      return null;
+    }
+    const n = parseInt(h, 16);
     return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+  // rgb() / rgba()
+  const rgbMatch = hex.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (rgbMatch) {
+    return {
+      r: Math.min(255, parseInt(rgbMatch[1], 10)),
+      g: Math.min(255, parseInt(rgbMatch[2], 10)),
+      b: Math.min(255, parseInt(rgbMatch[3], 10)),
+    };
   }
   return null;
 }
@@ -98,7 +123,15 @@ console.log('ChessPulse contrast check (WCAG 2.2 AA)');
 for (const { fg, bg, selectors } of pairs.values()) {
   const fgRgb = hexToRgb(fg);
   const bgRgb = hexToRgb(bg);
-  if (!fgRgb || !bgRgb) continue;
+  if (fg === 'transparent' || bg === 'transparent') {
+    continue;
+  }
+  if (!fgRgb || !bgRgb) {
+    console.error(`Unsupported color format: ${fg} on ${bg}`);
+    process.exitCode = 1;
+    failed = true;
+    continue;
+  }
   const ratio = contrast(fgRgb, bgRgb);
   const ok = ratio >= 4.5;
   if (!ok) failed = true;

@@ -83,7 +83,7 @@ export type FlowEvent =
   | { type: 'reportStarted'; sessionId: string; slots: string[] }
   | { type: 'reportProgress'; scored: number; total: number }
   | { type: 'reportReady'; result: ReportResult }
-  | { type: 'reportFailed'; message: string }
+  | { type: 'reportFailed'; message: string; sessionId?: string }
   | { type: 'reportCancelRequested' }
   | { type: 'reportCancelRejected' }
   | { type: 'gapChanged'; betweenGames: boolean }
@@ -191,6 +191,7 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       };
 
     case 'sessionStopped':
+      if (state.session && state.session.id !== event.sessionId) return state;
       return {
         ...state,
         screen: 'stopped',
@@ -276,6 +277,7 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
 
     case 'reportFailed':
       if (!state.review) return state;
+      if (event.sessionId && event.sessionId !== state.review.sessionId) return state;
       return {
         ...state,
         review: {

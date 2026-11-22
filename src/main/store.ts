@@ -219,6 +219,13 @@ export async function saveReportArtifacts(
     const gamesFile = path.join(dir, 'games.json');
     const reportFile = path.join(dir, 'report.json');
     const pending = new Set<string>();
+    let previousGames: string | null = null;
+    try {
+      previousGames = await readFile(gamesFile, 'utf8');
+    } catch (error) {
+      if (!isEnoent(error)) throw error;
+    }
+    let gamesCommitted = false;
     try {
       const gamesTmp = await stageAtomic(gamesFile, jsonText(parsed.data.pgns), fs);
       pending.add(gamesTmp);
@@ -226,10 +233,24 @@ export async function saveReportArtifacts(
       pending.add(reportTmp);
       await commitAtomic(gamesTmp, gamesFile, fs);
       pending.delete(gamesTmp);
+      gamesCommitted = true;
       await commitAtomic(reportTmp, reportFile, fs);
       pending.delete(reportTmp);
     } catch (error) {
       await Promise.all([...pending].map((tmp) => removeAtomicTemp(tmp, fs)));
+      // A failed report commit must not leave the new PGNs beside the old report.
+      if (gamesCommitted) {
+        try {
+          if (previousGames === null) {
+            await fs.rm(gamesFile, { force: true });
+          } else {
+            const restore = await stageAtomic(gamesFile, previousGames, fs);
+            await commitAtomic(restore, gamesFile, fs);
+          }
+        } catch {
+          // The digest mismatch still makes the pair detectable and refusable.
+        }
+      }
       throw error;
     }
   });

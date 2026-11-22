@@ -14,6 +14,8 @@ export const POSITION_TIMEOUT_MS = 5_000;
 export const ENGINE_BUDGET_MS = 20 * 60 * 1000;
 /** A position whose worker crashes is retried, but only this many times per engine/report. */
 export const MAX_WORKER_RESTARTS = 2;
+/** A worker that will not terminate must not hold the process open indefinitely. */
+const CLOSE_TIMEOUT_MS = 2_000;
 
 export type EngineFailureReason = 'timeout' | 'fen' | 'engine' | 'budget' | 'crash' | 'cancelled';
 
@@ -71,6 +73,7 @@ export function createEngine(options: EngineOptions = {}): {
   let worker = options.worker;
   // Ownership follows the current worker, not merely how the engine was constructed.
   let ownsWorker = options.worker === undefined;
+  if (worker) watchWorker(worker);
   const spawnWorker = options.spawnWorker ?? ((): Worker => new Worker(path.join(__dirname, 'engine-worker.js')));
   let startedAt: number | undefined;
   let queue: Promise<void> = Promise.resolve();
@@ -80,6 +83,18 @@ export function createEngine(options: EngineOptions = {}): {
   let everSpawned = options.worker !== undefined;
 
   const cancelled = (fen: string): PositionEval => ({ fen, depth, evalFailed: true, reason: 'cancelled' });
+
+  /** Invalidates an idle worker before its next use; per-attempt listeners handle live searches. */
+  function watchWorker(candidate: Worker): void {
+    const invalidate = (): void => {
+      if (worker === candidate) {
+        worker = undefined;
+        ownsWorker = false;
+      }
+    };
+    candidate.on('error', invalidate);
+    candidate.on('exit', invalidate);
+  }
 
   async function evaluate(fen: string): Promise<PositionEval> {
     const run = queue.then(() => evaluateOne(fen));
@@ -121,6 +136,7 @@ export function createEngine(options: EngineOptions = {}): {
       try {
         worker = spawnWorker();
         ownsWorker = true;
+        watchWorker(worker);
       } catch {
         return { fen, depth, evalFailed: true, reason: 'crash' };
       }
@@ -212,7 +228,14 @@ export function createEngine(options: EngineOptions = {}): {
     const current = worker;
     worker = undefined;
     ownsWorker = false;
-    await current.terminate();
+    const terminated = current.terminate().catch(() => undefined);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, CLOSE_TIMEOUT_MS);
+      timer.unref?.();
+    });
+    await Promise.race([terminated, deadline]);
+    if (timer !== undefined) clearTimeout(timer);
   }
 
   return { evaluate, close, depth };

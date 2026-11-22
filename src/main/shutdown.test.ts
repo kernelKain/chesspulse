@@ -64,6 +64,32 @@ describe('shutdown hooks', () => {
     assert.deepEqual(test.events, ['stop', 'quit']);
   });
 
+  it('keeps the app alive and retries when stop rejects', async () => {
+    let attempts = 0;
+    const events: string[] = [];
+    const hooks = createShutdownHooks({
+      stop: async () => {
+        attempts += 1;
+        events.push('stop');
+        if (attempts === 1) throw new Error('teardown failed');
+      },
+      hasActive: () => true,
+      quit: () => {
+        events.push('quit');
+      },
+    });
+    let prevented = 0;
+    hooks.onBeforeQuit({ preventDefault: () => { prevented += 1; } });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events, ['stop']);
+    assert.equal(prevented, 1);
+
+    hooks.onBeforeQuit({ preventDefault: () => { prevented += 1; } });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events, ['stop', 'stop', 'quit']);
+    assert.equal(prevented, 2);
+  });
+
   it('does not block a quit when no session or stop is active', () => {
     const test = harness(false);
     let prevented = 0;

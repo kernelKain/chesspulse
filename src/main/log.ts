@@ -133,7 +133,7 @@ function append(level: Level, message: string): void {
   );
   const text = `${prefix}${truncateUtf8(message, room)}${suffix}`;
   try {
-    rotateIfNeeded(current, Buffer.byteLength(text));
+    if (!rotateIfNeeded(current, Buffer.byteLength(text))) return;
     appendFileSync(current.file, text, { mode: 0o600 });
   } catch {
     // A full disk or a read-only home must not interrupt a measurement.
@@ -148,21 +148,24 @@ function truncateUtf8(text: string, maxBytes: number): string {
   const suffix = Buffer.byteLength(marker) < maxBytes ? marker : '';
   const budget = maxBytes - Buffer.byteLength(suffix);
   let out = '';
+  let used = 0;
   for (const character of text) {
-    if (Buffer.byteLength(out + character) > budget) break;
+    const size = Buffer.byteLength(character);
+    if (used + size > budget) break;
     out += character;
+    used += size;
   }
   return out + suffix;
 }
 
-function rotateIfNeeded(current: FileSink, incomingBytes: number): void {
+function rotateIfNeeded(current: FileSink, incomingBytes: number): boolean {
   let size: number;
   try {
     size = statSync(current.file).size;
   } catch {
-    return;
+    return true;
   }
-  if (size + incomingBytes <= current.maxBytes) return;
+  if (size + incomingBytes <= current.maxBytes) return true;
   for (let index = current.keep; index >= 1; index -= 1) {
     const to = `${current.file}.${index}`;
     const from = index === 1 ? current.file : `${current.file}.${index - 1}`;
@@ -174,9 +177,11 @@ function rotateIfNeeded(current: FileSink, incomingBytes: number): void {
     try {
       renameSync(from, to);
     } catch {
-      // The source may not exist yet; the next index simply finds no file.
+      // The current file must move for the cap to hold. Older gaps are tolerable.
+      if (index === 1) return false;
     }
   }
+  return true;
 }
 
 /** Secret values are collected from the environment and replaced literally, longest first. */

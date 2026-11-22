@@ -489,14 +489,20 @@ function EndingRail({
     raw: Math.min(LEFT + PLOT_W - 14, Math.max(LEFT + 14, xOf(game.endUs))),
   }));
   const MIN_SPACING = 52;
+  const maxX = LEFT + PLOT_W - 14;
+  const minX = LEFT + 14;
   positions.sort((a, b) => a.raw - b.raw);
   let prev = -Infinity;
   for (const p of positions) {
-    if (p.raw - prev < MIN_SPACING) {
-      p.raw = prev + MIN_SPACING;
-    }
-    if (p.raw > LEFT + PLOT_W - 14) p.raw = LEFT + PLOT_W - 14;
+    if (p.raw - prev < MIN_SPACING) p.raw = prev + MIN_SPACING;
     prev = p.raw;
+  }
+  // Right boundary: shift earlier labels left instead of stacking them on one coordinate.
+  for (let index = positions.length - 1; index >= 0; index -= 1) {
+    const p = positions[index];
+    const limit = index === positions.length - 1 ? maxX : positions[index + 1].raw - MIN_SPACING;
+    if (p.raw > limit) p.raw = limit;
+    if (p.raw < minX) p.raw = minX;
   }
   return (
     <g className="ending-rail">

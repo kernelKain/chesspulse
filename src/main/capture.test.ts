@@ -65,8 +65,8 @@ function useRoot(): string {
   return root;
 }
 
-function metricsBuffer(anchor: SessionAnchor): Buffer {
-  const timestamp = anchor.epochMs * 1000 + 5_000_000;
+function metricsBuffer(anchor: SessionAnchor, offsetUs = 5_000_000): Buffer {
+  const timestamp = anchor.epochMs * 1000 + offsetUs;
   return Buffer.from(
     Metrics.encode({
       cardio: {
@@ -266,6 +266,57 @@ describe('capture terminal reporting', () => {
     const reason = await stopping;
 
     assert.equal(reason, 'storage');
+    assert.deepEqual(ended, ['storage']);
+  });
+
+  it('waits for an earlier pending write when a later write rejects', async () => {
+    const sdk = new FakeSdk();
+    const ended: SessionEndReason[] = [];
+    const anchor = { monoUs: 1_000_000, epochMs: 1_700_000_000_000 };
+    let releaseFirst: () => void = () => undefined;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let firstStarted = false;
+    let secondStarted = false;
+    const capture = startCapture({
+      apiKey: 'test-key',
+      anchor,
+      sdk,
+      flushMs: 0,
+      events: {
+        onSamples: async () => {
+          if (!firstStarted) {
+            firstStarted = true;
+            await firstGate;
+            return;
+          }
+          secondStarted = true;
+          throw new Error('disk full');
+        },
+        onValidation: () => undefined,
+        onError: () => undefined,
+        onPreview: () => undefined,
+        onEnded: (reason) => {
+          ended.push(reason);
+        },
+      },
+    });
+
+    sdk.emit('metrics', metricsBuffer(anchor));
+    await waitFor(() => firstStarted);
+    sdk.emit('metrics', metricsBuffer(anchor, 6_000_000));
+    await waitFor(() => secondStarted);
+
+    let settled = false;
+    const stopping = capture.stop().then((reason) => {
+      settled = true;
+      return reason;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(settled, false);
+    releaseFirst();
+    assert.equal(await stopping, 'storage');
     assert.deepEqual(ended, ['storage']);
   });
 
