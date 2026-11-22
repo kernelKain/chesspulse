@@ -29,14 +29,24 @@ const SESSION_ENDED_COPY: Record<SessionEndReason, string> = {
 export function createSessionStopper(seams: SessionStopSeams): SessionStopper {
   let inFlight: Promise<SessionMeta> | null = null;
   let pendingReason: SessionEndReason | undefined;
+  // A finalized session whose automatic event still needs the page. A retry republishes this,
+  // never finalizes again.
+  let retained: { meta: SessionMeta; event: SessionEnded } | null = null;
 
   return {
     beginSession() {
       pendingReason = undefined;
+      retained = null;
     },
     stop(reason) {
       if (inFlight) return inFlight;
       const run = (async () => {
+        if (retained) {
+          const { meta, event } = retained;
+          seams.publish(event);
+          retained = null;
+          return meta;
+        }
         const captureReason = await seams.stopCapture();
         const effectiveReason = captureReason ?? pendingReason ?? reason;
         if (effectiveReason === 'storage' || effectiveReason === 'limit') {
@@ -45,13 +55,15 @@ export function createSessionStopper(seams: SessionStopSeams): SessionStopper {
         const meta = await seams.stopSession(effectiveReason);
         pendingReason = undefined;
         if (effectiveReason === 'storage' || effectiveReason === 'limit') {
-          seams.publish(
-            sessionEndedSchema.parse({
-              sessionId: meta.id,
-              reason: effectiveReason,
-              message: SESSION_ENDED_COPY[effectiveReason],
-            }),
-          );
+          const event = sessionEndedSchema.parse({
+            sessionId: meta.id,
+            reason: effectiveReason,
+            message: SESSION_ENDED_COPY[effectiveReason],
+          });
+          // Retain until the page has actually received it; a throwing publish leaves this for retry.
+          retained = { meta, event };
+          seams.publish(event);
+          retained = null;
         }
         return meta;
       })();

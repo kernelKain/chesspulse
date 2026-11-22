@@ -39,6 +39,7 @@ import { grantsMediaPermission } from './permission.js';
 import {
   hasActiveSession,
   ingestSamples,
+  isActiveSession,
   recoverInterruptedSessions,
   setSampleSink,
   startSession,
@@ -183,9 +184,9 @@ function registerSessionHandlers(): void {
       await stopEverything('user').catch(() => undefined);
       throw new AppError('session_failed');
     }
-    // A limit or storage stop can finalize the session while startSession is still awaiting work.
-    if (stoppingSession || !hasActiveSession(defaultDataRoot())) {
-      await stopEverything('user').catch(() => undefined);
+    // A stop can finalize this session while startSession is still awaiting work. If a newer
+    // session is active instead, never stop it and never open capture against A's anchor.
+    if (stoppingSession || !isActiveSession(defaultDataRoot(), meta.id)) {
       throw new AppError('session_failed');
     }
     coach = new BetweenGamesCoach(meta.startAnchor.monoUs);

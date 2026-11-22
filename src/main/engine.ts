@@ -31,6 +31,8 @@ export interface EngineOptions {
   depth?: number;
   timeoutMs?: number;
   budgetMs?: number;
+  /** Clock seam for the budget check; production uses Date.now. */
+  now?: () => number;
   /** A specific worker, used by tests. The engine does not own it. */
   worker?: Worker;
   /** A factory for the first and every replacement worker, used by tests and production. */
@@ -57,6 +59,7 @@ export function createEngine(options: EngineOptions = {}): {
   const depth = options.depth ?? ENGINE_DEPTH;
   const timeoutMs = options.timeoutMs ?? POSITION_TIMEOUT_MS;
   const budgetMs = options.budgetMs ?? ENGINE_BUDGET_MS;
+  const now = options.now ?? Date.now;
   if (
     options.maxRestarts !== undefined &&
     (!Number.isInteger(options.maxRestarts) || options.maxRestarts < 0)
@@ -87,12 +90,12 @@ export function createEngine(options: EngineOptions = {}): {
 
   async function evaluateOne(fen: string): Promise<PositionEval> {
     if (signal?.aborted) return cancelled(fen);
-    if (startedAt === undefined) startedAt = Date.now();
+    if (startedAt === undefined) startedAt = now();
     if (!validateFen(fen).ok) {
       return { fen, depth, evalFailed: true, reason: 'fen' };
     }
     for (;;) {
-      if (Date.now() - startedAt >= budgetMs) {
+      if (now() - startedAt >= budgetMs) {
         return { fen, depth, evalFailed: true, reason: 'budget' };
       }
       const result = await evaluateAttempt(fen);

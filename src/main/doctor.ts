@@ -120,8 +120,9 @@ function defaultCameraCheck(): DoctorCheck {
 }
 
 export async function probeEngine(): Promise<DoctorCheck> {
-  const engine = createEngine({ depth: 1, timeoutMs: 5_000, maxRestarts: 0 });
+  let engine: ReturnType<typeof createEngine> | undefined;
   try {
+    engine = createEngine({ depth: 1, timeoutMs: 5_000, maxRestarts: 0 });
     const result = await engine.evaluate(START_FEN);
     if (result.evalFailed) {
       return {
@@ -145,7 +146,7 @@ export async function probeEngine(): Promise<DoctorCheck> {
       detail: `Could not start (${error instanceof Error ? error.message : 'unknown error'}).`,
     };
   } finally {
-    await engine.close().catch(() => undefined);
+    await engine?.close().catch(() => undefined);
   }
 }
 

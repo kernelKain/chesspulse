@@ -129,14 +129,17 @@ describe('createEngine', { concurrency: false }, () => {
 
   it('stops retrying once the budget is exhausted', async () => {
     let spawned = 0;
+    let clock = 0;
     const spawnWorker = (): Worker => {
       spawned += 1;
+      // The first worker starts inside the budget; its crash is judged after the budget.
+      clock = 100;
       return new Worker(
-        "require('node:worker_threads').parentPort.on('message', () => setTimeout(() => { throw new Error('crash'); }, 30));",
+        "require('node:worker_threads').parentPort.on('message', () => setTimeout(() => { throw new Error('crash'); }, 10));",
         { eval: true },
       );
     };
-    const engine = createEngine({ budgetMs: 5, maxRestarts: 3, spawnWorker });
+    const engine = createEngine({ budgetMs: 5, maxRestarts: 3, now: () => clock, spawnWorker });
     try {
       const result = await engine.evaluate(START_FEN);
       assert.equal(result.evalFailed, true);

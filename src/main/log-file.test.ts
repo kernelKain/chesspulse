@@ -85,3 +85,40 @@ describe('redacted file log', () => {
     assert.deepEqual(readRecentLogLines('/nonexistent-chesspulse-root', 10), []);
   });
 });
+
+describe('log redaction edge cases', () => {
+  it('redacts the console line and JSON-escaped secret forms', async () => {
+    const lines: string[] = [];
+    const capture = {
+      log: (line: string) => lines.push(line),
+      error: (line: string) => lines.push(line),
+    } as unknown as Console;
+    installSafeConsole(capture);
+    const root = await newRoot();
+    installFileLog({ root, env: { CP_AI_KEY: 'ai-key-with-"quote"-and-\\slash' } });
+    log('plain ai-key-with-"quote"-and-\\slash');
+    log({ note: 'json ai-key-with-"quote"-and-\\slash' });
+
+    const file = await readFile(path.join(root, 'logs', 'chesspulse.log'), 'utf8');
+    assert.ok(!file.includes('ai-key-with-'));
+    assert.ok(!file.includes('quote'));
+    assert.ok(!lines.join('\n').includes('ai-key-with-'));
+    assert.match(file, /\[redacted\]/);
+  });
+
+  it('keeps ordinary arguments when another value cannot be formatted', async () => {
+    const root = await newRoot();
+    installFileLog({ root, env: {} });
+    const hostile = {
+      toJSON: () => {
+        throw new Error('cannot serialize');
+      },
+      toString: () => {
+        throw new Error('cannot stringify');
+      },
+    };
+    assert.doesNotThrow(() => log('ordinary message', hostile));
+    const file = await readFile(path.join(root, 'logs', 'chesspulse.log'), 'utf8');
+    assert.match(file, /ordinary message \[unloggable value\]/);
+  });
+});

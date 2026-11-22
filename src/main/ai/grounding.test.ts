@@ -105,3 +105,27 @@ describe('groundInsight', () => {
     );
   });
 });
+
+describe('direct-claim modifiers and measured heart rate', () => {
+  it('rejects a degree word between the verb and the state adjective', () => {
+    for (const text of [
+      'You were very stressed.',
+      "You're a bit anxious.",
+      'You seemed really tired.',
+      'You felt extremely overwhelmed.',
+    ]) {
+      assert.throws(() => groundInsight({}, text), /diagnostic or mental-state/);
+    }
+  });
+
+  it('allows a grounded heart-rate measurement while still rejecting diagnostic use', () => {
+    assert.equal(
+      groundInsight({ baselineBpm: 72 }, 'Your baseline heart rate was 72.'),
+      'Your baseline heart rate was 72.',
+    );
+    assert.throws(
+      () => groundInsight({ baselineBpm: 72 }, 'Your heart disease explains the 72.'),
+      /diagnostic or mental-state/,
+    );
+  });
+});

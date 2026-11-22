@@ -13,6 +13,7 @@ import {
   coverageFromSamples,
   activeTimeControl,
   ingestSamples,
+  isActiveSession,
   MAX_SAMPLE_HOLD_US,
   MAX_SESSION_US,
   recoverInterruptedSessions,
@@ -110,6 +111,15 @@ describe('session controller', () => {
     await assert.rejects(() => startSession(root, anchor, '3+2'), /already running/);
     const stopped = await stopSession(root, { monoUs: 1_000, epochMs: anchor.epochMs + 1 }, 'user');
     assert.equal((await readSamples(root, stopped.id)).length, 0);
+  });
+
+  it('identifies only the running session as active', async () => {
+    const root = useRoot();
+    const started = await startSession(root, anchor, '3+2');
+    assert.equal(isActiveSession(root, started.id), true);
+    assert.equal(isActiveSession(root, '01OTHER0000000000000000000'), false);
+    await stopSession(root, { monoUs: 1_000, epochMs: anchor.epochMs + 1 }, 'user');
+    assert.equal(isActiveSession(root, started.id), false);
   });
 
   it('leaves the 90-minute boundary to the timer instead of rejecting a sample batch', async () => {

@@ -275,6 +275,12 @@ export function hasActiveSession(root: string): boolean {
   return active.has(path.resolve(root));
 }
 
+/** True only while this exact id is the active, running session. */
+export function isActiveSession(root: string, sessionId: string): boolean {
+  const current = active.get(path.resolve(root));
+  return current?.state === 'running' && current.id === sessionId;
+}
+
 function reserve(
   anchor: SessionAnchor,
   timeControl: string,

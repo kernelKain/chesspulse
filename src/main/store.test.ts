@@ -229,6 +229,8 @@ describe('session store', () => {
       JSON.stringify({ schemaVersion: 2, ids: [meta.id] }),
     );
     await assert.rejects(() => listSessions(root), /newer version/);
+    await assert.rejects(() => deleteSession(root, meta.id), /newer version/);
+    assert.deepEqual(await readMeta(root, meta.id).then((stored) => stored.id), meta.id);
   });
 
   it('deletes one session folder and rewrites the index from what remains', async () => {

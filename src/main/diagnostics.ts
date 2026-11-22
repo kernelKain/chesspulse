@@ -4,6 +4,12 @@
 
 export const DIAGNOSTICS_LOG_LINES = 100;
 
+/** Defence in depth: a log line must never carry a PGN header or a pulse sample into a bundle. */
+const SENSITIVE_LINE_PATTERNS: readonly RegExp[] = [
+  /\[\s*(?:Event|Site|Date|Round|White|Black|Result|UTCDate|UTCTime|ECO|Opening|Termination|TimeControl|EndTime|FEN|SetUp|Variant)\s+"/i,
+  /"(?:tUs|bpm|confidence|stable)"\s*:/,
+];
+
 export interface DiagnosticsInput {
   appVersion: string;
   electron: string;
@@ -29,12 +35,18 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
     `Platform: ${oneLine(input.platform)} ${oneLine(input.arch)}`,
     '',
     'Doctor',
-    ...doctor.map((line) => `  ${oneLine(line)}`),
+    ...doctor.map((line) => `  ${safeLine(oneLine(line))}`),
     '',
     `Recent log (last ${DIAGNOSTICS_LOG_LINES} lines)`,
-    ...(recent.length > 0 ? recent.map((line) => `  ${oneLine(line)}`) : ['  No log lines yet.']),
+    ...(recent.length > 0
+      ? recent.map((line) => `  ${safeLine(oneLine(line))}`)
+      : ['  No log lines yet.']),
     '',
   ].join('\n');
+}
+
+function safeLine(line: string): string {
+  return SENSITIVE_LINE_PATTERNS.some((pattern) => pattern.test(line)) ? '[redacted line]' : line;
 }
 
 function oneLine(value: string): string {

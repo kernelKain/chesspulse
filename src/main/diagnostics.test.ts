@@ -62,4 +62,25 @@ describe('diagnostics bundle', () => {
     assert.match(text, / {2}log line/);
     assert.ok(!text.includes('\r'));
   });
+
+  it('removes PGN headers and pulse-sample lines before delivery', () => {
+    const text = buildDiagnostics({
+      appVersion: '0.1.2',
+      electron: '45.4.1',
+      node: '26.6.6',
+      platform: 'linux',
+      arch: 'x64',
+      doctor: ['[Event "Club game"]'],
+      logLines: [
+        'ordinary line stays',
+        '[White "Ada"] [Black "Nim"]',
+        '{"tUs":100,"bpm":72,"confidence":80,"stable":true}',
+      ],
+      now: new Date('2026-11-22T10:00:00.000Z'),
+    });
+    assert.match(text, /ordinary line stays/);
+    assert.ok(!text.includes('[White "Ada"]'));
+    assert.ok(!text.includes('"bpm":72'));
+    assert.match(text, /\[redacted line\]/);
+  });
 });

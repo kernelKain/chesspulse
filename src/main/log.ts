@@ -102,12 +102,22 @@ export function readRecentLogLines(root: string, limit = 100): string[] {
 }
 
 function write(writer: Writer, args: readonly unknown[], level: Level): void {
+  const line = formatArgs(args);
   try {
-    writer(...args);
+    writer(line);
   } catch {
     // stdout or stderr is gone. Losing a log line beats losing the session.
   }
-  append(level, redact(args.map(describe).join(' ')));
+  append(level, line);
+}
+
+/** Console and file receive the same redacted text, so a copied terminal is safe too. */
+function formatArgs(args: readonly unknown[]): string {
+  try {
+    return redact(args.map(describe).join(' '));
+  } catch {
+    return '[unloggable message]';
+  }
 }
 
 function append(level: Level, message: string): void {
@@ -170,12 +180,20 @@ function redact(text: string): string {
 }
 
 function describe(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (value instanceof Error) return value.stack ?? `${value.name}: ${value.message}`;
+  if (typeof value === 'string') return redact(value);
+  if (value instanceof Error) return redact(value.stack ?? `${value.name}: ${value.message}`);
   try {
-    return JSON.stringify(value) ?? String(value);
+    const json = JSON.stringify(value, (_key, item) =>
+      typeof item === 'string' ? redact(item) : item,
+    );
+    if (json !== undefined) return json;
   } catch {
-    return String(value);
+    // Circular, BigInt, or a throwing toJSON: fall through to String.
+  }
+  try {
+    return redact(String(value));
+  } catch {
+    return '[unloggable value]';
   }
 }
 

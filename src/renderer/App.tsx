@@ -347,6 +347,7 @@ export function App() {
     }
     try {
       await bridge.copyDiagnostics();
+      setError(null);
       setNote('Diagnostics copied. They contain no games, pulse samples, or keys.');
     } catch (caught: unknown) {
       setError(readIpcError(caught, 'internal'));

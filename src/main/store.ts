@@ -306,6 +306,8 @@ export async function deleteReport(root: string, sessionId: string): Promise<voi
 export async function deleteSession(root: string, sessionId: string): Promise<boolean> {
   const dir = sessionDir(root, sessionId);
   return exclusive(root, async () => {
+    // Refuse a newer index before touching data; a missing or corrupt one is repaired here.
+    await readIndexIds(root);
     let existed = true;
     try {
       await stat(dir);

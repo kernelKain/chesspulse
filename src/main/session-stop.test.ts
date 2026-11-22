@@ -17,7 +17,12 @@ function meta(reason: NonNullable<SessionMeta['stopReason']>): SessionMeta {
 
 function harness(
   captureReason?: SessionEndReason,
-  options: { failFirstFinalize?: boolean; failFirstPublish?: boolean; captureOnce?: boolean } = {},
+  options: {
+    failFirstFinalize?: boolean;
+    failFirstPublish?: boolean;
+    captureOnce?: boolean;
+    finalizeOnce?: boolean;
+  } = {},
 ) {
   const publishes: SessionEnded[] = [];
   const stopReasons: SessionStopReason[] = [];
@@ -33,8 +38,11 @@ function harness(
       return options.captureOnce && captures > 1 ? undefined : captureReason;
     },
     stopSession: async (reason) => {
-      stopReasons.push(reason);
       finalizations += 1;
+      if (options.finalizeOnce && finalizations > 1) {
+        throw new Error('second finalization');
+      }
+      stopReasons.push(reason);
       if (options.failFirstFinalize && finalizations === 1) {
         throw new Error('injected finalize failure');
       }
@@ -111,15 +119,15 @@ describe('session stop orchestration', () => {
     assert.equal(test.publishes.length, 0);
   });
 
-  it('clears a pending reason after finalization succeeds even if publication fails', async () => {
-    const test = harness('storage', { failFirstPublish: true, captureOnce: true });
+  it('republishes a retained automatic event without finalizing the session again', async () => {
+    const test = harness('storage', { failFirstPublish: true, captureOnce: true, finalizeOnce: true });
 
     await assert.rejects(test.stopper.stop('user'), /publish failure/);
     const stopped = await test.stopper.stop('user');
 
-    assert.equal(stopped.stopReason, 'user');
-    assert.deepEqual(test.stopReasons, ['storage', 'user']);
-    assert.equal(test.publishes.length, 0);
+    assert.equal(stopped.stopReason, 'storage');
+    assert.deepEqual(test.stopReasons, ['storage']);
+    assert.deepEqual(test.publishes.map((event) => event.reason), ['storage']);
   });
 
   it('shares one finalization and publication across concurrent stop requests', async () => {
