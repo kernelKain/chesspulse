@@ -1,7 +1,7 @@
 // What: the stored-session rows shared by Home and the Sessions screen.
 // Why: opening, exporting, and deleting must be one set of controls, with the same labels and guards.
 // Removed: history would be a dead list, and delete/export would have no confirmation.
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { SessionSummary } from '../shared/contracts.js';
 import {
   coverageLabel,
@@ -90,8 +90,24 @@ function SessionRow({
   onCancel(): void;
 }) {
   const titleId = useId();
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
+  const deleteRef = useRef<HTMLButtonElement | null>(null);
+  const exportRef = useRef<HTMLButtonElement | null>(null);
+  const previousConfirmation = useRef<'delete' | 'export' | null>(null);
   const date = new Date(session.startedAtEpochMs);
   const dateTime = Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+
+  useEffect(() => {
+    if (confirmation) {
+      previousConfirmation.current = confirmation;
+      cancelRef.current?.focus();
+    } else if (previousConfirmation.current) {
+      const target =
+        previousConfirmation.current === 'delete' ? deleteRef.current : exportRef.current;
+      previousConfirmation.current = null;
+      target?.focus();
+    }
+  }, [confirmation]);
 
   return (
     <li className="session-row">
@@ -121,7 +137,7 @@ function SessionRow({
             >
               {confirmation === 'delete' ? 'Delete' : 'Export'}
             </button>
-            <button type="button" onClick={onCancel}>
+            <button type="button" ref={cancelRef} onClick={onCancel}>
               Cancel
             </button>
           </div>
@@ -131,10 +147,10 @@ function SessionRow({
           <button type="button" onClick={onOpen}>
             Open
           </button>
-          <button type="button" disabled={!session.hasReport} onClick={onRequestExport}>
+          <button type="button" ref={exportRef} disabled={!session.hasReport} onClick={onRequestExport}>
             Export
           </button>
-          <button type="button" onClick={onRequestDelete}>
+          <button type="button" ref={deleteRef} onClick={onRequestDelete}>
             Delete
           </button>
           {!session.hasReport ? (

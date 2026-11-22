@@ -17,7 +17,7 @@ export interface PreviewStartInput {
 export type PreviewStarter = (input: PreviewStartInput) => PreviewCapture;
 
 export interface PreviewController {
-  start(input: PreviewStartInput): Promise<void>;
+  start(input: PreviewStartInput, guard?: () => void): Promise<void>;
   stop(): Promise<void>;
   active(): boolean;
 }
@@ -37,9 +37,11 @@ export function createPreviewController(start: PreviewStarter): PreviewControlle
   }
 
   return {
-    start(input) {
+    start(input, guard) {
       return enqueue(async () => {
         if (current) return;
+        // The guard runs inside the queue, after any pending stop and immediately before capture.
+        guard?.();
         // startCapture is synchronous; a throw leaves `current` null and the queue usable.
         current = start(input);
       });

@@ -71,8 +71,11 @@ function assertSupportedNotation(text: string): void {
 }
 
 function assertNoClaims(text: string): void {
+  // Newlines and tabs are word separators in prose. Detect claims across them while returning the
+  // original text unchanged from groundInsight.
+  const normalized = text.replace(/\s+/g, ' ');
   for (const pattern of CLAIM_PATTERNS) {
-    if (pattern.test(text)) {
+    if (pattern.test(normalized)) {
       throw new GroundingError('The AI response made a diagnostic or mental-state claim. Nothing in the report changed.');
     }
   }

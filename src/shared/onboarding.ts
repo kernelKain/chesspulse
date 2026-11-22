@@ -40,8 +40,12 @@ export const EXPLAINER_STEPS: readonly ExplainerStep[] = [
 export const EXPLAINER_NEVERS: readonly string[] = [
   'It does not give advice during a rated game.',
   'It does not diagnose anything or give medical advice.',
-  'It does not upload your data. Everything stays local.',
+  'It does not upload video, images, or pulse samples. Everything measured stays on this computer.',
 ];
+
+/** The optional AI layer is the one path that sends pasted games and summary numbers off-device. */
+export const EXPLAINER_AI_NOTE =
+  'The optional AI reading sends only your question, pasted games, and summary numbers to the provider you configure. It never sends video, images, or pulse samples.';
 
 export const EXPLAINER_PREFERENCE_KEY = 'chesspulse.explainer.seen.v1';
 

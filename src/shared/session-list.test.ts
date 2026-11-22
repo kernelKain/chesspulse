@@ -30,5 +30,6 @@ describe('session row labels', () => {
     assert.ok(first.length > 0);
     assert.notEqual(first, second);
     assert.equal(formatSessionDate(Number.NaN), 'Unknown date');
+    assert.equal(formatSessionDate(1e20), 'Unknown date');
   });
 });

@@ -24,6 +24,8 @@ export interface Score {
 /** Mate in N maps to 10000 - 100N, so every mate outranks any centipawn advantage. */
 export const MATE_SCORE_BASE = 10_000;
 export const MATE_SCORE_STEP = 100;
+/** Distances beyond this stay at the floor; a mate in 100 must still beat any ordinary score. */
+export const MATE_SCORE_FLOOR = 5_000;
 
 export interface MoveMetric {
   cpl: number | null;
@@ -54,7 +56,10 @@ export interface AnalysisSummary {
 }
 
 export function mateToCp(mate: number): number {
-  const magnitude = Math.max(MATE_SCORE_STEP, MATE_SCORE_BASE - MATE_SCORE_STEP * Math.abs(mate));
+  const magnitude = Math.max(
+    MATE_SCORE_FLOOR,
+    MATE_SCORE_BASE - MATE_SCORE_STEP * Math.abs(mate),
+  );
   if (mate > 0) return magnitude;
   if (mate < 0) return -magnitude;
   // UCI mate 0 means the side to move is already mated.

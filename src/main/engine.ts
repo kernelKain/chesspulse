@@ -76,6 +76,8 @@ export function createEngine(options: EngineOptions = {}): {
   let queue: Promise<void> = Promise.resolve();
   let requestId = 0;
   let restarts = 0;
+  // A borrowed worker already exists; a spawn after it fails is a replacement, not an initial spawn.
+  let everSpawned = options.worker !== undefined;
 
   const cancelled = (fen: string): PositionEval => ({ fen, depth, evalFailed: true, reason: 'cancelled' });
 
@@ -101,13 +103,21 @@ export function createEngine(options: EngineOptions = {}): {
       const result = await evaluateAttempt(fen);
       if (result.reason !== 'crash') return result;
       if (restarts >= maxRestarts) return result;
-      restarts += 1;
+      // The replacement spawn is counted in evaluateAttempt, immediately before it is created.
     }
   }
 
   async function evaluateAttempt(fen: string): Promise<PositionEval> {
     if (signal?.aborted) return cancelled(fen);
     if (!worker) {
+      if (everSpawned) {
+        // A later evaluation must not get a fresh worker after the allowance was spent.
+        if (restarts >= maxRestarts) {
+          return { fen, depth, evalFailed: true, reason: 'crash' };
+        }
+        restarts += 1;
+      }
+      everSpawned = true;
       try {
         worker = spawnWorker();
         ownsWorker = true;

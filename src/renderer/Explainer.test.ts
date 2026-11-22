@@ -47,5 +47,6 @@ describe('Explainer markup', () => {
     const html = renderToStaticMarkup(createElement(Explainer));
     for (const line of EXPLAINER_NEVERS) assert.ok(html.includes(line), line);
     assert.match(html, /<ul\b/);
+    assert.match(html, /optional AI reading sends only your question, pasted games/);
   });
 });

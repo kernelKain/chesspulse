@@ -64,6 +64,8 @@ let coach: BetweenGamesCoach | null = null;
 const preview = createPreviewController(startCapture);
 /** One stop at a time. Every caller shares this promise, so the session is finalized exactly once. */
 let stoppingSession: Promise<SessionMeta> | null = null;
+/** True from admission until the start flow settles; preview must not take the reserved camera. */
+let sessionStarting = false;
 
 function rendererDevOrigin(): string | undefined {
   const devUrl = process.env.CHESSPULSE_RENDERER_URL;
@@ -158,7 +160,7 @@ const shutdownHooks = createShutdownHooks({
     await preview.stop();
     return stopEverything('user');
   },
-  hasActive: () => capture !== null || stoppingSession !== null || preview.active(),
+  hasActive: () => capture !== null || stoppingSession !== null || preview.active() || sessionStarting,
   quit: () => app.quit(),
 });
 
@@ -196,27 +198,37 @@ function registerSessionHandlers(): void {
   });
   registerInvokeChannel('previewStart', async () => {
     if (!currentConsent()) throw new AppError('consent_required');
-    if (capture || hasActiveSession(defaultDataRoot())) throw new AppError('session_busy');
+    if (capture || sessionStarting || hasActiveSession(defaultDataRoot())) {
+      throw new AppError('session_busy');
+    }
     const apiKey = readSensingKey(process.env);
     if (!apiKey) throw new AppError('key_missing');
     lastValidationCode = null;
     try {
-      await preview.start({
-        apiKey,
-        anchor: currentAnchor(),
-        events: {
-          // Framing only: preview samples never enter a session or the store.
-          onSamples: () => undefined,
-          onValidation: publishValidation,
-          onError: (error) => {
-            publishSdkError(error);
-            if (!error.retryable) void preview.stop();
+      await preview.start(
+        {
+          apiKey,
+          anchor: currentAnchor(),
+          events: {
+            // Framing only: preview samples never enter a session or the store.
+            onSamples: () => undefined,
+            onValidation: publishValidation,
+            onError: (error) => {
+              publishSdkError(error);
+              if (!error.retryable) void preview.stop();
+            },
+            onPreview: publishPreview,
+            onEnded: () => undefined,
           },
-          onPreview: publishPreview,
-          onEnded: () => undefined,
         },
-      });
+        () => {
+          // Runs inside the serialized controller, immediately before native capture is created.
+          if (!currentConsent()) throw new AppError('consent_required');
+          if (capture || sessionStarting) throw new AppError('session_busy');
+        },
+      );
     } catch (error) {
+      if (error instanceof AppError) throw error;
       throw new AppError('camera_unavailable', { cause: error });
     }
     return previewStartResultSchema.parse({ started: true });
@@ -225,7 +237,7 @@ function registerSessionHandlers(): void {
     await preview.stop();
     return previewStopResultSchema.parse({ stopped: true });
   });
-  registerInvokeChannel('sessionStart', async (_event, payload) => {
+  async function startSessionFlow(payload: { timeControl: string }): Promise<unknown> {
     if (!currentConsent()) throw new AppError('consent_required');
     if (capture) throw new AppError('session_busy');
     shutdownHooks.beginStart();
@@ -299,6 +311,16 @@ function registerSessionHandlers(): void {
       sessionId: meta.id,
       startedAtEpochMs: meta.startedAtEpochMs,
     });
+  }
+
+  registerInvokeChannel('sessionStart', async (_event, payload) => {
+    if (sessionStarting) throw new AppError('session_busy');
+    sessionStarting = true;
+    try {
+      return await startSessionFlow(payload);
+    } finally {
+      sessionStarting = false;
+    }
   });
   registerInvokeChannel('sessionStop', async () =>
     stopEverything('user').catch((error: unknown) => {

@@ -127,6 +127,31 @@ describe('createEngine', { concurrency: false }, () => {
     await engine.close();
   });
 
+  it('does not spawn a replacement after the engine-wide restart budget is spent', async () => {
+    let spawned = 0;
+    const spawnWorker = (): Worker => {
+      spawned += 1;
+      return new Worker(
+        "require('node:worker_threads').parentPort.on('message', () => { throw new Error('worker crashed'); });",
+        { eval: true },
+      );
+    };
+    const engine = createEngine({ maxRestarts: 0, spawnWorker });
+    try {
+      const first = await engine.evaluate(START_FEN);
+      assert.equal(first.evalFailed, true);
+      assert.equal(first.reason, 'crash');
+      assert.equal(spawned, 1);
+
+      const second = await engine.evaluate(START_FEN);
+      assert.equal(second.evalFailed, true);
+      assert.equal(second.reason, 'crash');
+      assert.equal(spawned, 1, 'a later evaluation must not bypass the spent restart budget');
+    } finally {
+      await engine.close();
+    }
+  });
+
   it('stops retrying once the budget is exhausted', async () => {
     let spawned = 0;
     let clock = 0;

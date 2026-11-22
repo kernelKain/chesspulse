@@ -5,10 +5,12 @@ import { formatElapsedMs } from './sensing.js';
 
 export function formatSessionDate(epochMs: number): string {
   if (!Number.isFinite(epochMs)) return 'Unknown date';
+  const date = new Date(epochMs);
+  if (Number.isNaN(date.getTime())) return 'Unknown date';
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
     timeStyle: 'short',
-  }).format(new Date(epochMs));
+  }).format(date);
 }
 
 export function formatSessionDuration(ms: number | null): string {

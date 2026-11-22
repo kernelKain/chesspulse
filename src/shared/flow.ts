@@ -259,6 +259,9 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
 
     case 'reportReady':
       if (!state.review) return state;
+      if ('sessionId' in event.result && event.result.sessionId !== state.review.sessionId) {
+        return state;
+      }
       return {
         ...state,
         review: {
@@ -304,6 +307,7 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
     }
 
     case 'openedSession':
+      if (state.session) return state;
       return {
         ...state,
         screen: event.report ? 'review' : 'games',

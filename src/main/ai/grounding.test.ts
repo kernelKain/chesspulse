@@ -97,6 +97,22 @@ describe('groundInsight', () => {
     }
   });
 
+  it('rejects a direct claim split by a newline or tab', () => {
+    assert.throws(
+      () => groundInsight({ baselineBpm: 70 }, 'You\nare stressed about the 70 bpm baseline.'),
+      /diagnostic or mental-state/,
+    );
+    assert.throws(
+      () => groundInsight({ baselineBpm: 70 }, 'You\tfelt anxious about the 70 bpm baseline.'),
+      /diagnostic or mental-state/,
+    );
+  });
+
+  it('keeps measured pulse text across a newline unchanged', () => {
+    const output = 'Baseline\n70 bpm.';
+    assert.equal(groundInsight({ baselineBpm: 70 }, output), output);
+  });
+
   it('rejects a named-disease diagnosis without the general vocabulary', () => {
     assert.throws(() => groundInsight({}, 'You have diabetes.'), /diagnostic or mental-state/);
     assert.equal(

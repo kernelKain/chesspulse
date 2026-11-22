@@ -228,6 +228,51 @@ describe('flow reducer', () => {
     assert.equal(failed.review?.error, 'No.');
   });
 
+  it('ignores a report result whose session is not the review in progress', () => {
+    const building = flowReducer(inGames(), {
+      type: 'reportStarted',
+      sessionId: 'session-1',
+      slots: ['pgn'],
+    });
+    const other: ReportResult = {
+      ...refusal,
+      reason: 'no_games',
+    };
+    // A refusal carries no session id; a successful report does and must match.
+    const otherReport: ReportResult = {
+      ok: true,
+      schemaVersion: 1,
+      sessionId: 'session-2',
+      gamesDigest: 'a'.repeat(64),
+      coveragePct: 50,
+      baselineBpm: 70,
+      verdict: 'Other.',
+      settled: { band: 'settled', moves: 0, status: 'insufficient' },
+      elevated: { band: 'elevated', moves: 0, status: 'insufficient' },
+      engine: {
+        depth: 8,
+        positions: 0,
+        scored: 0,
+        failed: 0,
+        reasons: { timeout: 0, crash: 0, engine: 0, budget: 0 },
+      },
+      alignmentMode: 'endtime',
+      toleranceSec: 5,
+      games: [],
+      timeline: {
+        startUs: 0,
+        stopUs: 1,
+        baselineBpm: 70,
+        elevatedThresholdBpm: 80,
+        samples: [],
+        games: [],
+        moves: [],
+      },
+    };
+    assert.equal(flowReducer(building, { type: 'reportReady', result: otherReport }), building);
+    assert.equal(flowReducer(building, { type: 'reportReady', result: other }).review?.result, other);
+  });
+
   it('returns to the session summary from a review and refuses Review without a report', () => {
     const review = flowReducer(inGames(), {
       type: 'reportStarted',
@@ -239,8 +284,7 @@ describe('flow reducer', () => {
     assert.equal(flowReducer(stopped, { type: 'openReview' }), stopped);
   });
 
-  it('opens an earlier session at Review when it has a report and at Games otherwise', () => {
-    const withReport = flowReducer(initialFlowState(), {
+  it('opens an earlier session at Review when it has a report and at Games otherwise', () => {    const withReport = flowReducer(initialFlowState(), {
       type: 'openedSession',
       sessionId: 'old-1',
       report: refusal,
@@ -259,6 +303,23 @@ describe('flow reducer', () => {
     assert.equal(withoutReport.screen, 'games');
     assert.equal(withoutReport.review, null);
     assert.equal(currentSessionId(withoutReport), 'old-2');
+  });
+
+  it('does not clear a live session when a saved session is opened from a stale page', () => {
+    const sensing = flowReducer(initialFlowState(), {
+      type: 'sessionStarted',
+      sessionId: 'live',
+      startedAtEpochMs: 1_000,
+    });
+    assert.equal(
+      flowReducer(sensing, {
+        type: 'openedSession',
+        sessionId: 'old',
+        report: refusal,
+        games: [],
+      }),
+      sensing,
+    );
   });
 
   it('deletes only the session currently shown, then returns Home', () => {

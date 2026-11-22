@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
@@ -84,6 +84,19 @@ describe('redacted file log', () => {
   it('returns nothing when no log has been written', () => {
     assert.deepEqual(readRecentLogLines('/nonexistent-chesspulse-root', 10), []);
   });
+
+  it('bounds one oversized record inside the file cap and marks the cut', async () => {
+    const root = await newRoot();
+    const maxBytes = 260;
+    installFileLog({ root, env: {}, maxBytes });
+    log('x'.repeat(2_000));
+
+    const file = path.join(root, 'logs', 'chesspulse.log');
+    const size = (await stat(file)).size;
+    assert.ok(size <= maxBytes, `oversized record must stay inside the cap, got ${size}`);
+    const text = await readFile(file, 'utf8');
+    assert.match(text, /\[truncated\]/);
+  });
 });
 
 describe('log redaction edge cases', () => {
@@ -98,12 +111,29 @@ describe('log redaction edge cases', () => {
     installFileLog({ root, env: { CP_AI_KEY: 'ai-key-with-"quote"-and-\\slash' } });
     log('plain ai-key-with-"quote"-and-\\slash');
     log({ note: 'json ai-key-with-"quote"-and-\\slash' });
+    log(JSON.stringify({ note: 'pre-serialized ai-key-with-"quote"-and-\\slash' }));
 
     const file = await readFile(path.join(root, 'logs', 'chesspulse.log'), 'utf8');
     assert.ok(!file.includes('ai-key-with-'));
     assert.ok(!file.includes('quote'));
     assert.ok(!lines.join('\n').includes('ai-key-with-'));
     assert.match(file, /\[redacted\]/);
+  });
+
+  it('collects secrets for console redaction even when the file directory cannot be made', async () => {
+    const root = await newRoot();
+    const blocker = path.join(root, 'not-a-directory');
+    await writeFile(blocker, 'x');
+    const lines: string[] = [];
+    const capture = {
+      log: (line: string) => lines.push(line),
+      error: (line: string) => lines.push(line),
+    } as unknown as Console;
+    installSafeConsole(capture);
+    installFileLog({ root: blocker, env: { CP_AI_KEY: 'blocked-key-123456' } });
+    log('blocked-key-123456');
+    assert.ok(!lines.join('\n').includes('blocked-key-123456'));
+    assert.match(lines.join('\n'), /\[redacted\]/);
   });
 
   it('keeps ordinary arguments when another value cannot be formatted', async () => {

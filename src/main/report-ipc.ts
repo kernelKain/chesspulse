@@ -22,6 +22,11 @@ interface ActiveBuild {
 /** One active build per session. */
 const activeBuilds = new Map<string, ActiveBuild>();
 
+/** True while a report for this session is still owned by a build request. */
+export function isReportBuilding(sessionId: string): boolean {
+  return activeBuilds.has(sessionId);
+}
+
 export function registerReportHandler(dataRoot: () => string = defaultDataRoot): void {
   registerInvokeChannel('reportBuild', async (event, payload) => {
     const { sessionId, pgns } = payload;

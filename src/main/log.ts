@@ -59,12 +59,14 @@ export function installFileLog(options: FileLogOptions): void {
   const dir = path.join(options.root, 'logs');
   const maxBytes = positiveInteger(options.maxBytes, DEFAULT_MAX_BYTES);
   const keep = positiveInteger(options.keep, DEFAULT_KEEP);
+  // Console redaction must work even when the file sink cannot be created.
+  secrets = collectSecrets(options.env);
+  sink = null;
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
   } catch {
     return;
   }
-  secrets = collectSecrets(options.env);
   sink = { dir, file: path.join(dir, LOG_NAME), maxBytes, keep };
 }
 
@@ -123,13 +125,34 @@ function formatArgs(args: readonly unknown[]): string {
 function append(level: Level, message: string): void {
   const current = sink;
   if (!current) return;
-  const text = `${new Date().toISOString()} ${level} ${message}\n`;
+  const prefix = `${new Date().toISOString()} ${level} `;
+  const suffix = '\n';
+  const room = Math.max(
+    0,
+    current.maxBytes - Buffer.byteLength(prefix) - Buffer.byteLength(suffix),
+  );
+  const text = `${prefix}${truncateUtf8(message, room)}${suffix}`;
   try {
     rotateIfNeeded(current, Buffer.byteLength(text));
     appendFileSync(current.file, text, { mode: 0o600 });
   } catch {
     // A full disk or a read-only home must not interrupt a measurement.
   }
+}
+
+/** Keeps one record inside the cap; the marker is omitted only when the cap is smaller than it. */
+function truncateUtf8(text: string, maxBytes: number): string {
+  if (maxBytes <= 0) return '';
+  if (Buffer.byteLength(text) <= maxBytes) return text;
+  const marker = '…[truncated]';
+  const suffix = Buffer.byteLength(marker) < maxBytes ? marker : '';
+  const budget = maxBytes - Buffer.byteLength(suffix);
+  let out = '';
+  for (const character of text) {
+    if (Buffer.byteLength(out + character) > budget) break;
+    out += character;
+  }
+  return out + suffix;
 }
 
 function rotateIfNeeded(current: FileSink, incomingBytes: number): void {
@@ -174,9 +197,22 @@ function collectSecrets(env: NodeJS.ProcessEnv): string[] {
 function redact(text: string): string {
   let result = text;
   for (const secret of secrets) {
-    if (result.includes(secret)) result = result.split(secret).join(REDACTED);
+    const escaped = jsonEscaped(secret);
+    for (const form of new Set([secret, escaped])) {
+      if (form.length === 0) continue;
+      if (result.includes(form)) result = result.split(form).join(REDACTED);
+    }
   }
   return result;
+}
+
+/** The representation a secret takes inside a JSON string, without the surrounding quotes. */
+function jsonEscaped(value: string): string {
+  try {
+    return JSON.stringify(value).slice(1, -1);
+  } catch {
+    return value;
+  }
 }
 
 function describe(value: unknown): string {

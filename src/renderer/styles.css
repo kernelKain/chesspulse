@@ -1107,6 +1107,11 @@ textarea {
   max-width: 38rem;
 }
 
+.explainer-ai {
+  margin-top: 16px;
+  color: var(--muted);
+}
+
 .explainer h2,
 .explainer h3 {
   margin: 32px 0 12px;

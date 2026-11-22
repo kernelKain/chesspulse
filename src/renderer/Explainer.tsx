@@ -3,6 +3,7 @@
 // Removed: the first screen would be controls with no explanation, and Help would repeat stale copy.
 import { useId } from 'react';
 import {
+  EXPLAINER_AI_NOTE,
   EXPLAINER_INTRO,
   EXPLAINER_NEVERS,
   EXPLAINER_STEPS,
@@ -59,6 +60,7 @@ export function Explainer({
             <li key={line}>{line}</li>
           ))}
         </ul>
+        <p className="explainer-ai">{EXPLAINER_AI_NOTE}</p>
       </section>
     </section>
   );

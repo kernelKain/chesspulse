@@ -618,13 +618,15 @@ export function App() {
 
   async function onCancelReport(): Promise<void> {
     if (!bridge || !sessionId || !flow.review?.building || flow.review.cancelling) return;
+    const seq = reportRequestSeq.current;
     dispatch({ type: 'reportCancelRequested' });
     try {
       const result = await bridge.cancelReport(sessionId);
+      if (seq !== reportRequestSeq.current) return;
       if (!result.cancelled) dispatch({ type: 'reportCancelRejected' });
     } catch {
       // Let the player retry if the cancel request never reached main.
-      dispatch({ type: 'reportCancelRejected' });
+      if (seq === reportRequestSeq.current) dispatch({ type: 'reportCancelRejected' });
     }
   }
 
@@ -650,6 +652,10 @@ export function App() {
 
   async function onOpenSession(sessionId: string): Promise<void> {
     if (!bridge) return;
+    if (flow.session) {
+      dispatch({ type: 'error', message: 'Stop the current session before opening another.' });
+      return;
+    }
     try {
       const raw = await bridge.openSession(sessionId);
       const parsed = sessionOpenResultSchema.safeParse(raw);
@@ -657,6 +663,12 @@ export function App() {
         dispatch({ type: 'error', message: 'The saved session returned an unexpected shape.' });
         return;
       }
+      // A build from the previous review must not land on the newly opened session.
+      if (flow.review?.building) {
+        void bridge.cancelReport(flow.review.sessionId).catch(() => undefined);
+      }
+      resetInsight();
+      reportRequestSeq.current += 1;
       sessionIdRef.current = sessionId;
       terminalSessionRef.current = null;
       dispatch({

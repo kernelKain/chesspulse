@@ -10,7 +10,9 @@ import {
 } from '../shared/contracts.js';
 import { AppError, toAppError } from '../shared/errors.js';
 import { registerInvokeChannel } from './ipc-registry.js';
+import { isReportBuilding } from './report-ipc.js';
 import { reportAppError } from './report-errors.js';
+import { withReportExclusion } from './report-lock.js';
 import { exportResult, writeReportExport } from './report-export.js';
 import { activeSessionState } from './session.js';
 import { listSessionSummaries, openStoredSession } from './session-library.js';
@@ -29,7 +31,10 @@ export function registerLibraryHandler(dataRoot: () => string = defaultDataRoot)
     if (activeSessionState(dataRoot()).sessionId === payload.sessionId) {
       throw new AppError('session_busy');
     }
-    const deleted = await deleteSession(dataRoot(), payload.sessionId);
+    if (isReportBuilding(payload.sessionId)) throw new AppError('session_busy');
+    // The exclusion closes the race with a build that starts after the check: either the build
+    // finishes first and is deleted, or it waits and then finds the session missing.
+    const deleted = await withReportExclusion(() => deleteSession(dataRoot(), payload.sessionId));
     return sessionDeleteResultSchema.parse({ deleted });
   });
 

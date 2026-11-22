@@ -86,6 +86,26 @@ describe('preview controller', () => {
     assert.equal(controller.active(), false);
   });
 
+  it('rejects a queued start when its guard no longer allows capture', async () => {
+    const fake = fakeStarter();
+    let allowed = false;
+    const controller = createPreviewController(fake.start);
+    await assert.rejects(
+      () =>
+        controller.start(input, () => {
+          if (!allowed) throw new Error('consent withdrawn');
+        }),
+      /consent withdrawn/,
+    );
+    assert.equal(fake.created.length, 0);
+    assert.equal(controller.active(), false);
+    allowed = true;
+    await controller.start(input, () => {
+      if (!allowed) throw new Error('consent withdrawn');
+    });
+    assert.equal(fake.created.length, 1);
+  });
+
   it('keeps the queue usable after a failed start', async () => {
     let fail = true;
     const created: FakeCapture[] = [];

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  EXPLAINER_AI_NOTE,
   EXPLAINER_NEVERS,
   EXPLAINER_PREFERENCE_KEY,
   EXPLAINER_STEPS,
@@ -38,6 +39,8 @@ describe('first-run explainer copy', () => {
     assert.ok(EXPLAINER_NEVERS.some((line) => /rated game/i.test(line)));
     assert.ok(EXPLAINER_NEVERS.some((line) => /diagnose|medical/i.test(line)));
     assert.ok(EXPLAINER_NEVERS.some((line) => /upload/i.test(line)));
+    assert.match(EXPLAINER_AI_NOTE, /pasted games/i);
+    assert.match(EXPLAINER_AI_NOTE, /pulse samples/i);
   });
 });
 

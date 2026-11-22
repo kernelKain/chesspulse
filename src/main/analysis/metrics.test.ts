@@ -9,8 +9,8 @@ const failed = { evalFailed: true };
 
 function counted(partial: Partial<MoveMetric> & Pick<MoveMetric, 'band'>): MoveMetric {
   return {
-    cpl: partial.cpl ?? 0,
-    accuracy: partial.accuracy ?? 80,
+    cpl: partial.cpl === undefined ? 0 : partial.cpl,
+    accuracy: partial.accuracy === undefined ? 80 : partial.accuracy,
     blunder: partial.blunder ?? false,
     mate: partial.mate ?? false,
     band: partial.band,
@@ -99,6 +99,12 @@ describe('mateToCp', () => {
     assert.ok(mateToCp(1) > mateToCp(2));
     assert.ok(mateToCp(2) > 1000);
     assert.ok(mateToCp(1) > 0);
+  });
+
+  it('keeps a long mate decisive instead of decaying to a normal score', () => {
+    assert.equal(mateToCp(200), 5000);
+    assert.equal(mateToCp(-200), -5000);
+    assert.ok(mateToCp(200) > 0);
   });
 });
 
