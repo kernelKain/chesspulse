@@ -1,0 +1,54 @@
+{
+  "cli_version": "0.12.3-nightly.202610310614.54b6a5cac",
+  "checkpoint_id": "01M82PP2CW6D45YNHYR55PPGGY",
+  "strategy": "manual-commit",
+  "branch": "report-redesign",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/main/ai/config.ts",
+    "src/main/ai/grounding.ts",
+    "src/main/ai/providers.test.ts",
+    "src/main/ai/providers.ts",
+    "src/main/ai/service.test.ts",
+    "src/main/ai/service.ts",
+    "src/main/insight-ipc.ts",
+    "src/main/ipc-contract.test.ts",
+    "src/preload/index.ts",
+    "src/renderer/App.tsx",
+    "src/renderer/InsightPanel.dom.test.tsx",
+    "src/renderer/InsightPanel.tsx",
+    "src/renderer/bridge.d.ts",
+    "src/renderer/copy.ts",
+    "src/renderer/ipc-error.ts",
+    "src/renderer/styles.css",
+    "src/shared/channels.ts",
+    "src/shared/contracts.ts",
+    "src/shared/errors.ts",
+    "src/shared/explainer.test.ts",
+    "src/shared/explainer.ts",
+    "tsconfig.renderer-test.json"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "redaction": {
+    "replacements": 0,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 0,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
