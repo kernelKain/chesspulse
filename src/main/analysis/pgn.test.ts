@@ -125,6 +125,27 @@ describe('parsePgnBatch order', () => {
     assert.equal(batch.order, 'unverified');
   });
 
+  it('treats a dated batch with one date-less EndTime as unverified, not out of order', () => {
+    const header = '[White "Ada"]\n[Black "Nim"]\n[Result "1-0"]\n';
+    const batch = parsePgnBatch([
+      `${header}[EndDate "2026.11.22"]\n[EndTime "18:00:00 GMT+0000"]\n\n1. e4 1-0\n`,
+      `${header}[EndTime "18:51:25 GMT+0000"]\n\n1. e4 1-0\n`,
+    ]);
+    assert.equal(batch.ok, true);
+    if (!batch.ok) return;
+    assert.equal(batch.order, 'unverified');
+  });
+  it('still rejects a dated batch when a game has no EndTime at all', () => {
+    const header = '[White "Ada"]\n[Black "Nim"]\n[Result "1-0"]\n';
+    const batch = parsePgnBatch([
+      `${header}[EndDate "2026.11.22"]\n[EndTime "18:00:00 GMT+0000"]\n\n1. e4 1-0\n`,
+      `${header}[EndTime "18:51:25 GMT+0000"]\n\n1. e4 1-0\n`,
+      `${header}\n1. e4 1-0\n`,
+    ]);
+    assert.equal(batch.ok, false);
+    if (batch.ok || batch.reason !== 'order') return;
+    assert.deepEqual(batch.indices, [2]);
+  });
   it('rejects a mix of timed and untimed games instead of inventing an order', async () => {
     const batch = parsePgnBatch([
       await fixture('checkmate.pgn'),
@@ -270,7 +291,9 @@ describe('parsePgn failures', () => {
     assert.equal(dateOnly.ok, true);
     if (!dateOnly.ok) return;
     assert.equal(dateOnly.game.endTimeEpochMs, undefined);
-    assert.equal(timeOnly.ok, false);
+    // A lone clock has no date, so it is unknown rather than invalid: placement uses marks now.
+    assert.equal(timeOnly.ok, true);
+    if (timeOnly.ok) assert.equal(timeOnly.game.endTimeEpochMs, undefined);
   });
 
   it('classifies a resignation even when the winner name contains abort', () => {
@@ -288,5 +311,57 @@ describe('parsePgn failures', () => {
     assert.equal(aborted.ok, true);
     if (!aborted.ok) return;
     assert.equal(aborted.game.ending, 'aborted');
+  });
+});
+
+describe('stated clock zones', () => {
+  const header = '[White "Ada"]\n[Black "Nim"]\n[Result "1-0"]\n';
+
+  it('reads the chess.com EndTime format with no EndDate', () => {
+    const parsed = parsePgn(
+      `${header}[EndTime "18:51:25 GMT+0000"]\n\n1. e4 1-0\n`,
+      0,
+    );
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+    assert.equal(parsed.game.endTimeEpochMs, undefined);
+    assert.equal(parsed.game.moves.length, 1);
+  });
+
+  it('applies a negative offset instead of treating the clock as UTC', () => {
+    const parsed = parsePgn(
+      `${header}[EndDate "2026.11.22"]\n[EndTime "18:51:25 GMT-0500"]\n\n1. e4 1-0\n`,
+      0,
+    );
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+    assert.equal(parsed.game.endTimeEpochMs, Date.UTC(2026, 10, 22, 23, 51, 25));
+  });
+
+  it('accepts the other spellings of a zero offset', () => {
+    for (const clock of ['18:51:25 UTC+0000', '18:51:25 Z', '18:51:25 +00:00']) {
+      const parsed = parsePgn(`${header}[EndDate "2026.11.22"]\n[EndTime "${clock}"]\n\n1. e4 1-0\n`, 0);
+      assert.equal(parsed.ok, true, clock);
+      if (!parsed.ok) return;
+      assert.equal(parsed.game.endTimeEpochMs, Date.UTC(2026, 10, 22, 18, 51, 25), clock);
+    }
+  });
+
+  it('moves an instant across the date boundary when the offset requires it', () => {
+    const parsed = parsePgn(
+      `${header}[EndDate "2024.01.01"]\n[EndTime "00:30:00 GMT+0530"]\n\n1. e4 1-0\n`,
+      0,
+    );
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+    assert.equal(parsed.game.endTimeEpochMs, Date.UTC(2023, 11, 31, 19, 0, 0));
+  });
+
+  it('rejects an offset that cannot exist', () => {
+    const parsed = parsePgn(
+      `${header}[EndDate "2026.11.22"]\n[EndTime "18:51:25 GMT+1500"]\n\n1. e4 1-0\n`,
+      0,
+    );
+    assert.equal(parsed.ok, false);
   });
 });

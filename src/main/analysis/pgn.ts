@@ -21,7 +21,10 @@ export type PgnFailure =
   | { ok: false; reason: 'order'; indices: number[]; remedy: string }
   | { ok: false; reason: 'no_games'; remedy: string };
 
-export type PgnParseResult = { ok: true; game: PgnGame } | Extract<PgnFailure, { reason: 'invalid' }>;
+/** `undatedEnd`: the game has an EndTime clock but no EndDate, so its end instant is unknown. */
+export type PgnParseResult =
+  | { ok: true; game: PgnGame; undatedEnd: boolean }
+  | Extract<PgnFailure, { reason: 'invalid' }>;
 
 export type PgnBatchResult =
   | { ok: true; games: PgnGame[]; order: 'checked' | 'unverified'; summary: PgnBatchSummary }
@@ -75,7 +78,8 @@ export function parsePgn(pgn: string, index: number): PgnParseResult {
   };
   const checked = pgnGameSchema.safeParse(game);
   if (!checked.success) return invalid(index, 'The parsed game does not match the game contract.');
-  return { ok: true, game: checked.data };
+  const undatedEnd = endClock !== undefined && endDate === undefined && endClock.trim() !== UNKNOWN_TIME;
+  return { ok: true, game: checked.data, undatedEnd };
 }
 
 export function parsePgnBatch(pgns: readonly string[]): PgnBatchResult {
@@ -94,13 +98,15 @@ export function parsePgnBatch(pgns: readonly string[]): PgnBatchResult {
   }
 
   const games: PgnGame[] = [];
+  const undated = new Set<number>();
   for (let index = 0; index < pgns.length; index += 1) {
     const parsed = parsePgn(pgns[index] ?? '', index);
     if (!parsed.ok) return parsed;
     games.push(parsed.game);
+    if (parsed.undatedEnd) undated.add(parsed.game.index);
   }
 
-  const order = chronologicalOrder(games);
+  const order = chronologicalOrder(games, undated);
   if (order.kind === 'reject') {
     return { ok: false, reason: 'order', indices: order.indices, remedy: order.remedy };
   }
@@ -253,13 +259,22 @@ function clockFromComment(comment: string): number | undefined | 'bad' {
 const UNKNOWN_DATE = '????.??.??';
 const UNKNOWN_TIME = '??:??:??';
 
+/**
+ * What: turns a PGN date and clock into a UTC epoch, honouring the zone the export states.
+ * Why: chess.com writes `EndTime` as `18:51:25 GMT+0000` and often omits `EndDate`; players in other
+ *      zones write their own offset. The offset is part of the instant, so it is applied, not ignored.
+ * Removed: a valid export from any timezone would be rejected, and a half pair would fail the PGN.
+ *
+ * A date and a clock are both needed for an instant. A lone clock stays unknown rather than
+ * invalid: the date cannot be guessed, and placement no longer uses header times.
+ */
 function epochPair(date: string | undefined, time: string | undefined): number | undefined | 'bad' {
   if (date === undefined && time === undefined) return undefined;
-  if (date === undefined || time === undefined) return 'bad';
+  if (date === undefined || time === undefined) return undefined;
   if (date === UNKNOWN_DATE && time === UNKNOWN_TIME) return undefined;
   if (date.includes('?') || time.includes('?')) return 'bad';
-  const day = /^(\d{4})\.(\d{2})\.(\d{2})$/.exec(date);
-  const clock = /^(\d{2}):(\d{2}):(\d{2})$/.exec(time);
+  const day = /^(\d{4})\.(\d{2})\.(\d{2})$/.exec(date.trim());
+  const clock = /^(\d{2}):(\d{2}):(\d{2})\s*(.*)$/.exec(time.trim());
   if (!day || !clock) return 'bad';
   const month = Number(day[2]);
   const dayOfMonth = Number(day[3]);
@@ -268,9 +283,11 @@ function epochPair(date: string | undefined, time: string | undefined): number |
   const second = Number(clock[3]);
   if (month < 1 || month > 12 || dayOfMonth < 1 || dayOfMonth > 31) return 'bad';
   if (hour > 23 || minute > 59 || second > 59) return 'bad';
+  const offset = zoneMinutes(clock[4] ?? '');
+  if (offset === 'bad') return 'bad';
   const year = Number(day[1]);
-  const utc = Date.UTC(year, month - 1, dayOfMonth, hour, minute, second);
-  const back = new Date(utc);
+  const midnightUtc = Date.UTC(year, month - 1, dayOfMonth);
+  const back = new Date(midnightUtc);
   if (
     back.getUTCFullYear() !== year ||
     back.getUTCMonth() !== month - 1 ||
@@ -278,7 +295,27 @@ function epochPair(date: string | undefined, time: string | undefined): number |
   ) {
     return 'bad';
   }
-  return utc;
+  const clockMs = ((hour * 60 + minute) * 60 + second) * 1000;
+  return midnightUtc + clockMs - offset * 60_000;
+}
+
+/**
+ * What: the offset the clock states, in minutes east of UTC.
+ * Why: `GMT+0000`, `UTC-05:00`, `+0530`, and `Z` all appear in exports and mean different instants.
+ * Removed: a stated offset would be treated as UTC, moving a game by hours.
+ */
+function zoneMinutes(zone: string): number | 'bad' {
+  const text = zone.trim();
+  // A PGN without a zone is UTC by definition; chess.com's own exports state the zone anyway.
+  if (text.length === 0) return 0;
+  if (/^z$/i.test(text)) return 0;
+  const match = /^(?:GMT|UTC)?\s*([+-])(\d{2}):?(\d{2})$/i.exec(text);
+  if (!match) return 'bad';
+  const hours = Number(match[2]);
+  const minutes = Number(match[3]);
+  if (hours > 14 || minutes > 59) return 'bad';
+  const total = hours * 60 + minutes;
+  return match[1] === '-' ? -total : total;
 }
 
 function classifyEnding(
@@ -306,6 +343,7 @@ function parseTimeControl(value: string): ClockParts | null {
 
 function chronologicalOrder(
   games: readonly PgnGame[],
+  undated: ReadonlySet<number> = new Set(),
 ):
   | { kind: 'checked' }
   | { kind: 'unverified' }
@@ -315,7 +353,11 @@ function chronologicalOrder(
   if (!anyEnd && !anyStart) return { kind: 'unverified' };
 
   if (anyEnd) {
-    const missing = games.filter((game) => game.endTimeEpochMs === undefined).map((game) => game.index);
+    // A game with no EndTime at all still rejects a timed batch. A game whose EndTime has no date
+    // cannot be ordered either, but it does carry the tag, so the order is unverified rather than wrong.
+    const missing = games
+      .filter((game) => game.endTimeEpochMs === undefined && !undated.has(game.index))
+      .map((game) => game.index);
     if (missing.length > 0) {
       return {
         kind: 'reject',
@@ -323,6 +365,7 @@ function chronologicalOrder(
         remedy: 'Every game needs an EndTime, or none of them can, so the order is not guessed.',
       };
     }
+    if (games.some((game) => game.endTimeEpochMs === undefined)) return { kind: 'unverified' };
     return compareKeys(
       games.map((game) => game.endTimeEpochMs ?? 0),
       games,
