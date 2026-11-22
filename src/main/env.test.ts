@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
-import { loadEnvFile, readSensingKey } from './env.js';
+import { loadEnvCandidates, loadEnvFile, readSensingKey } from './env.js';
 
 const roots: string[] = [];
 after(() => {
@@ -66,5 +66,26 @@ describe('readSensingKey', () => {
   it('returns empty for a missing or blank key', () => {
     assert.equal(readSensingKey({}), '');
     assert.equal(readSensingKey({ SMARTSPECTRA_API_KEY: '   ' }), '');
+  });
+});
+
+describe('loadEnvCandidates', () => {
+  it('uses the first file that exists and skips empty or missing paths', () => {
+    const file = envFile('SMARTSPECTRA_API_KEY=from-second\n');
+    const env: NodeJS.ProcessEnv = {};
+    const result = loadEnvCandidates(
+      ['', path.join(tmpdir(), 'chesspulse-no-such-env'), file, envFile('CP_AI_KEY=unused\n')],
+      env,
+    );
+    assert.equal(result.found, true);
+    assert.equal(env.SMARTSPECTRA_API_KEY, 'from-second');
+    assert.equal(env.CP_AI_KEY, undefined);
+  });
+
+  it('reports the first candidate path when none exists', () => {
+    const first = path.join(tmpdir(), 'chesspulse-no-such-env');
+    const result = loadEnvCandidates(['', first], {});
+    assert.equal(result.found, false);
+    assert.equal(result.path, first);
   });
 });

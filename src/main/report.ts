@@ -11,7 +11,9 @@ import { firstIllegalMove, illegalMoveMessage, positionsFromMoves, type MovePosi
 import { createEngine, ENGINE_DEPTH, type PositionEval } from './engine.js';
 import { baselineFromSamples, coverageFromSamples, isUsableSample } from './session.js';
 import { defaultDataRoot, digestGames, readMeta, readSamples, saveReportArtifacts } from './store.js';
+import { AppError } from '../shared/errors.js';
 import {
+  REPORT_SCHEMA_VERSION,
   reportSchema,
   type PulseSample,
   type Refusal,
@@ -146,6 +148,7 @@ export async function buildReport(
     }
     const report = reportSchema.parse({
       ok: true,
+      schemaVersion: REPORT_SCHEMA_VERSION,
       sessionId,
       gamesDigest: digestGames(pgnBatch),
       coveragePct: coverage.pct,
@@ -193,7 +196,11 @@ export async function buildReport(
     if (control.signal?.aborted) return CANCELLED_REFUSAL;
     control.onCommitStart?.();
     if (control.signal?.aborted) return CANCELLED_REFUSAL;
-    await saveReportArtifacts(root, sessionId, JSON.stringify(report, null, 2) + '\n', pgnBatch);
+    try {
+      await saveReportArtifacts(root, sessionId, JSON.stringify(report, null, 2) + '\n', pgnBatch);
+    } catch (error) {
+      throw new AppError('storage_failed', { cause: error });
+    }
     return report;
   } finally {
     if (owned) await scorer.close();

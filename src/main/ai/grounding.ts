@@ -30,13 +30,20 @@ const CLAIM_PATTERNS: readonly RegExp[] = [
   /\b(?:felt|feeling) (?:anxious|nervous|stressed|panicked|overwhelmed|tilted)\b/i,
 ];
 
+export class GroundingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GroundingError';
+  }
+}
+
 export function groundInsight(stats: unknown, output: string): string {
   assertSupportedNotation(output);
   assertNoClaims(output);
   for (const match of output.matchAll(NUMBER)) {
     const token = withoutSentencePunctuation(match[0]);
     if (token.includes(',') && !VALID_COMMA_NUMBER.test(token)) {
-      throw new Error(`The AI response contained a malformed number: ${match[0]}. Nothing in the report changed.`);
+      throw new GroundingError(`The AI response contained a malformed number: ${match[0]}. Nothing in the report changed.`);
     }
   }
   const serialized = JSON.stringify(stats, (_key, value) => (typeof value === 'bigint' ? value.toString() : value)) ?? '';
@@ -44,7 +51,7 @@ export function groundInsight(stats: unknown, output: string): string {
   for (const match of output.matchAll(NUMBER)) {
     const token = withoutSentencePunctuation(match[0]);
     if (!allowed.has(canonicalDecimal(token))) {
-      throw new Error(`The AI response introduced a number that is not in the session data: ${token}. Nothing in the report changed.`);
+      throw new GroundingError(`The AI response introduced a number that is not in the session data: ${token}. Nothing in the report changed.`);
     }
   }
   return output;
@@ -55,14 +62,14 @@ function assertSupportedNotation(text: string): void {
   const unicodeDigit = [...text].find((character) => /\p{Nd}/u.test(character) && !/[0-9]/.test(character));
   const unsupported = unicodeNegative?.[0] ?? unicodeDigit;
   if (unsupported) {
-    throw new Error(`The AI response used unsupported numeric notation: ${unsupported}. Nothing in the report changed.`);
+    throw new GroundingError(`The AI response used unsupported numeric notation: ${unsupported}. Nothing in the report changed.`);
   }
 }
 
 function assertNoClaims(text: string): void {
   for (const pattern of CLAIM_PATTERNS) {
     if (pattern.test(text)) {
-      throw new Error('The AI response made a diagnostic or mental-state claim. Nothing in the report changed.');
+      throw new GroundingError('The AI response made a diagnostic or mental-state claim. Nothing in the report changed.');
     }
   }
 }

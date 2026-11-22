@@ -28,4 +28,16 @@ describe('safe logging', () => {
     logError('camera gone');
     assert.deepEqual(lines, [['sensing error 2'], ['camera gone']]);
   });
+
+  it('does not wrap the same console twice', () => {
+    const lines: unknown[][] = [];
+    const working = {
+      log: (...args: unknown[]) => lines.push(args),
+      error: (...args: unknown[]) => lines.push(args),
+    } as unknown as Console;
+    installSafeConsole(working);
+    installSafeConsole(working);
+    log('one line');
+    assert.deepEqual(lines, [['one line']]);
+  });
 });

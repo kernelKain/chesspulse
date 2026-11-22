@@ -69,7 +69,7 @@ export async function requestInsight(
       output = await callProvider(configured.config, prompt, fetchImpl, controller.signal);
     } catch (error) {
       const failure = options.signal?.aborted
-        ? new AiProviderError('The AI reading was cancelled. Nothing in this report depends on it.', false)
+        ? new AiProviderError('The AI reading was cancelled. Nothing in this report depends on it.', false, 'ai_cancelled')
         : providerFailure(error);
       if (!failure.retryable || attempt === 1) throw failure;
       continue;
@@ -84,7 +84,7 @@ export async function requestInsight(
       text: groundInsight(summary, output),
     };
   }
-  throw new Error('The AI provider did not respond. Nothing in this report depends on it.');
+  throw new AiProviderError('The AI provider did not respond. Nothing in this report depends on it.', true, 'ai_unavailable');
 }
 
 function computedSummary(report: Report): unknown {
@@ -109,7 +109,7 @@ function computedSummary(report: Report): unknown {
 function providerFailure(error: unknown): AiProviderError {
   if (error instanceof AiProviderError) return error;
   if (error instanceof Error && error.name === 'AbortError') {
-    return new AiProviderError('The AI provider timed out. Nothing in this report depends on it.', false);
+    return new AiProviderError('The AI provider timed out. Nothing in this report depends on it.', false, 'ai_unavailable');
   }
-  return new AiProviderError('The AI provider could not be reached. Nothing in this report depends on it.', true);
+  return new AiProviderError('The AI provider could not be reached. Nothing in this report depends on it.', true, 'ai_unavailable');
 }

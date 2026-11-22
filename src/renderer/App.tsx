@@ -20,6 +20,7 @@ import { CameraPreview } from './CameraPreview';
 import { CoachLine } from './CoachLine';
 import { GameList } from './GameList';
 import { InsightPanel, type InsightViewState } from './InsightPanel';
+import { readIpcError } from './ipc-error';
 import { PasteScreen } from './PasteScreen';
 import { SensingStrip } from './SensingStrip';
 import { Timeline } from './Timeline';
@@ -223,7 +224,7 @@ export function App() {
       setNote('Waiting for a face.');
     } catch (caught: unknown) {
       if (!revokedDuringStart.current && grantedNow.current) {
-        setError(ipcErrorText(caught, 'The session did not start. The camera stays off.'));
+        setError(readIpcError(caught, 'session_failed'));
       }
     } finally {
       startPending.current = false;
@@ -254,7 +255,7 @@ export function App() {
       const result = await bridge.setBetweenGames(!betweenGames);
       setBetweenGames(result.betweenGames);
     } catch (caught: unknown) {
-      setError(ipcErrorText(caught, 'The game boundary could not be saved.'));
+      setError(readIpcError(caught, 'session_failed'));
     } finally {
       setGapPending(false);
     }
@@ -279,7 +280,7 @@ export function App() {
       if (seq !== insightRequestSeq.current) return;
       setInsightState({
         status: 'error',
-        message: ipcErrorText(caught, 'The provider did not respond. Nothing in this report depends on it.'),
+        message: readIpcError(caught, 'ai_unavailable'),
       });
     }
   }
@@ -321,15 +322,7 @@ export function App() {
       setReportResult(parsed.data);
     } catch (caught: unknown) {
       if (seq !== reportRequestSeq.current) return;
-      const cancelled =
-        caught instanceof Error && (caught.name === 'AbortError' || /cancel/i.test(caught.message));
-      setReportError(
-        cancelled
-          ? 'Report build cancelled. No report was saved.'
-          : caught instanceof Error
-            ? caught.message
-            : 'The report could not be built.',
-      );
+      setReportError(readIpcError(caught, 'report_failed'));
     } finally {
       if (seq === reportRequestSeq.current) setReportBuilding(false);
     }
@@ -344,6 +337,19 @@ export function App() {
     } catch {
       // Let the player retry if the cancel request never reached main.
       setReportCancelling(false);
+    }
+  }
+
+  async function onCopyDiagnostics(): Promise<void> {
+    if (!bridge) {
+      setNote('This page is open outside the ChessPulse window. Diagnostics are unavailable.');
+      return;
+    }
+    try {
+      await bridge.copyDiagnostics();
+      setNote('Diagnostics copied. They contain no games, pulse samples, or keys.');
+    } catch (caught: unknown) {
+      setError(readIpcError(caught, 'internal'));
     }
   }
 
@@ -466,6 +472,9 @@ export function App() {
         <button type="button" aria-pressed={granted} onClick={() => void onConsent()}>
           {granted ? 'Revoke camera consent' : 'Allow the camera'}
         </button>
+        <button type="button" onClick={() => void onCopyDiagnostics()}>
+          Copy diagnostics
+        </button>
       </div>
     </main>
   );
@@ -497,13 +506,4 @@ function stoppedNote(meta: SessionMeta): string {
 
 function formatNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
-
-/** Electron wraps a rejected invoke in "Error invoking remote method …: Error: ", which is not for the player. */
-function ipcErrorText(caught: unknown, fallback: string): string {
-  if (!(caught instanceof Error)) return fallback;
-  const marker = 'Error: ';
-  const at = caught.message.lastIndexOf(marker);
-  const text = (at >= 0 ? caught.message.slice(at + marker.length) : caught.message).trim();
-  return text.length > 0 && !text.startsWith('Error invoking remote method') ? text : fallback;
 }

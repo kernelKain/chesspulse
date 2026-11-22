@@ -4,12 +4,13 @@ import { mkdir, open, readdir, readFile, rename, rm, writeFile } from 'node:fs/p
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
-import type { PulseSample, Report } from '../shared/contracts.js';
+import { REPORT_SCHEMA_VERSION, type PulseSample, type Report } from '../shared/contracts.js';
 import { requestInsight } from './ai/service.js';
 import {
   appendSamples,
   createSession,
   createSessionId,
+  deleteSession,
   digestGames,
   findMediaFiles,
   listSessions,
@@ -48,6 +49,7 @@ function sample(tUs: number): PulseSample {
 function reportFor(sessionId: string, pgns: readonly string[]): Report {
   return {
     ok: true,
+    schemaVersion: REPORT_SCHEMA_VERSION,
     sessionId,
     gamesDigest: digestGames(pgns),
     coveragePct: 80,
@@ -202,6 +204,58 @@ describe('session store', () => {
     assert.deepEqual(await listSessions(root), [meta.id]);
   });
 
+  it('repairs a corrupt index and writes a valid replacement', async () => {
+    const root = useRoot();
+    const meta = await createSession(root, {
+      startedAtEpochMs: anchor.epochMs,
+      startAnchor: anchor,
+    });
+    const indexFile = path.join(root, 'sessions', 'index.json');
+    await writeFile(indexFile, '{not json');
+    assert.deepEqual(await listSessions(root), [meta.id]);
+    const repaired = JSON.parse(await readFile(indexFile, 'utf8')) as { schemaVersion: number; ids: string[] };
+    assert.equal(repaired.schemaVersion, 1);
+    assert.deepEqual(repaired.ids, [meta.id]);
+  });
+
+  it('refuses a newer data index instead of rebuilding it', async () => {
+    const root = useRoot();
+    const meta = await createSession(root, {
+      startedAtEpochMs: anchor.epochMs,
+      startAnchor: anchor,
+    });
+    await writeFile(
+      path.join(root, 'sessions', 'index.json'),
+      JSON.stringify({ schemaVersion: 2, ids: [meta.id] }),
+    );
+    await assert.rejects(() => listSessions(root), /newer version/);
+  });
+
+  it('deletes one session folder and rewrites the index from what remains', async () => {
+    const root = useRoot();
+    const first = await createSession(root, {
+      startedAtEpochMs: anchor.epochMs,
+      startAnchor: anchor,
+    });
+    const second = await createSession(
+      root,
+      { startedAtEpochMs: anchor.epochMs + 1, startAnchor: anchor },
+      Uint8Array.from({ length: 10 }, () => 9),
+    );
+    assert.deepEqual(await listSessions(root), [first.id, second.id].sort());
+
+    assert.equal(await deleteSession(root, first.id), true);
+    assert.deepEqual(await listSessions(root), [second.id]);
+    await assert.rejects(() => readMeta(root, first.id), /No session/);
+    const index = JSON.parse(
+      await readFile(path.join(root, 'sessions', 'index.json'), 'utf8'),
+    ) as { ids: string[] };
+    assert.deepEqual(index.ids, [second.id]);
+
+    assert.equal(await deleteSession(root, first.id), false);
+    await assert.rejects(() => deleteSession(root, '../escape'), /Session id is not valid/);
+  });
+
   it('refuses another batch when the sample file is marked for repair', async () => {
     const root = useRoot();
     const meta = await createSession(root, {
@@ -238,10 +292,22 @@ describe('session store', () => {
     assert.deepEqual(await readGames(root, meta.id), ['[Event "Test"]\n1. e4 e5']);
 
     const legacyReport = Object.fromEntries(
-      Object.entries(report).filter(([key]) => key !== 'gamesDigest'),
+      Object.entries(report).filter(([key]) => key !== 'schemaVersion'),
     );
     await writeFile(path.join(root, 'sessions', meta.id, 'report.json'), JSON.stringify(legacyReport));
-    await assert.rejects(() => readReport(root, meta.id), /Build the report again/);
+    await assert.rejects(() => readReport(root, meta.id), /older version.*Build the report again/);
+
+    await writeFile(
+      path.join(root, 'sessions', meta.id, 'report.json'),
+      JSON.stringify({ ...report, schemaVersion: 2 }),
+    );
+    await assert.rejects(() => readReport(root, meta.id), /newer version.*Update the app/);
+
+    const noDigest = Object.fromEntries(
+      Object.entries(report).filter(([key]) => key !== 'gamesDigest'),
+    );
+    await writeFile(path.join(root, 'sessions', meta.id, 'report.json'), JSON.stringify(noDigest));
+    await assert.rejects(() => readReport(root, meta.id), /report is not valid/);
 
     await writeFile(path.join(root, 'sessions', meta.id, 'report.json'), '{"ok":false}');
     await assert.rejects(() => readReport(root, meta.id), /report is not valid/);

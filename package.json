@@ -6,11 +6,13 @@
   "main": "dist-electron/main/index.js",
   "scripts": {
     "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.electron.json && node --test dist-electron/shared/contracts.test.js dist-electron/shared/security.test.js dist-electron/shared/sensing.test.js dist-electron/shared/timeline.test.js dist-electron/shared/preview.test.js dist-electron/main/navigation.test.js dist-electron/main/env.test.js dist-electron/main/log.test.js dist-electron/main/permission.test.js dist-electron/main/store.test.js dist-electron/main/session.test.js dist-electron/main/session-stop.test.js dist-electron/main/shutdown.test.js dist-electron/main/coach.test.js dist-electron/main/ai/grounding.test.js dist-electron/main/ai/providers.test.js dist-electron/main/ai/service.test.js dist-electron/main/capture-samples.test.js dist-electron/main/capture.test.js dist-electron/main/analysis/pgn.test.js dist-electron/main/analysis/paste.test.js dist-electron/main/analysis/positions.test.js dist-electron/main/analysis/metrics.test.js dist-electron/main/analysis/align.test.js dist-electron/main/engine.test.js dist-electron/main/report.test.js dist-electron/main/report-lock.test.js scripts/vite-ready.test.mjs",
+    "test": "tsc -p tsconfig.electron.json && node --test dist-electron/shared/contracts.test.js dist-electron/shared/errors.test.js dist-electron/shared/security.test.js dist-electron/shared/sensing.test.js dist-electron/shared/timeline.test.js dist-electron/shared/preview.test.js dist-electron/main/navigation.test.js dist-electron/main/env.test.js dist-electron/main/log.test.js dist-electron/main/log-file.test.js dist-electron/main/diagnostics.test.js dist-electron/main/doctor.test.js dist-electron/main/ipc-guard.test.js dist-electron/main/ipc-contract.test.js dist-electron/main/permission.test.js dist-electron/main/store.test.js dist-electron/main/session.test.js dist-electron/main/session-stop.test.js dist-electron/main/shutdown.test.js dist-electron/main/coach.test.js dist-electron/main/ai/grounding.test.js dist-electron/main/ai/providers.test.js dist-electron/main/ai/service.test.js dist-electron/main/capture-samples.test.js dist-electron/main/capture.test.js dist-electron/main/analysis/pgn.test.js dist-electron/main/analysis/paste.test.js dist-electron/main/analysis/positions.test.js dist-electron/main/analysis/metrics.test.js dist-electron/main/analysis/align.test.js dist-electron/main/engine.test.js dist-electron/main/report.test.js dist-electron/main/report-lock.test.js dist-electron/main/report-export.test.js scripts/vite-ready.test.mjs",
     "test:consent": "npm run build && electron scripts/consent-bridge.mjs",
-    "build": "tsc -p tsconfig.electron.json && vite build",
+    "build": "tsc -p tsconfig.electron.json && vite build && vite build --config vite.preload.mts",
+    "dist": "npm run build && electron-builder --linux AppImage",
     "dev": "node scripts/dev.mjs",
     "report": "tsc -p tsconfig.electron.json && node dist-electron/main/report.js",
+    "doctor": "tsc -p tsconfig.electron.json && node dist-electron/main/doctor-cli.js",
     "bench:depth": "tsc -p tsconfig.electron.json && node scripts/engine-depth-bench.mjs",
     "start": "electron ."
   },
@@ -22,10 +24,33 @@
     },
     "files": [
       "dist/**",
-      "dist-electron/**"
+      "dist-electron/**",
+      "!node_modules/@smartspectra/node-sdk-*/**",
+      "!node_modules/stockfish/bin/stockfish-19.js",
+      "!node_modules/stockfish/bin/stockfish-19.wasm",
+      "!node_modules/stockfish/bin/stockfish-19-single.js",
+      "!node_modules/stockfish/bin/stockfish-19-single.wasm",
+      "!node_modules/stockfish/bin/stockfish-19-lite.js",
+      "!node_modules/stockfish/bin/stockfish-19-lite.wasm",
+      "!node_modules/stockfish/bin/stockfish-19-asm.js"
     ],
+    "extraResources": [
+      {
+        "from": "node_modules/@smartspectra/node-sdk-linux-x64",
+        "to": "smartspectra",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/koffi/**"
+    ],
+    "artifactName": "ChessPulse-${version}-${arch}.${ext}",
     "linux": {
-      "target": "AppImage",
+      "target": [
+        "AppImage"
+      ],
       "category": "Utility"
     }
   },

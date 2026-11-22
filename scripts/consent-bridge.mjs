@@ -12,6 +12,7 @@ const require = createRequire(import.meta.url);
 const root = path.resolve(import.meta.dirname, '..');
 const page = pathToFileURL(path.join(root, 'dist/index.html')).href;
 const { registerConsentHandler } = require(path.join(root, 'dist-electron/main/consent.js'));
+const { deserializeAppError } = require(path.join(root, 'dist-electron/shared/errors.js'));
 
 app.whenReady().then(async () => {
   registerConsentHandler({ appFileUrl: page });
@@ -31,13 +32,14 @@ app.whenReady().then(async () => {
     'window.chesspulse.setConsent("yes").then(() => "accepted", (error) => error.message)',
     true,
   );
+  const badError = deserializeAppError(bad);
   const ok =
     allowed?.granted === true &&
     allowed?.cameraAllowed === true &&
     revoked?.granted === false &&
     revoked?.cameraAllowed === false &&
-    bad === 'Consent was not a yes or no.';
-  console.log(JSON.stringify({ allowed, revoked, bad, ok }));
+    badError?.code === 'invalid_request';
+  console.log(JSON.stringify({ allowed, revoked, bad, badCode: badError?.code ?? null, ok }));
   app.exit(ok ? 0 : 1);
 }).catch((error) => {
   console.error(error instanceof Error ? error.message : error);

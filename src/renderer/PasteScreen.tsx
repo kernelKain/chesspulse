@@ -9,6 +9,7 @@ import {
   type PasteState,
   type PasteValidation,
 } from '../shared/contracts';
+import { readIpcError } from './ipc-error';
 
 const INITIAL_SLOTS = 3;
 const MAX_SLOTS = 20;
@@ -97,9 +98,7 @@ export function PasteScreen({
       })
       .catch((error: unknown) => {
         if (seq !== requestSeq.current) return;
-        setBridgeError(
-          error instanceof Error ? error.message : 'Games could not be validated.',
-        );
+        setBridgeError(readIpcError(error, 'pgn_invalid'));
       })
       .finally(() => {
         if (seq === requestSeq.current) setValidating(false);

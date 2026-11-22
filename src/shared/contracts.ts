@@ -6,6 +6,9 @@ import { z } from 'zod';
 /** Session files are readable only by a writer that stamps this version. */
 export const SCHEMA_VERSION = 1;
 
+/** Reports change shape independently of session headers, so they carry their own version. */
+export const REPORT_SCHEMA_VERSION = 1;
+
 const monoUsSchema = z.number().finite().nonnegative();
 
 export const pulseSampleSchema = z
@@ -199,6 +202,7 @@ const bandSummarySchema = z.discriminatedUnion('status', [
 export const reportSchema = z
   .object({
     ok: z.literal(true),
+    schemaVersion: z.literal(REPORT_SCHEMA_VERSION),
     sessionId: z.string().min(1),
     gamesDigest: z.string().regex(/^[0-9a-f]{64}$/),
     coveragePct: z.number().finite().min(0).max(100),
@@ -232,6 +236,20 @@ export const reportSchema = z
 
 export const reportResultSchema = z.discriminatedUnion('ok', [reportSchema, refusalSchema]);
 
+/** A shared report omits the pulse trace and says so in the file. */
+export const exportedReportSchema = reportSchema.extend({
+  timeline: timelineDataSchema.omit({ samples: true }),
+});
+
+export const reportExportSchema = z
+  .object({
+    format: z.literal('chesspulse-report-export'),
+    exportedAt: z.string().min(1),
+    note: z.literal('This file contains no pulse samples.'),
+    report: exportedReportSchema,
+  })
+  .strict();
+
 export const aiProviderSchema = z.enum([
   'openai',
   'anthropic',
@@ -253,7 +271,15 @@ export const sessionStartResultSchema = z
   })
   .strict();
 
-export const sessionStopRequestSchema = z.object({}).strict();
+export const emptyRequestSchema = z.object({}).strict();
+export const sessionStopRequestSchema = emptyRequestSchema;
+
+/** The diagnostics bundle is written to the clipboard in main; the page only learns it worked. */
+export const diagnosticsResultSchema = z
+  .object({
+    copied: z.literal(true),
+  })
+  .strict();
 
 export const sampleBatchSchema = z.array(pulseSampleSchema);
 
@@ -343,6 +369,38 @@ export const reportCancelRequestSchema = z
 export const reportCancelResultSchema = z
   .object({
     cancelled: z.boolean(),
+  })
+  .strict();
+
+export const reportExportRequestSchema = z
+  .object({
+    sessionId: z.string().min(1),
+  })
+  .strict();
+
+export const reportExportResultSchema = z.discriminatedUnion('exported', [
+  z
+    .object({
+      exported: z.literal(false),
+    })
+    .strict(),
+  z
+    .object({
+      exported: z.literal(true),
+      path: z.string().min(1),
+    })
+    .strict(),
+]);
+
+export const sessionDeleteRequestSchema = z
+  .object({
+    sessionId: z.string().min(1),
+  })
+  .strict();
+
+export const sessionDeleteResultSchema = z
+  .object({
+    deleted: z.boolean(),
   })
   .strict();
 
@@ -490,13 +548,17 @@ export type TimelineData = z.infer<typeof timelineDataSchema>;
 export type ReportGame = z.infer<typeof reportGameSchema>;
 export type Report = z.infer<typeof reportSchema>;
 export type ReportResult = z.infer<typeof reportResultSchema>;
+export type ReportExport = z.infer<typeof reportExportSchema>;
 export type ReportProgress = z.infer<typeof reportProgressSchema>;
+export type ReportExportResult = z.infer<typeof reportExportResultSchema>;
+export type SessionDeleteResult = z.infer<typeof sessionDeleteResultSchema>;
 export type PasteGameSummary = z.infer<typeof pasteGameSummarySchema>;
 export type PasteSlot = z.infer<typeof pasteSlotSchema>;
 export type PasteState = z.infer<typeof pasteStateSchema>;
 export type PasteValidation = z.infer<typeof pasteValidationSchema>;
 export type ValidationMessage = z.infer<typeof validationMessageSchema>;
 export type SdkError = z.infer<typeof sdkErrorSchema>;
+export type DiagnosticsResult = z.infer<typeof diagnosticsResultSchema>;
 export type SessionEndReason = z.infer<typeof sessionEndReasonSchema>;
 export type SessionEnded = z.infer<typeof sessionEndedSchema>;
 export type CoachMessage = z.infer<typeof coachMessageSchema>;

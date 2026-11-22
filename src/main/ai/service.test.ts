@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import type { Report } from '../../shared/contracts.js';
+import { REPORT_SCHEMA_VERSION, type Report } from '../../shared/contracts.js';
 import { requestInsight } from './service.js';
 
 const ENV = { CP_AI_KEY: 'test-secret', CP_AI_MODEL: 'test-model' };
@@ -16,6 +16,7 @@ function digest(pgns: readonly string[]): string {
 
 const REPORT: Report = {
   ok: true,
+  schemaVersion: REPORT_SCHEMA_VERSION,
   sessionId: 's1',
   gamesDigest: digest([PGN]),
   coveragePct: 80,

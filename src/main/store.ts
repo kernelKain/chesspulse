@@ -7,6 +7,7 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import {
+  REPORT_SCHEMA_VERSION,
   SCHEMA_VERSION,
   pulseSampleSchema,
   reportBuildRequestSchema,
@@ -43,6 +44,17 @@ const sessionIndexSchema = z
 
 const tails = new Map<string, Promise<void>>();
 const tornSamples = new Set<string>();
+
+/** Why a stored report could not be opened. The message stays player-facing; the kind picks copy. */
+export class StoredReportError extends Error {
+  constructor(
+    readonly kind: 'missing' | 'stale' | 'newer' | 'invalid',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'StoredReportError';
+  }
+}
 
 export interface NewSession {
   startedAtEpochMs: number;
@@ -244,12 +256,16 @@ export async function readReport(root: string, sessionId: string): Promise<Repor
   try {
     value = JSON.parse(await readFile(file, 'utf8'));
   } catch (error) {
-    if (isEnoent(error)) throw new Error('Build a report before requesting an AI reading.');
-    throw new Error('The stored report is not valid.');
+    if (isEnoent(error)) throw new StoredReportError('missing', 'Build a report before requesting an AI reading.');
+    throw new StoredReportError('invalid', 'The stored report is not valid.');
   }
+  assertReportVersion(value);
   const parsed = reportSchema.safeParse(value);
   if (!parsed.success || parsed.data.sessionId !== sessionId) {
-    throw new Error('The stored report is not valid or is stale. Build the report again before requesting AI.');
+    throw new StoredReportError(
+      'invalid',
+      'The stored report is not valid or is stale. Build the report again before requesting AI.',
+    );
   }
   return parsed.data;
 }
@@ -281,6 +297,25 @@ export async function readGames(root: string, sessionId: string): Promise<string
 export async function deleteReport(root: string, sessionId: string): Promise<void> {
   await exclusive(root, async () => {
     await rm(path.join(sessionDir(root, sessionId), 'report.json'), { force: true });
+  });
+}
+
+// What: removes one session folder, then rebuilds the index from what remains.
+// Why: a failed index write must leave a readable store, and a reader must not see a deleted id.
+// Removed: deleting a session would leave a ghost row or a half-written index.
+export async function deleteSession(root: string, sessionId: string): Promise<boolean> {
+  const dir = sessionDir(root, sessionId);
+  return exclusive(root, async () => {
+    let existed = true;
+    try {
+      await stat(dir);
+    } catch (error) {
+      if (isEnoent(error)) existed = false;
+      else throw error;
+    }
+    if (existed) await rm(dir, { recursive: true, force: false });
+    await writeIndex(root, await scanSessionIds(root));
+    return existed;
   });
 }
 
@@ -347,22 +382,51 @@ function parseMeta(value: unknown): SessionMeta {
   return parsed.data;
 }
 
-function assertCurrentVersion(value: unknown): void {
+function assertCurrentVersion(value: unknown, label = 'session'): void {
   if (typeof value !== 'object' || value === null || !('schemaVersion' in value)) return;
   const version = value.schemaVersion;
   if (typeof version === 'number' && version > SCHEMA_VERSION) {
-    throw new Error('This session was written by a newer version of ChessPulse.');
+    throw new Error(`This ${label} was written by a newer version of ChessPulse.`);
   }
+}
+
+function assertReportVersion(value: unknown): void {
+  if (typeof value !== 'object' || value === null) {
+    throw new StoredReportError('invalid', 'The stored report is not valid.');
+  }
+  const version = (value as { schemaVersion?: unknown }).schemaVersion;
+  if (typeof version === 'number' && version > REPORT_SCHEMA_VERSION) {
+    throw new StoredReportError(
+      'newer',
+      'This report was written by a newer version of ChessPulse. Update the app to read it.',
+    );
+  }
+  if (version === REPORT_SCHEMA_VERSION) return;
+  // A versionless object that still looks like a finished report is an older report, not junk.
+  if ((value as { ok?: unknown }).ok !== true) {
+    throw new StoredReportError('invalid', 'The stored report is not valid.');
+  }
+  throw new StoredReportError(
+    'stale',
+    'This report was written by an older version of ChessPulse. Build the report again from the pasted games.',
+  );
 }
 
 async function readIndexIds(root: string): Promise<string[]> {
   const indexFile = path.join(root, 'sessions', 'index.json');
+  let value: unknown;
+  let parsedJson = true;
   try {
-    const text = await readFile(indexFile, 'utf8');
-    const parsed = sessionIndexSchema.safeParse(JSON.parse(text));
-    if (parsed.success && (await indexMatchesDisk(root, parsed.data.ids))) return parsed.data.ids;
+    value = JSON.parse(await readFile(indexFile, 'utf8'));
   } catch {
-    // A missing or broken index is rebuilt from the session folders.
+    // A missing or unreadable index is rebuilt from the session folders.
+    parsedJson = false;
+  }
+  if (parsedJson) {
+    // A newer index must be refused, not silently replaced by this version's view of the folders.
+    assertCurrentVersion(value, 'data index');
+    const parsed = sessionIndexSchema.safeParse(value);
+    if (parsed.success && (await indexMatchesDisk(root, parsed.data.ids))) return parsed.data.ids;
   }
   const ids = await scanSessionIds(root);
   await writeIndex(root, ids);

@@ -41,6 +41,15 @@ function run(command, args, env) {
 const compile = run('npx', ['tsc', '-p', 'tsconfig.electron.json']);
 compile.on('exit', (code) => {
   if (code !== 0) shutdown(code ?? 1);
+  // The sandboxed preload cannot require relative files, so its shared imports are bundled here.
+  const preload = run('npx', ['vite', 'build', '--config', 'vite.preload.mts']);
+  preload.on('exit', (preloadCode) => {
+    if (preloadCode !== 0) shutdown(preloadCode ?? 1);
+    startDevServer();
+  });
+});
+
+function startDevServer() {
   portInUse(5173)
     .then((occupied) => {
       if (occupied) {
@@ -64,4 +73,4 @@ compile.on('exit', (code) => {
       console.error(error instanceof Error ? error.message : error);
       shutdown(1);
     });
-});
+}

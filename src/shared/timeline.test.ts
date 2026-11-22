@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { PulseSample, Refusal, Report } from './contracts.js';
+import { REPORT_SCHEMA_VERSION, type PulseSample, type Refusal, type Report } from './contracts.js';
 import {
   alignmentConfidenceLabel,
   buildGameMiniViews,
@@ -28,6 +28,7 @@ function sample(tSec: number, bpm: number, confidence = 80, stable = true): Puls
 function baseReport(overrides: Partial<Report> = {}): Report {
   return {
     ok: true,
+    schemaVersion: REPORT_SCHEMA_VERSION,
     sessionId: '01TESTSESSION0000000000000',
     gamesDigest: 'a'.repeat(64),
     coveragePct: 92,

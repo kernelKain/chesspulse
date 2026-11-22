@@ -38,6 +38,9 @@ export interface ChessPulseBridge {
   onReportProgress(listener: (progress: ReportProgress) => void): () => void;
   buildReport(sessionId: string, pgns: string[]): Promise<ReportResult>;
   cancelReport(sessionId: string): Promise<{ cancelled: boolean }>;
+  copyDiagnostics(): Promise<{ copied: true }>;
+  deleteSession(sessionId: string): Promise<{ deleted: boolean }>;
+  exportReport(sessionId: string): Promise<{ exported: false } | { exported: true; path: string }>;
 }
 
 declare global {

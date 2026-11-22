@@ -1,18 +1,17 @@
 // What: the Electron main process. It opens one local window and owns the camera, never the page.
 // Why: the SmartSpectra key and native runtime stay here, so the page receives only numbers.
 // Removed: the renderer would have no desktop process to attach to, and no way to sense.
+// The native override must be the first import: the SDK loads its shared library at import time.
+import './native-runtime.js';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { app, BrowserWindow, session } from 'electron';
 import {
-  coachGapRequestSchema,
   coachMessageSchema,
   previewFrameSchema,
   sampleBatchSchema,
   sdkErrorSchema,
-  sessionStartRequestSchema,
   sessionStartResultSchema,
-  sessionStopRequestSchema,
   validationMessageSchema,
   type PreviewFrame,
   type SdkError,
@@ -20,14 +19,20 @@ import {
   type SessionMeta,
   type ValidationMessage,
 } from '../shared/contracts.js';
+import { EVENT_CHANNELS } from '../shared/channels.js';
 import { contentSecurityPolicy } from '../shared/security.js';
+import { AppError, toAppError } from '../shared/errors.js';
 import { allowsNavigation } from './navigation.js';
 import { startCapture, type CaptureSession } from './capture.js';
 import { BetweenGamesCoach } from './coach.js';
 import { currentConsent, registerConsentHandler } from './consent.js';
-import { loadEnvFile, readSensingKey } from './env.js';
-import { installSafeConsole, log, logError } from './log.js';
+import { loadEnvCandidates, readSensingKey } from './env.js';
+import { installFileLog, installSafeConsole, log, logError } from './log.js';
+import { registerDiagnosticsHandler } from './diagnostics-ipc.js';
+import { runDoctor } from './doctor.js';
 import { registerInsightHandler } from './insight-ipc.js';
+import { registerInvokeChannel } from './ipc-registry.js';
+import { registerLibraryHandler } from './library-ipc.js';
 import { registerPasteHandler } from './paste.js';
 import { registerReportHandler } from './report-ipc.js';
 import { grantsMediaPermission } from './permission.js';
@@ -43,16 +48,6 @@ import {
 import { createSessionStopper } from './session-stop.js';
 import { createShutdownHooks } from './shutdown.js';
 import { defaultDataRoot } from './store.js';
-
-const SESSION_START_CHANNEL = 'cp:session:start';
-const SESSION_STOP_CHANNEL = 'cp:session:stop';
-const SAMPLE_CHANNEL = 'cp:sample:batch';
-const VALIDATION_CHANNEL = 'cp:validation';
-const SDK_ERROR_CHANNEL = 'cp:sdk:error';
-const PREVIEW_CHANNEL = 'cp:preview';
-const COACH_GAP_CHANNEL = 'cp:coach:gap';
-const COACH_MESSAGE_CHANNEL = 'cp:coach:message';
-const SESSION_ENDED_CHANNEL = 'cp:session:ended';
 
 let capture: CaptureSession | null = null;
 let coach: BetweenGamesCoach | null = null;
@@ -83,10 +78,10 @@ function publishToWindows(channel: string, payload: unknown): void {
 
 function publishSamples(samples: readonly unknown[]): void {
   const parsed = sampleBatchSchema.parse(samples);
-  publishToWindows(SAMPLE_CHANNEL, parsed);
+  publishToWindows(EVENT_CHANNELS.samples, parsed);
   // Only batches already committed to the session file can trigger the coach.
   const message = coach?.ingest(parsed);
-  if (message) publishToWindows(COACH_MESSAGE_CHANNEL, coachMessageSchema.parse(message));
+  if (message) publishToWindows(EVENT_CHANNELS.coachMessage, coachMessageSchema.parse(message));
 }
 
 let lastValidationCode: number | null = null;
@@ -97,18 +92,18 @@ function publishValidation(message: ValidationMessage): void {
     lastValidationCode = parsed.code;
     log(`[chesspulse] sensing hint ${parsed.code}: ${parsed.hint}`);
   }
-  publishToWindows(VALIDATION_CHANNEL, parsed);
+  publishToWindows(EVENT_CHANNELS.validation, parsed);
 }
 
 function publishPreview(frame: PreviewFrame): void {
-  publishToWindows(PREVIEW_CHANNEL, previewFrameSchema.parse(frame));
+  publishToWindows(EVENT_CHANNELS.preview, previewFrameSchema.parse(frame));
 }
 
 function publishSdkError(error: SdkError): void {
   const parsed = sdkErrorSchema.parse(error);
   // The page shows this; the terminal keeps the code so a failure can be diagnosed after the fact.
   logError(`[chesspulse] sensing error ${parsed.code}: ${parsed.message} (retryable=${parsed.retryable})`);
-  publishToWindows(SDK_ERROR_CHANNEL, parsed);
+  publishToWindows(EVENT_CHANNELS.sdkError, parsed);
 }
 
 /** The camera is released before the session closes, so the last batch still has a session to land in. */
@@ -129,7 +124,7 @@ async function stopCapture(): Promise<SessionEndReason | undefined> {
 const sessionStopper = createSessionStopper({
   stopCapture,
   stopSession: (reason) => stopSession(defaultDataRoot(), currentAnchor(), reason),
-  publish: (event) => publishToWindows(SESSION_ENDED_CHANNEL, event),
+  publish: (event) => publishToWindows(EVENT_CHANNELS.sessionEnded, event),
 });
 
 /**
@@ -161,23 +156,19 @@ function currentAnchor(): { monoUs: number; epochMs: number } {
 }
 
 function registerSessionHandlers(): void {
-  ipcMain.handle(SESSION_START_CHANNEL, async (_event, payload: unknown) => {
-    if (!currentConsent()) throw new Error('The camera stays off until you consent.');
-    const parsed = sessionStartRequestSchema.safeParse(payload);
-    if (!parsed.success) throw new Error('Choose a time control before starting.');
-    if (capture) throw new Error('A session is already running.');
+  registerInvokeChannel('sessionStart', async (_event, payload) => {
+    if (!currentConsent()) throw new AppError('consent_required');
+    if (capture) throw new AppError('session_busy');
     shutdownHooks.beginStart();
     // A previous stop may still be draining the camera; the SDK is process-global.
     if (stoppingSession) await stoppingSession.catch(() => undefined);
-    if (!shutdownHooks.captureAllowed()) {
-      throw new Error('Sensing was cancelled before it started.');
-    }
+    if (!shutdownHooks.captureAllowed()) throw new AppError('session_failed');
     const apiKey = readSensingKey(process.env);
-    if (!apiKey) throw new Error('The SmartSpectra key is missing. Add SMARTSPECTRA_API_KEY to .env.');
+    if (!apiKey) throw new AppError('key_missing');
     const anchor = currentAnchor();
     lastValidationCode = null;
     if (!hasActiveSession(defaultDataRoot())) sessionStopper.beginSession();
-    const meta = await startSession(defaultDataRoot(), anchor, parsed.data.timeControl, {
+    const meta = await startSession(defaultDataRoot(), anchor, payload.timeControl, {
       onLimit: () => {
         void stopEverything('limit').catch((error: unknown) => {
           // The session is already in 'stopping', so it cannot accept over-limit samples; the
@@ -190,19 +181,19 @@ function registerSessionHandlers(): void {
     });
     if (!shutdownHooks.captureAllowed()) {
       await stopEverything('user').catch(() => undefined);
-      throw new Error('Sensing was cancelled before the camera opened.');
+      throw new AppError('session_failed');
     }
     // A limit or storage stop can finalize the session while startSession is still awaiting work.
     if (stoppingSession || !hasActiveSession(defaultDataRoot())) {
       await stopEverything('user').catch(() => undefined);
-      throw new Error('The session ended before the camera opened.');
+      throw new AppError('session_failed');
     }
     coach = new BetweenGamesCoach(meta.startAnchor.monoUs);
     // Consent can be withdrawn while the header is written. Checked again immediately before the
     // camera opens, with no await in between, so a revocation cannot slip through.
     if (!currentConsent()) {
       await stopEverything('user').catch(() => undefined);
-      throw new Error('The camera stays off until you consent.');
+      throw new AppError('consent_required');
     }
     try {
       capture = startCapture({
@@ -226,22 +217,20 @@ function registerSessionHandlers(): void {
       });
     } catch (error) {
       await stopEverything('sdkError').catch(() => undefined);
-      throw error;
+      throw new AppError('camera_unavailable', { cause: error });
     }
     return sessionStartResultSchema.parse({ sessionId: meta.id });
   });
-  ipcMain.handle(SESSION_STOP_CHANNEL, async (_event, payload: unknown) => {
-    const parsed = sessionStopRequestSchema.safeParse(payload ?? {});
-    if (!parsed.success) throw new Error('Stop does not take any details.');
-    return stopEverything('user');
-  });
-  ipcMain.handle(COACH_GAP_CHANNEL, (_event, payload: unknown) => {
-    const parsed = coachGapRequestSchema.safeParse(payload);
-    if (!parsed.success) throw new Error('Mark the game boundary as either between games or playing.');
-    if (!coach) throw new Error('Start sensing before marking a game boundary.');
-    const message = coach.setBetweenGames(parsed.data.betweenGames);
-    if (message) publishToWindows(COACH_MESSAGE_CHANNEL, coachMessageSchema.parse(message));
-    return parsed.data;
+  registerInvokeChannel('sessionStop', async () =>
+    stopEverything('user').catch((error: unknown) => {
+      throw toAppError(error, 'session_failed');
+    }),
+  );
+  registerInvokeChannel('coachGap', (_event, payload) => {
+    if (!coach) throw new AppError('session_not_running');
+    const message = coach.setBetweenGames(payload.betweenGames);
+    if (message) publishToWindows(EVENT_CHANNELS.coachMessage, coachMessageSchema.parse(message));
+    return payload;
   });
 }
 
@@ -339,7 +328,19 @@ function createWindow(): void {
 installSafeConsole();
 
 app.whenReady().then(async () => {
-  const env = loadEnvFile(path.join(app.getAppPath(), '.env'), process.env);
+  const besideExecutable = process.env.APPIMAGE
+    ? path.dirname(process.env.APPIMAGE)
+    : path.dirname(app.getPath('exe'));
+  const env = loadEnvCandidates(
+    [
+      process.env.CHESSPULSE_ENV_FILE ?? '',
+      app.isPackaged ? path.join(besideExecutable, '.env') : path.join(app.getAppPath(), '.env'),
+      app.isPackaged ? path.join(app.getPath('userData'), '.env') : '',
+    ],
+    process.env,
+  );
+  installFileLog({ root: defaultDataRoot(), env: process.env });
+  log('[chesspulse] application ready');
   if (env.found && env.loadedKeys.length > 0) {
     log(`[chesspulse] loaded ${env.loadedKeys.length} setting(s) from .env`);
   }
@@ -354,6 +355,11 @@ app.whenReady().then(async () => {
   registerPasteHandler();
   registerReportHandler();
   registerInsightHandler();
+  registerLibraryHandler(defaultDataRoot);
+  registerDiagnosticsHandler(defaultDataRoot, {
+    doctorLines: async () =>
+      (await runDoctor({ env: process.env, envFile: env, dataRoot: defaultDataRoot() })).lines,
+  });
   setSampleSink(defaultDataRoot(), publishSamples);
   try {
     const recovery = await recoverInterruptedSessions(defaultDataRoot());

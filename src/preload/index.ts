@@ -2,23 +2,27 @@
 // Why: the page must not receive Node, files, or keys, and main checks every payload again.
 // Removed: a later screen could not start or stop a session.
 import { contextBridge, ipcRenderer } from 'electron';
+import { EVENT_CHANNELS, INVOKE_CHANNELS } from '../shared/channels.js';
+import { AppError, deserializeAppError, serializeAppError } from '../shared/errors.js';
 
-const CONSENT_CHANNEL = 'cp:consent:set';
-const SESSION_START_CHANNEL = 'cp:session:start';
-const SESSION_STOP_CHANNEL = 'cp:session:stop';
-const SAMPLE_CHANNEL = 'cp:sample:batch';
-const VALIDATION_CHANNEL = 'cp:validation';
-const SDK_ERROR_CHANNEL = 'cp:sdk:error';
-const PREVIEW_CHANNEL = 'cp:preview';
-const PASTE_VALIDATE_CHANNEL = 'cp:pgn:validate';
-const REPORT_BUILD_CHANNEL = 'cp:report:build';
-const REPORT_PROGRESS_CHANNEL = 'cp:report:progress';
-const REPORT_CANCEL_CHANNEL = 'cp:report:cancel';
-const COACH_GAP_CHANNEL = 'cp:coach:gap';
-const COACH_MESSAGE_CHANNEL = 'cp:coach:message';
-const SESSION_ENDED_CHANNEL = 'cp:session:ended';
-const INSIGHT_REQUEST_CHANNEL = 'cp:insight:request';
-const INSIGHT_CANCEL_CHANNEL = 'cp:insight:cancel';
+/** Preload-side argument checks are programming errors, but they still leave as a typed code. */
+function rejectInvalidRequest(): Promise<never> {
+  return Promise.reject(new Error(serializeAppError(new AppError('invalid_request'))));
+}
+
+/**
+ * Every rejection leaves this process as a typed code in the message.
+ * contextBridge drops custom Error fields, so a code marker is the only transport that survives.
+ */
+async function invoke(channel: string, payload: unknown): Promise<unknown> {
+  try {
+    return await ipcRenderer.invoke(channel, payload);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : error;
+    const appError = deserializeAppError(detail) ?? new AppError('internal', { cause: error });
+    throw new Error(serializeAppError(appError));
+  }
+}
 
 interface ConsentState {
   granted: boolean;
@@ -77,15 +81,15 @@ function readConsentState(value: unknown): ConsentState {
 contextBridge.exposeInMainWorld('chesspulse', {
   setConsent(granted: unknown): Promise<ConsentState> {
     if (typeof granted !== 'boolean') {
-      return Promise.reject(new Error('Consent was not a yes or no.'));
+      return rejectInvalidRequest();
     }
-    return ipcRenderer.invoke(CONSENT_CHANNEL, { granted }).then(readConsentState);
+    return invoke(INVOKE_CHANNELS.consentSet.name, { granted }).then(readConsentState);
   },
   startSession(timeControl: unknown): Promise<{ sessionId: string }> {
     if (typeof timeControl !== 'string') {
-      return Promise.reject(new Error('Choose a time control before starting.'));
+      return rejectInvalidRequest();
     }
-    return ipcRenderer.invoke(SESSION_START_CHANNEL, { timeControl }).then((value: unknown) => {
+    return invoke(INVOKE_CHANNELS.sessionStart.name, { timeControl }).then((value: unknown) => {
       if (typeof value !== 'object' || value === null || !('sessionId' in value) || typeof value.sessionId !== 'string') {
         throw new Error('The window returned an unexpected session.');
       }
@@ -93,7 +97,7 @@ contextBridge.exposeInMainWorld('chesspulse', {
     });
   },
   stopSession(): Promise<{ id: string }> {
-    return ipcRenderer.invoke(SESSION_STOP_CHANNEL, {}).then((value: unknown) => {
+    return invoke(INVOKE_CHANNELS.sessionStop.name, {}).then((value: unknown) => {
       if (
         typeof value !== 'object' ||
         value === null ||
@@ -115,9 +119,9 @@ contextBridge.exposeInMainWorld('chesspulse', {
         // A bad batch is dropped. The stored trace is unchanged.
       }
     };
-    ipcRenderer.on(SAMPLE_CHANNEL, handler);
+    ipcRenderer.on(EVENT_CHANNELS.samples, handler);
     return () => {
-      ipcRenderer.removeListener(SAMPLE_CHANNEL, handler);
+      ipcRenderer.removeListener(EVENT_CHANNELS.samples, handler);
     };
   },
   onValidation(listener: (message: ValidationMessage) => void): () => void {
@@ -128,9 +132,9 @@ contextBridge.exposeInMainWorld('chesspulse', {
         // A bad hint is dropped. The strip keeps its own state.
       }
     };
-    ipcRenderer.on(VALIDATION_CHANNEL, handler);
+    ipcRenderer.on(EVENT_CHANNELS.validation, handler);
     return () => {
-      ipcRenderer.removeListener(VALIDATION_CHANNEL, handler);
+      ipcRenderer.removeListener(EVENT_CHANNELS.validation, handler);
     };
   },
   onSdkError(listener: (error: SdkError) => void): () => void {
@@ -141,9 +145,9 @@ contextBridge.exposeInMainWorld('chesspulse', {
         // A bad error is dropped. The session controls still work.
       }
     };
-    ipcRenderer.on(SDK_ERROR_CHANNEL, handler);
+    ipcRenderer.on(EVENT_CHANNELS.sdkError, handler);
     return () => {
-      ipcRenderer.removeListener(SDK_ERROR_CHANNEL, handler);
+      ipcRenderer.removeListener(EVENT_CHANNELS.sdkError, handler);
     };
   },
   onPreview(listener: (frame: PreviewFrame) => void): () => void {
@@ -154,16 +158,16 @@ contextBridge.exposeInMainWorld('chesspulse', {
         // A bad frame is dropped. The next one is a fresh copy.
       }
     };
-    ipcRenderer.on(PREVIEW_CHANNEL, handler);
+    ipcRenderer.on(EVENT_CHANNELS.preview, handler);
     return () => {
-      ipcRenderer.removeListener(PREVIEW_CHANNEL, handler);
+      ipcRenderer.removeListener(EVENT_CHANNELS.preview, handler);
     };
   },
   setBetweenGames(active: unknown): Promise<{ betweenGames: boolean }> {
     if (typeof active !== 'boolean') {
-      return Promise.reject(new Error('The game boundary must be between games or playing.'));
+      return rejectInvalidRequest();
     }
-    return ipcRenderer.invoke(COACH_GAP_CHANNEL, { betweenGames: active }).then((value: unknown) => {
+    return invoke(INVOKE_CHANNELS.coachGap.name, { betweenGames: active }).then((value: unknown) => {
       if (
         typeof value !== 'object' ||
         value === null ||
@@ -183,9 +187,9 @@ contextBridge.exposeInMainWorld('chesspulse', {
         // A malformed message is dropped; no number from it reaches the page.
       }
     };
-    ipcRenderer.on(COACH_MESSAGE_CHANNEL, handler);
+    ipcRenderer.on(EVENT_CHANNELS.coachMessage, handler);
     return () => {
-      ipcRenderer.removeListener(COACH_MESSAGE_CHANNEL, handler);
+      ipcRenderer.removeListener(EVENT_CHANNELS.coachMessage, handler);
     };
   },
   onSessionEnded(listener: (event: SessionEnded) => void): () => void {
@@ -196,9 +200,9 @@ contextBridge.exposeInMainWorld('chesspulse', {
         // A malformed terminal event is dropped; the session controls remain usable.
       }
     };
-    ipcRenderer.on(SESSION_ENDED_CHANNEL, handler);
+    ipcRenderer.on(EVENT_CHANNELS.sessionEnded, handler);
     return () => {
-      ipcRenderer.removeListener(SESSION_ENDED_CHANNEL, handler);
+      ipcRenderer.removeListener(EVENT_CHANNELS.sessionEnded, handler);
     };
   },
   onReportProgress(listener: (progress: ReportProgress) => void): () => void {
@@ -209,14 +213,14 @@ contextBridge.exposeInMainWorld('chesspulse', {
         // A malformed progress event is dropped. The build still resolves or rejects.
       }
     };
-    ipcRenderer.on(REPORT_PROGRESS_CHANNEL, handler);
+    ipcRenderer.on(EVENT_CHANNELS.reportProgress, handler);
     return () => {
-      ipcRenderer.removeListener(REPORT_PROGRESS_CHANNEL, handler);
+      ipcRenderer.removeListener(EVENT_CHANNELS.reportProgress, handler);
     };
   },
   requestInsight(request: unknown): Promise<unknown> {
     if (typeof request !== 'object' || request === null) {
-      return Promise.reject(new Error('The AI reading needs a session, provider, and question.'));
+      return rejectInvalidRequest();
     }
     const value = request as { sessionId?: unknown; provider?: unknown; text?: unknown };
     if (
@@ -224,9 +228,9 @@ contextBridge.exposeInMainWorld('chesspulse', {
       typeof value.provider !== 'string' ||
       typeof value.text !== 'string'
     ) {
-      return Promise.reject(new Error('The AI reading needs a session, provider, and question.'));
+      return rejectInvalidRequest();
     }
-    return ipcRenderer.invoke(INSIGHT_REQUEST_CHANNEL, request).then((result: unknown) => {
+    return invoke(INVOKE_CHANNELS.insightRequest.name, request).then((result: unknown) => {
       if (typeof result !== 'object' || result === null || !('disabled' in result) || typeof result.disabled !== 'boolean') {
         throw new Error('The window returned an unexpected AI reading.');
       }
@@ -235,9 +239,9 @@ contextBridge.exposeInMainWorld('chesspulse', {
   },
   cancelInsight(sessionId: unknown): Promise<{ cancelled: boolean }> {
     if (typeof sessionId !== 'string' || sessionId.length === 0) {
-      return Promise.reject(new Error('Choose a session to cancel.'));
+      return rejectInvalidRequest();
     }
-    return ipcRenderer.invoke(INSIGHT_CANCEL_CHANNEL, { sessionId }).then((value: unknown) => {
+    return invoke(INVOKE_CHANNELS.insightCancel.name, { sessionId }).then((value: unknown) => {
       if (typeof value !== 'object' || value === null || !('cancelled' in value) || typeof value.cancelled !== 'boolean') {
         throw new Error('The window returned an unexpected cancellation.');
       }
@@ -246,9 +250,9 @@ contextBridge.exposeInMainWorld('chesspulse', {
   },
   validatePgns(slots: unknown): Promise<unknown> {
     if (!Array.isArray(slots) || !slots.every((item) => typeof item === 'string')) {
-      return Promise.reject(new Error('Paste entries must be text.'));
+      return rejectInvalidRequest();
     }
-    return ipcRenderer.invoke(PASTE_VALIDATE_CHANNEL, { slots }).then((value: unknown) => {
+    return invoke(INVOKE_CHANNELS.pasteValidate.name, { slots }).then((value: unknown) => {
       if (typeof value !== 'object' || value === null || !('state' in value) || !('slots' in value)) {
         throw new Error('The window returned an unexpected paste validation.');
       }
@@ -257,12 +261,12 @@ contextBridge.exposeInMainWorld('chesspulse', {
   },
   buildReport(sessionId: unknown, pgns: unknown): Promise<unknown> {
     if (typeof sessionId !== 'string' || sessionId.length === 0) {
-      return Promise.reject(new Error('No session is selected for this report.'));
+      return rejectInvalidRequest();
     }
     if (!Array.isArray(pgns) || !pgns.every((item) => typeof item === 'string')) {
-      return Promise.reject(new Error('Paste entries must be text.'));
+      return rejectInvalidRequest();
     }
-    return ipcRenderer.invoke(REPORT_BUILD_CHANNEL, { sessionId, pgns }).then((value: unknown) => {
+    return invoke(INVOKE_CHANNELS.reportBuild.name, { sessionId, pgns }).then((value: unknown) => {
       if (typeof value !== 'object' || value === null || !('ok' in value) || typeof value.ok !== 'boolean') {
         throw new Error('The window returned an unexpected report.');
       }
@@ -271,13 +275,49 @@ contextBridge.exposeInMainWorld('chesspulse', {
   },
   cancelReport(sessionId: unknown): Promise<{ cancelled: boolean }> {
     if (typeof sessionId !== 'string' || sessionId.length === 0) {
-      return Promise.reject(new Error('Choose a session to cancel.'));
+      return rejectInvalidRequest();
     }
-    return ipcRenderer.invoke(REPORT_CANCEL_CHANNEL, { sessionId }).then((value: unknown) => {
+    return invoke(INVOKE_CHANNELS.reportCancel.name, { sessionId }).then((value: unknown) => {
       if (typeof value !== 'object' || value === null || !('cancelled' in value) || typeof value.cancelled !== 'boolean') {
         throw new Error('The window returned an unexpected cancellation.');
       }
       return { cancelled: value.cancelled };
+    });
+  },
+  copyDiagnostics(): Promise<{ copied: true }> {
+    return invoke(INVOKE_CHANNELS.diagnosticsCopy.name, {}).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('copied' in value) || value.copied !== true) {
+        throw new Error('The window returned an unexpected diagnostics result.');
+      }
+      return { copied: true };
+    });
+  },
+  deleteSession(sessionId: unknown): Promise<{ deleted: boolean }> {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      return rejectInvalidRequest();
+    }
+    return invoke(INVOKE_CHANNELS.sessionDelete.name, { sessionId }).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('deleted' in value) || typeof value.deleted !== 'boolean') {
+        throw new Error('The window returned an unexpected deletion result.');
+      }
+      return { deleted: value.deleted };
+    });
+  },
+  exportReport(
+    sessionId: unknown,
+  ): Promise<{ exported: false } | { exported: true; path: string }> {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      return rejectInvalidRequest();
+    }
+    return invoke(INVOKE_CHANNELS.reportExport.name, { sessionId }).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('exported' in value) || typeof value.exported !== 'boolean') {
+        throw new Error('The window returned an unexpected export result.');
+      }
+      if (value.exported === false) return { exported: false };
+      if (!('path' in value) || typeof value.path !== 'string' || value.path.length === 0) {
+        throw new Error('The window returned an unexpected export result.');
+      }
+      return { exported: true, path: value.path };
     });
   },
 });
