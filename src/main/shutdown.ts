@@ -13,6 +13,7 @@ export interface ShutdownDependencies {
 
 export interface ShutdownHooks {
   beginStart(): void;
+  cancelStart(): void;
   captureAllowed(): boolean;
   onWindowAllClosed(): void;
   onConsentRevoked(): void;
@@ -31,7 +32,10 @@ export function createShutdownHooks(deps: ShutdownDependencies): ShutdownHooks {
         teardownFailed = false;
         return true;
       },
-      () => false,
+      () => {
+        teardownFailed = true;
+        return false;
+      },
     );
   };
 
@@ -40,6 +44,9 @@ export function createShutdownHooks(deps: ShutdownDependencies): ShutdownHooks {
       if (quitting) return;
       captureDesired = true;
       exitAllowed = false;
+    },
+    cancelStart() {
+      captureDesired = false;
     },
     captureAllowed() {
       return captureDesired;

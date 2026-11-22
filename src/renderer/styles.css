@@ -1647,3 +1647,7 @@ kbd {
   color: var(--text);
   text-align: center;
 }
+
+.cpl-mate {
+  fill: var(--text);
+}

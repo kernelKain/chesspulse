@@ -72,7 +72,7 @@ export function CameraPreview({ active, guide = false }: { active: boolean; guid
           </div>
         ) : null}
       </div>
-      <figcaption className="hint">
+      <figcaption className="hint" aria-live="polite" aria-atomic="true">
         {!active
           ? COPY.camera.closed
           : !hasFrame || stale

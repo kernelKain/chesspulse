@@ -589,7 +589,7 @@ function CplRail({
       {view.moves.map((move) => {
         if (move.tUs === null) return null;
         const x = xOf(move.tUs);
-        if (move.cpl === null) {
+        if (!move.scored) {
           return (
             <circle
               key={`${move.gameIndex}-${move.moveIndex}`}
@@ -604,12 +604,28 @@ function CplRail({
             </circle>
           );
         }
-        const height = Math.max(3, cplBarRatio(move.cpl) * maxH);
+        if (move.mate) {
+          return (
+            <circle
+              key={`${move.gameIndex}-${move.moveIndex}`}
+              className="cpl-mate"
+              cx={x}
+              cy={CPL_BOTTOM - 5}
+              r={3}
+            >
+              <title>
+                G{move.gameIndex + 1} · {move.san} · mate
+                {move.blunder ? ' (blunder)' : ''}
+              </title>
+            </circle>
+          );
+        }
+        const height = Math.max(3, cplBarRatio(move.cpl ?? 0) * maxH);
         const topY = CPL_BOTTOM - height;
         return (
           <g key={`${move.gameIndex}-${move.moveIndex}`}>
             <title>
-              G{move.gameIndex + 1} · {move.san} · {Math.round(move.cpl)} cpl
+              G{move.gameIndex + 1} · {move.san} · {Math.round(move.cpl ?? 0)} cpl
               {move.blunder ? ' (blunder)' : ''}
             </title>
             <line
@@ -865,8 +881,11 @@ function MiniGameTimeline({
           {mini.moves.map((move) => {
             if (move.tUs === null) return null;
             const x = xOf(move.tUs);
-            if (move.cpl === null) {
+            if (!move.scored) {
               return <circle key={`mc-${move.moveIndex}`} className="cpl-unscored" cx={x} cy={MINI_CPL_BOTTOM - 2} r={1.5} />;
+            }
+            if (move.mate) {
+              return <circle key={`mc-${move.moveIndex}`} className="cpl-mate" cx={x} cy={MINI_CPL_BOTTOM - 5} r={2.5} />;
             }
             const h = Math.max(3, cplBarRatio(move.cpl) * (MINI_CPL_BOTTOM - MINI_CPL_TOP));
             return (

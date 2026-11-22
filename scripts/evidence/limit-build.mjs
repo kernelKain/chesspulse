@@ -29,6 +29,13 @@ const options = parseArgs(process.argv.slice(2));
 const minutes = Number(options.minutes ?? 2);
 const buildDir = path.resolve(options.out ?? path.join(ROOT, 'docs', 'evidence', 'limit-build'));
 const dataDir = `${buildDir}-data`;
+const rootInsideBuild = path.relative(buildDir, ROOT);
+const buildContainsRepository =
+  rootInsideBuild === '' || (!rootInsideBuild.startsWith('..') && !path.isAbsolute(rootInsideBuild));
+if (buildContainsRepository) {
+  console.error(`Refusing to use ${buildDir}: it is the repository or one of its parents.`);
+  process.exit(1);
+}
 
 if (options.clean) {
   rmSync(buildDir, { recursive: true, force: true });
@@ -115,5 +122,5 @@ console.log(
 );
 console.log('');
 console.log('After the run:');
-console.log(`  node scripts/evidence/collect.mjs --session <id> --data-root ${JSON.stringify(path.join(dataDir, 'data', 'chesspulse'))} --expect-limit --label limit`);
-console.log('  node scripts/evidence/limit-build.mjs --clean');
+console.log(`  node scripts/evidence/collect.mjs --session <id> --data-root ${JSON.stringify(path.join(dataDir, 'data', 'chesspulse'))} --expect-limit --limit-minutes ${minutes} --label limit`);
+console.log(`  node scripts/evidence/limit-build.mjs --clean --out ${JSON.stringify(buildDir)}`);

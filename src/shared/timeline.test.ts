@@ -89,6 +89,7 @@ function baseReport(overrides: Partial<Report> = {}): Report {
           thinkSec: 4.5,
           blunder: true,
           mate: false,
+          scored: true,
           band: 'elevated',
         },
       ],
@@ -199,6 +200,7 @@ describe('buildTimelineView', () => {
         thinkSec: 1,
         blunder: false,
         mate: false,
+        scored: true,
         band: 'settled',
       },
       {
@@ -210,6 +212,7 @@ describe('buildTimelineView', () => {
         thinkSec: 2,
         blunder: false,
         mate: false,
+        scored: true,
         band: 'settled',
       },
     ];
@@ -319,6 +322,18 @@ describe('timeline helpers', () => {
     assert.equal(row?.cpl, 'Mate');
     assert.equal(row?.note, 'Mate');
     assert.match(sampleReadout(view, 2), /e4 \(mate, 4\.5 s think\)/);
+  });
+
+  it('shows Unscored when a mate was involved but evaluation never completed', () => {
+    const report = baseReport();
+    const original = report.timeline.moves[0];
+    assert.ok(original);
+    report.timeline.moves[0] = { ...original, cpl: null, mate: true, scored: false, blunder: false };
+    const view = buildTimelineView(report);
+    const row = moveTableRows(view)[0];
+    assert.equal(row?.cpl, 'Unscored');
+    assert.equal(row?.note, 'Unscored');
+    assert.match(sampleReadout(view, 2), /e4 \(unscored/);
   });
 
   it('states the engine depth and its calibration limit', () => {

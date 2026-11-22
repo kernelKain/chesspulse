@@ -28,6 +28,24 @@ describe('KeyboardHelp interaction', () => {
     harness.unmount();
   });
 
+  it('makes the app shell inert while the dialog is open', () => {
+    const harness = mountDom(
+      createElement(
+        'div',
+        null,
+        createElement('div', { id: 'app-shell' }, createElement('main', null, 'content')),
+        createElement(KeyboardHelpHost),
+      ),
+    );
+    const shell = harness.document.getElementById('app-shell');
+    assert.ok(shell);
+    harness.keyDown(shell, '?');
+    assert.equal(shell.hasAttribute('inert'), true);
+    harness.keyDown(harness.document.querySelector('[role="dialog"]')!, 'Escape');
+    assert.equal(shell.hasAttribute('inert'), false);
+    harness.unmount();
+  });
+
   it('does not open while typing in a text area', () => {
     const harness = mountDom(
       createElement(

@@ -8,6 +8,8 @@ const UNICODE_NEGATIVE_NUMBER = /[\u2212\uFE63\uFF0D]\s*\p{Nd}/u;
 /** Degree words between the verb and the state adjective must not hide a direct claim. */
 const DEGREE = String.raw`(?:(?:very|really|so|quite|extremely|incredibly|completely|totally|rather|pretty|somewhat|slightly|a little|a bit|kind of|sort of)\s+)?`;
 const STATE = String.raw`(?:anxious|nervous|stressed|panicked|panicking|afraid|scared|angry|frustrated|upset|overwhelmed|tilted|calm|relaxed|focused|distracted|tired|exhausted)`;
+/** Markdown emphasis around a state adjective must not hide the claim. */
+const EMPHASIS = String.raw`(?:\*{1,3}|_{1,3}|~{2})?`;
 
 /**
  * A fixed, deliberately narrow list. It catches diagnostic vocabulary and direct claims about the
@@ -18,21 +20,21 @@ const CLAIM_PATTERNS: readonly RegExp[] = [
   /\b(?:medical|clinical|clinically)\b/i,
   /\b(?:disorder|syndrome|disease|illness|symptom|symptoms)\b/i,
   /\b(?:therapy|treatment|medication|medications|prescription|prescriptions)\b/i,
-  /\b(?:hypertension|arrhythmia|cardiac|cardiovascular)\b/i,
+  /\b(?:hypertens(?:ion|ive)|arrhythmi(?:a|c)|cardiac|cardiovascular)\b/i,
   /\b(?:heart disease|blood pressure|stress response)\b/i,
   /\b(?:cortisol|adrenaline|adrenal|fight or flight)\b/i,
   /\b(?:diabetes|diabetic|cancer|asthma|epilepsy|migraine|stroke|infection|insomnia|fatigue|burnout|exhaustion|dehydration|concussion|dementia|alzheimer'?s|parkinson'?s|thyroid|hormonal|inflammation|nausea|headache|ulcer|fever|chronic pain)\b/i,
   /\bmental health\b/i,
   /\byou (?:have|had|suffer from|are suffering from|were suffering from|have been diagnosed with|were diagnosed with|are being treated for|are dealing with)\b[^.!?\n]{0,60}\b(?:condition|disorder|disease|syndrome|illness|insomnia|fatigue|burnout|exhaustion|dehydration|concussion|dementia|parkinson'?s|alzheimer'?s|thyroid|inflammation|nausea|headache|ulcer|fever|pain)\b/i,
   /\b(?:anxiety|anxious|depression|depressed|panic attack|ptsd|adhd|autism)\b/i,
-  new RegExp(String.raw`\byou(?:['’]re| are) ${DEGREE}${STATE}\b`, 'i'),
-  new RegExp(String.raw`\byou (?:seem|look|appear|sound|remain|stay) ${DEGREE}(?:anxious|nervous|stressed|panicked|overwhelmed|tilted|calm|relaxed|focused|distracted|tired|exhausted)\b`, 'i'),
-  new RegExp(String.raw`\byou (?:were|felt|seemed|looked|appeared|got|became|stayed|remained|sounded|feel|feels) ${DEGREE}${STATE}\b`, 'i'),
+  new RegExp(String.raw`\byou(?:['’]re| are) ${DEGREE}${EMPHASIS}\s*${STATE}\b${EMPHASIS}`, 'i'),
+  new RegExp(String.raw`\byou (?:seem|look|appear|sound|remain|stay) ${DEGREE}${EMPHASIS}\s*${STATE}\b${EMPHASIS}`, 'i'),
+  new RegExp(String.raw`\byou (?:were|felt|seemed|looked|appeared|got|became|stayed|remained|sounded|feel|feels) ${DEGREE}${EMPHASIS}\s*${STATE}\b${EMPHASIS}`, 'i'),
   /\byou (?:must|might|may) have (?:been|felt) (?:anxious|nervous|stressed|panicked|overwhelmed|tilted|calm|relaxed)\b/i,
   /\byou (?:were|felt|seemed|looked|appeared) (?:in|under) (?:stress|pressure|distress)\b/i,
   /\byou (?:panicked|tilted|choked|froze)\b/i,
   /\byour (?:anxiety|stress|nerves|emotions|emotional state|mental state|physical state|mood|frame of mind|brain|body|nervous system)\b/i,
-  new RegExp(String.raw`\b(?:felt|feeling) ${DEGREE}(?:anxious|nervous|stressed|panicked|overwhelmed|tilted)\b`, 'i'),
+  new RegExp(String.raw`\b(?:felt|feeling) ${DEGREE}${EMPHASIS}\s*${STATE}\b${EMPHASIS}`, 'i'),
 ];
 
 export class GroundingError extends Error {

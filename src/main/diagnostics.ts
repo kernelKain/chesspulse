@@ -6,7 +6,8 @@ export const DIAGNOSTICS_LOG_LINES = 100;
 
 /** Defence in depth: a log line must never carry a PGN header or a pulse sample into a bundle. */
 const SENSITIVE_LINE_PATTERNS: readonly RegExp[] = [
-  /\[\s*(?:Event|Site|Date|Round|White|Black|Result|UTCDate|UTCTime|ECO|Opening|Termination|TimeControl|EndTime|FEN|SetUp|Variant)\s+"/i,
+  /\[\s*(?:Event|Site|Date|Round|White|Black|Result|UTCDate|UTCTime|ECO|Opening|Termination|TimeControl|EndTime|FEN|SetUp|Variant)\s+\\?"/i,
+  /\\?"(?:pgn|pgns|white|black|moves)\\?"\s*:/i,
   /"(?:tUs|bpm|confidence|stable)"\s*:/,
 ];
 

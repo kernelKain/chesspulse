@@ -29,7 +29,10 @@ describe('Explainer markup', () => {
   it('marks the first step as the current one in text, not colour', () => {
     const firstRun = renderToStaticMarkup(createElement(Explainer, { showProgress: true }));
     assert.equal((firstRun.match(/aria-current="step"/g) ?? []).length, 1);
-    assert.match(firstRun, />You are here</);
+    const items = [...firstRun.matchAll(/<li\b[^>]*>[\s\S]*?<\/li>/g)].map((match) => match[0]);
+    assert.match(items[0] ?? '', /aria-current="step"/);
+    assert.match(items[0] ?? '', /You are here/);
+    assert.doesNotMatch(items[1] ?? '', /aria-current="step"|You are here/);
     assert.equal(firstRun.match(new RegExp(EXPLAINER_STEPS[0].title, 'g'))?.length, 1);
 
     const help = renderToStaticMarkup(createElement(Explainer, { headingLevel: 2 }));

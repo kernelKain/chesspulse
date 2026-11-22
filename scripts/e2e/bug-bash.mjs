@@ -38,6 +38,8 @@ async function launch(home) {
     CHESSPULSE_ENV_FILE: emptyEnv,
   };
   delete env.CHESSPULSE_RENDERER_URL;
+  // A key exported by the developer's shell would defeat the empty env file.
+  delete env.SMARTSPECTRA_API_KEY;
   const app = await electron.launch({ args: ['.'], cwd: ROOT, env, timeout: 60_000 });
   const page = await app.firstWindow({ timeout: 60_000 });
   await page.waitForLoadState('domcontentloaded');
@@ -80,7 +82,12 @@ function realSessionWithSamples() {
       const samples = readFileSync(path.join(dir, 'samples.ndjson'), 'utf8')
         .split('\n')
         .filter(Boolean).length;
-      if (samples > 0 && meta.coverage?.pct > 0 && !existsSync(path.join(dir, 'report.json'))) {
+      if (
+        samples > 0 &&
+        meta.coverage?.pct > 0 &&
+        meta.coverage.pct < 70 &&
+        !existsSync(path.join(dir, 'report.json'))
+      ) {
         candidates.push({
           id,
           dir,

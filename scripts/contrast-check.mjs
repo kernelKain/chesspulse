@@ -28,30 +28,28 @@ function hexToRgb(hex) {
   hex = hex.trim();
   if (hex.startsWith('#')) {
     let h = hex.slice(1);
-    // 3-digit shorthand
     if (h.length === 3) {
       h = h.split('').map((c) => c + c).join('');
     }
-    // 8-digit #rrggbbaa: ignore alpha
+    // Translucent colours are rejected until the check can composite them against the backdrop.
     if (h.length === 8) {
+      const alpha = parseInt(h.slice(6), 16);
+      if (alpha !== 255) return null;
       h = h.slice(0, 6);
     }
-    // 4-digit #rgba shorthand
     if (h.length === 4) {
+      const alpha = parseInt(h[3] + h[3], 16);
+      if (alpha !== 255) return null;
       h = h.split('').map((c) => c + c).join('').slice(0, 6);
     }
-    if (h.length !== 6) {
-      return null;
-    }
-    if (!/^[0-9a-fA-F]{6}$/.test(h)) {
-      return null;
-    }
+    if (h.length !== 6) return null;
+    if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
     const n = parseInt(h, 16);
     return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
   }
-  // rgb() / rgba()
-  const rgbMatch = hex.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  const rgbMatch = hex.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)/i);
   if (rgbMatch) {
+    if (rgbMatch[4] !== undefined && Number.parseFloat(rgbMatch[4]) < 1) return null;
     return {
       r: Math.min(255, parseInt(rgbMatch[1], 10)),
       g: Math.min(255, parseInt(rgbMatch[2], 10)),
@@ -59,6 +57,14 @@ function hexToRgb(hex) {
     };
   }
   return null;
+}
+
+/** The last declaration wins inside one CSS rule, matching the browser's cascade. */
+function lastDeclaration(block, property) {
+  const pattern = new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`, 'g');
+  let value = null;
+  for (const match of block.matchAll(pattern)) value = match[1];
+  return value;
 }
 
 function luminance({ r, g, b }) {
@@ -83,11 +89,11 @@ let m;
 while ((m = ruleRe.exec(stylesCss)) !== null) {
   const selector = m[1].trim();
   const block = m[2];
-  const colorMatch = block.match(/(?:^|;)\s*color\s*:\s*([^;]+)/);
-  const bgMatch = block.match(/(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/);
-  if (colorMatch && bgMatch) {
-    const fg = resolveColor(colorMatch[1]);
-    const bg = resolveColor(bgMatch[1]);
+  const colorValue = lastDeclaration(block, 'color');
+  const bgValue = lastDeclaration(block, 'background(?:-color)?');
+  if (colorValue !== null && bgValue !== null) {
+    const fg = resolveColor(colorValue);
+    const bg = resolveColor(bgValue);
     const key = fg + '|' + bg;
     if (!pairs.has(key)) pairs.set(key, { fg, bg, selectors: [] });
     pairs.get(key).selectors.push(selector);

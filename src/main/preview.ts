@@ -54,10 +54,11 @@ export function createPreviewController(start: PreviewStarter): PreviewControlle
         stopping += 1;
         try {
           await capture.stop();
-        } catch {
+        } catch (error) {
           // Release was not confirmed. Keep ownership so a queued start cannot open another
           // capture and active() stays true until a later stop succeeds.
           current = capture;
+          throw error;
         } finally {
           stopping -= 1;
         }

@@ -77,10 +77,12 @@ function atomicProbe(options: {
   failWriteFor?: string;
   failCloseFor?: string;
   failRm?: boolean;
+  failSyncOnCall?: number;
 } = {}) {
   const events: string[] = [];
   const closes = new Map<number, number>();
   let nextHandleId = 0;
+  let syncCalls = 0;
   const fs: AtomicFileSystem = {
     open: async (filePath, flags, mode) => {
       events.push(`open:${filePath}:${flags}`);
@@ -97,7 +99,11 @@ function atomicProbe(options: {
           await handle.writeFile(body);
         },
         sync: async () => {
+          syncCalls += 1;
           events.push(`sync:${filePath}`);
+          if (options.failSyncOnCall === syncCalls) {
+            throw new Error('injected sync failure');
+          }
           if (options.failSyncFor && filePath.includes(options.failSyncFor)) {
             throw new Error('injected sync failure');
           }
@@ -366,6 +372,26 @@ describe('session store', () => {
     assert.equal(await readFile(gamesFile, 'utf8'), gamesBefore);
     assert.equal(probe.events.filter((event) => event.startsWith('rm:') && event.endsWith('.tmp')).length, 2);
     for (const count of probe.closes.values()) assert.equal(count, 1);
+    assert.deepEqual((await readdir(path.join(root, 'sessions', meta.id))).filter((name) => name.endsWith('.tmp')), []);
+  });
+
+  it('keeps the new pair when only the report directory sync fails after its rename', async () => {
+    const root = useRoot();
+    const meta = await createSession(root, { startedAtEpochMs: anchor.epochMs, startAnchor: anchor });
+    const oldPgns = ['[Event "Old"]\n1. e4 e5'];
+    const newPgns = ['[Event "New"]\n1. d4 d5'];
+    await saveReportArtifacts(root, meta.id, JSON.stringify(reportFor(meta.id, oldPgns)), oldPgns);
+    const probe = atomicProbe({ failSyncOnCall: 4 });
+
+    await assert.rejects(
+      saveReportArtifacts(root, meta.id, JSON.stringify(reportFor(meta.id, newPgns)), newPgns, probe.fs),
+      /injected sync failure/,
+    );
+
+    const storedReport = await readReport(root, meta.id);
+    const storedGames = await readGames(root, meta.id);
+    assert.deepEqual(storedGames, newPgns);
+    assert.equal(storedReport.gamesDigest, digestGames(storedGames));
     assert.deepEqual((await readdir(path.join(root, 'sessions', meta.id))).filter((name) => name.endsWith('.tmp')), []);
   });
 

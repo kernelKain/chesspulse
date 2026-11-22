@@ -65,7 +65,7 @@ type ScoreOutcome =
       engine: EngineStats;
     };
 
-const CANCELLED_REFUSAL: Refusal = {
+export const CANCELLED_REFUSAL: Refusal = {
   ok: false,
   reason: 'cancelled',
   remedy: 'Report build cancelled. No report was saved.',
@@ -384,6 +384,7 @@ async function scoreAlignedMoves(
         thinkSec: rawThink !== null && rawThink >= 0 ? rawThink : null,
         blunder: metric.blunder,
         mate: metric.mate,
+        scored: metric.accuracy !== null,
         band: metric.band,
       });
     }

@@ -3,6 +3,7 @@
 //      a written map. The dialog is the plan's `?` affordance and keeps focus inside itself.
 // Removed: keyboard operation would work but stay hidden, and H-27 could not pass.
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { COPY } from './copy';
 
 const OPEN_EVENT = 'chesspulse:keyboard-help';
@@ -41,7 +42,7 @@ export function KeyboardHelpHost() {
     };
   }, []);
 
-  return open ? <KeyboardHelp onClose={() => setOpen(false)} /> : null;
+  return open ? createPortal(<KeyboardHelp onClose={() => setOpen(false)} />, document.body) : null;
 }
 
 export function KeyboardHelp({ onClose }: { onClose(): void }) {
@@ -51,8 +52,11 @@ export function KeyboardHelp({ onClose }: { onClose(): void }) {
 
   useEffect(() => {
     const previous = document.activeElement;
+    const shell = document.querySelector('main')?.parentElement;
+    shell?.setAttribute('inert', '');
     closeRef.current?.focus();
     return () => {
+      shell?.removeAttribute('inert');
       if (previous instanceof HTMLElement) previous.focus();
     };
   }, []);

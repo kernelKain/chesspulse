@@ -146,6 +146,16 @@ const sessionStopper = createSessionStopper({
  * and quitting all share one promise: nobody proceeds while the native teardown is still draining,
  * and the session is never finalized twice.
  */
+function hasAnythingToStop(): boolean {
+  return (
+    hasActiveSession(defaultDataRoot()) ||
+    capture !== null ||
+    stoppingSession !== null ||
+    sessionStarting ||
+    sessionStopper.active()
+  );
+}
+
 function stopEverything(reason: SessionStopReason): Promise<SessionMeta> {
   if (stoppingSession) return stoppingSession;
   const run = sessionStopper.stop(reason);
@@ -159,6 +169,7 @@ const shutdownHooks = createShutdownHooks({
   stop: async () => {
     // A preview-only quit still has to release the camera before the window closes.
     await preview.stop();
+    if (!hasAnythingToStop()) return;
     return stopEverything('user');
   },
   hasActive: () => capture !== null || stoppingSession !== null || preview.active() || sessionStarting,
@@ -216,7 +227,7 @@ function registerSessionHandlers(): void {
             onValidation: publishValidation,
             onError: (error) => {
               publishSdkError(error);
-              if (!error.retryable) void preview.stop();
+              if (!error.retryable) void preview.stop().catch(() => undefined);
             },
             onPreview: publishPreview,
             onEnded: () => undefined,
@@ -235,7 +246,11 @@ function registerSessionHandlers(): void {
     return previewStartResultSchema.parse({ started: true });
   });
   registerInvokeChannel('previewStop', async () => {
-    await preview.stop();
+    try {
+      await preview.stop();
+    } catch (error) {
+      throw new AppError('camera_unavailable', { cause: error });
+    }
     return previewStopResultSchema.parse({ stopped: true });
   });
   async function startSessionFlow(payload: { timeControl: string }): Promise<unknown> {
@@ -243,7 +258,11 @@ function registerSessionHandlers(): void {
     if (capture) throw new AppError('session_busy');
     shutdownHooks.beginStart();
     // The preview and the session cannot own the native camera at the same time.
-    await preview.stop();
+    try {
+      await preview.stop();
+    } catch (error) {
+      throw new AppError('camera_unavailable', { cause: error });
+    }
     // A previous stop may still be draining the camera; the SDK is process-global.
     if (stoppingSession) await stoppingSession.catch(() => undefined);
     if (!shutdownHooks.captureAllowed()) throw new AppError('session_failed');
@@ -323,11 +342,13 @@ function registerSessionHandlers(): void {
       sessionStarting = false;
     }
   });
-  registerInvokeChannel('sessionStop', async () =>
-    stopEverything('user').catch((error: unknown) => {
+  registerInvokeChannel('sessionStop', async () => {
+    // A stop wins over a start that is still waiting on preview release.
+    shutdownHooks.cancelStart();
+    return stopEverything('user').catch((error: unknown) => {
       throw toAppError(error, 'session_failed');
-    }),
-  );
+    });
+  });
   registerInvokeChannel('coachGap', (_event, payload) => {
     if (!coach) throw new AppError('session_not_running');
     const message = coach.setBetweenGames(payload.betweenGames);

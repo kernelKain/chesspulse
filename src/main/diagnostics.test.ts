@@ -75,12 +75,14 @@ describe('diagnostics bundle', () => {
         'ordinary line stays',
         '[White "Ada"] [Black "Nim"]',
         '{"tUs":100,"bpm":72,"confidence":80,"stable":true}',
+        '{"event":"game","pgn":"[Event \\"Club\\"] [White \\"Ada\\"]"}',
       ],
       now: new Date('2026-11-22T10:00:00.000Z'),
     });
     assert.match(text, /ordinary line stays/);
     assert.ok(!text.includes('[White "Ada"]'));
     assert.ok(!text.includes('"bpm":72'));
+    assert.ok(!text.includes('Club'));
     assert.match(text, /\[redacted line\]/);
   });
 });

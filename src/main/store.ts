@@ -226,26 +226,31 @@ export async function saveReportArtifacts(
       if (!isEnoent(error)) throw error;
     }
     let gamesCommitted = false;
+    let reportCommitted = false;
     try {
       const gamesTmp = await stageAtomic(gamesFile, jsonText(parsed.data.pgns), fs);
       pending.add(gamesTmp);
       const reportTmp = await stageAtomic(reportFile, text, fs);
       pending.add(reportTmp);
-      await commitAtomic(gamesTmp, gamesFile, fs);
+      await renameAtomic(gamesTmp, gamesFile, fs);
       pending.delete(gamesTmp);
       gamesCommitted = true;
-      await commitAtomic(reportTmp, reportFile, fs);
+      // Sync the games rename before replacing the report, so a failed sync can still roll back.
+      await syncDirectory(gamesFile, fs);
+      await renameAtomic(reportTmp, reportFile, fs);
       pending.delete(reportTmp);
+      reportCommitted = true;
+      await syncDirectory(reportFile, fs);
     } catch (error) {
       await Promise.all([...pending].map((tmp) => removeAtomicTemp(tmp, fs)));
-      // A failed report commit must not leave the new PGNs beside the old report.
-      if (gamesCommitted) {
+      // A failed report rename must not leave the new PGNs beside the old report. If the report
+      // was renamed and only its directory sync failed, both new files are already a matched pair.
+      if (gamesCommitted && !reportCommitted) {
         try {
           if (previousGames === null) {
             await fs.rm(gamesFile, { force: true });
           } else {
-            const restore = await stageAtomic(gamesFile, previousGames, fs);
-            await commitAtomic(restore, gamesFile, fs);
+            await writeAtomic(gamesFile, previousGames, fs);
           }
         } catch {
           // The digest mismatch still makes the pair detectable and refusable.
@@ -552,10 +557,18 @@ async function stageAtomic(filePath: string, body: string, fs: AtomicFileSystem)
   return tmp;
 }
 
-async function commitAtomic(tmp: string, filePath: string, fs: AtomicFileSystem): Promise<void> {
+async function renameAtomic(tmp: string, filePath: string, fs: AtomicFileSystem): Promise<void> {
   await fs.rename(tmp, filePath);
+}
+
+async function syncDirectory(filePath: string, fs: AtomicFileSystem): Promise<void> {
   const directory = await fs.open(path.dirname(filePath), 'r');
   await closeAfter(directory, () => directory.sync());
+}
+
+async function commitAtomic(tmp: string, filePath: string, fs: AtomicFileSystem): Promise<void> {
+  await renameAtomic(tmp, filePath, fs);
+  await syncDirectory(filePath, fs);
 }
 
 async function closeAfter(handle: AtomicFileHandle, operation: () => Promise<void>): Promise<void> {

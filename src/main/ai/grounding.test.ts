@@ -92,7 +92,7 @@ describe('groundInsight', () => {
   });
 
   it('rejects present-tense and contracted mental-state claims', () => {
-    for (const text of ['You are stressed.', "You're stressed.", 'You seem anxious.', 'You stay focused.', 'You feel stressed.', 'You feel very tired.']) {
+    for (const text of ['You are stressed.', "You're stressed.", 'You seem anxious.', 'You stay focused.', 'You feel stressed.', 'You feel very tired.', 'You seem frustrated.', 'You seem **frustrated**.', 'You were *nervous*.']) {
       assert.throws(() => groundInsight({}, text), /diagnostic or mental-state/);
     }
   });
@@ -143,6 +143,18 @@ describe('direct-claim modifiers and measured heart rate', () => {
     );
     assert.throws(
       () => groundInsight({ baselineBpm: 72 }, 'Your heart disease explains the 72.'),
+      /diagnostic or mental-state/,
+    );
+    assert.throws(
+      () => groundInsight({ baselineBpm: 72 }, 'Your hypertensive response explains the 72.'),
+      /diagnostic or mental-state/,
+    );
+    assert.throws(
+      () =>
+        groundInsight(
+          { baselineBpm: 72 },
+          'Your pulse was 72 bpm and you were nervous about the position.',
+        ),
       /diagnostic or mental-state/,
     );
   });

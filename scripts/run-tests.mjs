@@ -3,10 +3,9 @@
 // Why: BUG-30 was a hand-written file list that silently skipped new tests. The count check also
 //      catches a compiled file that registers no tests, which would otherwise look like success.
 // Removed: `npm test` would run only named files and could pass while skipping suites.
-import path from 'node:path';
 import { run } from 'node:test';
 import { spec } from 'node:test/reporters';
-import { discoverTestFiles } from './test-files.mjs';
+import { discoverTestFiles, testFileOfEvent } from './test-files.mjs';
 
 const files = discoverTestFiles(process.cwd());
 console.log(`Discovered ${files.length} test files.`);
@@ -20,8 +19,8 @@ let failures = 0;
 
 const stream = run({ files });
 stream.on('data', (event) => {
-  const file = event.data?.file;
-  if (file) seenFiles.add(path.resolve(file));
+  const file = testFileOfEvent(event);
+  if (file) seenFiles.add(file);
   if (event.type === 'test:fail') failures += 1;
 });
 stream.on('end', () => {

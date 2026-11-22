@@ -35,6 +35,14 @@ describe('shutdown hooks', () => {
     assert.deepEqual(test.events, ['stop', 'stop']);
   });
 
+  it('cancels a pending start', () => {
+    const test = harness(true);
+    test.hooks.beginStart();
+    assert.equal(test.hooks.captureAllowed(), true);
+    test.hooks.cancelStart();
+    assert.equal(test.hooks.captureAllowed(), false);
+  });
+
   it('prevents quit while active, stops first, and quits afterward', async () => {
     const test = harness(true);
     let prevented = 0;
@@ -88,6 +96,32 @@ describe('shutdown hooks', () => {
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(events, ['stop', 'stop', 'quit']);
     assert.equal(prevented, 2);
+  });
+
+  it('retries after a failed window-close teardown even when nothing reports active', async () => {
+    let attempts = 0;
+    let active = true;
+    const events: string[] = [];
+    const hooks = createShutdownHooks({
+      stop: async () => {
+        attempts += 1;
+        events.push('stop');
+        active = false;
+        if (attempts === 1) throw new Error('teardown failed');
+      },
+      hasActive: () => active,
+      quit: () => {
+        events.push('quit');
+      },
+    });
+    hooks.onWindowAllClosed();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events, ['stop']);
+    let prevented = 0;
+    hooks.onBeforeQuit({ preventDefault: () => { prevented += 1; } });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(prevented, 1);
+    assert.deepEqual(events, ['stop', 'stop', 'quit']);
   });
 
   it('does not block a quit when no session or stop is active', () => {

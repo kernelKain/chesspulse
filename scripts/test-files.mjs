@@ -38,3 +38,16 @@ export function discoverTestFiles(baseDirectory, roots = TEST_ROOTS) {
   }
   return [...found].sort();
 }
+
+/**
+ * A file-level event is a wrapper around the file, not a registered test. Node emits one even for
+ * an empty file, so counting it would let a compiled test with no tests pass.
+ */
+export function testFileOfEvent(event) {
+  if (event?.type !== 'test:pass' && event?.type !== 'test:fail') return null;
+  const file = event.data?.file;
+  const name = event.data?.name;
+  if (typeof file !== 'string' || typeof name !== 'string') return null;
+  if (name === file || name === path.basename(file)) return null;
+  return path.resolve(file);
+}

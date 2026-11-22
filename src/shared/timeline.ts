@@ -296,9 +296,9 @@ export function moveTableRows(view: TimelineViewModel): TimelineMoveRow[] {
       san: move.san,
       pulseBpm: pulse ? `${formatNumber(pulse.bpm)} bpm` : '—',
       band: move.band === 'elevated' ? 'Elevated' : move.band === 'settled' ? 'Settled' : 'No reading',
-      cpl: move.mate ? 'Mate' : move.cpl === null ? 'Unscored' : `${Math.round(move.cpl)} cp`,
+      cpl: !move.scored ? 'Unscored' : move.mate ? 'Mate' : `${Math.round(move.cpl ?? 0)} cp`,
       think: move.thinkSec === null ? '—' : `${formatNumber(move.thinkSec)} s`,
-      note: move.blunder ? 'Blunder' : move.mate ? 'Mate' : move.cpl === null ? 'Unscored' : '',
+      note: !move.scored ? 'Unscored' : move.blunder ? 'Blunder' : move.mate ? 'Mate' : '',
     };
   });
 }
@@ -502,7 +502,7 @@ function nearestMoveTo(moves: readonly TimelineMove[], tUs: number): TimelineMov
 }
 
 function formatMoveReadout(move: TimelineMove): string {
-  const cpl = move.mate ? 'mate' : move.cpl === null ? 'unscored' : `${Math.round(move.cpl)} cpl`;
+  const cpl = !move.scored ? 'unscored' : move.mate ? 'mate' : `${Math.round(move.cpl ?? 0)} cpl`;
   const think = move.thinkSec === null ? '' : `, ${formatNumber(move.thinkSec)} s think`;
   const blunder = move.blunder ? ', blunder' : '';
   return ` · ${move.san} (${cpl}${think}${blunder})`;

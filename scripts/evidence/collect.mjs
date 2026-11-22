@@ -104,8 +104,8 @@ function sessionSummary(root, id) {
 
 function check(summary, options) {
   const results = [];
-  if (options['expect-coverage'] !== undefined) {
-    const wanted = Number(options['expect-coverage']);
+  if (options.expectedCoverage !== undefined) {
+    const wanted = options.expectedCoverage;
     const actual = summary.coveragePct;
     results.push({
       check: `coverage >= ${wanted}%`,
@@ -124,12 +124,12 @@ function check(summary, options) {
       status: summary.stopReason === 'limit' ? 'PASS' : 'FAIL',
       detail: `stopReason=${summary.stopReason ?? 'none'}`,
     });
+    const minMs = Math.max(60_000, limitMinutes * 60_000 * 0.5);
+    const maxMs = limitMinutes * 60_000 + 120_000;
     const inWindow =
-      summary.durationMs !== null &&
-      summary.durationMs >= 60_000 &&
-      summary.durationMs <= 300_000;
+      summary.durationMs !== null && summary.durationMs >= minMs && summary.durationMs <= maxMs;
     results.push({
-      check: 'stopped inside the 1–5 minute test window',
+      check: `stopped inside the ${Math.round(minMs / 60_000)}–${Math.round(maxMs / 60_000)} minute test window`,
       status: inWindow ? 'PASS' : 'FAIL',
       detail: summary.durationMs === null ? 'No duration.' : `${Math.round(summary.durationMs / 1000)}s.`,
     });
@@ -158,6 +158,34 @@ function writeRunsheet(directory, stamp, label) {
 }
 
 const options = parseArgs(process.argv.slice(2));
+
+function fail(message) {
+  console.error(message);
+  process.exit(1);
+}
+
+const hasCoverageExpectation = options['expect-coverage'] !== undefined;
+const hasLimitExpectation = options['expect-limit'] === true;
+if ((hasCoverageExpectation || hasLimitExpectation) && !options.session) {
+  fail('An expectation flag needs --session <id>. Metadata-only collection is available without one.');
+}
+let expectedCoverage;
+if (hasCoverageExpectation) {
+  if (options['expect-coverage'] === true) {
+    fail('--expect-coverage needs an explicit number, for example 70.');
+  }
+  expectedCoverage = Number(options['expect-coverage']);
+  if (!Number.isFinite(expectedCoverage) || expectedCoverage <= 0 || expectedCoverage > 100) {
+    fail('--expect-coverage must be a finite number between 0 and 100.');
+  }
+}
+const limitMinutes = Number(options['limit-minutes'] ?? 2);
+if (!Number.isInteger(limitMinutes) || limitMinutes < 1 || limitMinutes > 90) {
+  fail('--limit-minutes must be a whole number between 1 and 90.');
+}
+options.expectedCoverage = expectedCoverage;
+options.limitMinutes = limitMinutes;
+
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const directory = path.resolve(
   options.out ?? path.join(ROOT, 'docs', 'evidence', `${stamp}${options.label ? `-${options.label}` : ''}`),

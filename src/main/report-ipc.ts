@@ -9,7 +9,7 @@ import {
 import { EVENT_CHANNELS } from '../shared/channels.js';
 import { AppError } from '../shared/errors.js';
 import { registerInvokeChannel } from './ipc-registry.js';
-import { buildReport } from './report.js';
+import { CANCELLED_REFUSAL, buildReport } from './report.js';
 import { withReportExclusion } from './report-lock.js';
 import { defaultDataRoot } from './store.js';
 
@@ -35,20 +35,26 @@ export function registerReportHandler(dataRoot: () => string = defaultDataRoot):
     activeBuilds.set(sessionId, build);
     try {
       // Shared exclusion also covers insight artifact reads; only one Stockfish build runs at once.
-      const result = await withReportExclusion(() =>
-        buildReport(dataRoot(), sessionId, pgns, undefined, {
-          signal: build.controller.signal,
-          onCommitStart: () => {
-            build.committing = true;
-          },
-          onProgress: (progress) => {
-            if (event.sender.isDestroyed()) return;
-            const message = reportProgressSchema.safeParse({ sessionId, ...progress });
-            if (message.success) event.sender.send(EVENT_CHANNELS.reportProgress, message.data);
-          },
-        }),
+      const result = await withReportExclusion(
+        () =>
+          buildReport(dataRoot(), sessionId, pgns, undefined, {
+            signal: build.controller.signal,
+            onCommitStart: () => {
+              build.committing = true;
+            },
+            onProgress: (progress) => {
+              if (event.sender.isDestroyed()) return;
+              const message = reportProgressSchema.safeParse({ sessionId, ...progress });
+              if (message.success) event.sender.send(EVENT_CHANNELS.reportProgress, message.data);
+            },
+          }),
+        build.controller.signal,
       );
       return reportResultSchema.parse(result);
+    } catch (error) {
+      // A queued build is interrupted by the exclusion lock; report it as the same cancellation.
+      if (build.controller.signal.aborted) return reportResultSchema.parse(CANCELLED_REFUSAL);
+      throw error;
     } finally {
       if (activeBuilds.get(sessionId) === build) activeBuilds.delete(sessionId);
     }

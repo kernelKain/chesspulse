@@ -149,6 +149,7 @@ export const timelineMoveSchema = z
     thinkSec: z.number().finite().nonnegative().nullable(),
     blunder: z.boolean(),
     mate: z.boolean(),
+    scored: z.boolean(),
     band: z.enum(['settled', 'elevated']).nullable(),
   })
   .strict();

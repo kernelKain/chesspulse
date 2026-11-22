@@ -71,6 +71,21 @@ describe('preview controller', () => {
     assert.equal(controller.active(), true);
   });
 
+  it('keeps ownership and rejects when release fails', async () => {
+    let attempts = 0;
+    const controller = createPreviewController(() => ({
+      stop: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('camera busy');
+      },
+    }));
+    await controller.start(input);
+    await assert.rejects(() => controller.stop(), /camera busy/);
+    assert.equal(controller.active(), true);
+    await controller.stop();
+    assert.equal(controller.active(), false);
+  });
+
   it('keeps reporting active while a stop is in flight', async () => {
     let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => {

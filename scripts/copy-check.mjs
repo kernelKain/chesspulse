@@ -46,13 +46,23 @@ export function findCompetingTerms(root) {
   ];
   const hits = [];
   for (const file of copyFiles) {
-    const text = readFileSync(file, 'utf8').toLowerCase();
+    const text = stringLiterals(readFileSync(file, 'utf8')).toLowerCase();
     for (const term of COMPETING_TERMS) {
       const pattern = new RegExp(`\\b${term.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
       if (pattern.test(text)) hits.push(`${path.relative(root, file)}: ${term}`);
     }
   }
   return hits;
+}
+
+/** Comments and code identifiers are not copy; only quoted/template contents are scanned. */
+function stringLiterals(source) {
+  const withoutComments = source
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
+  return [...withoutComments.matchAll(/(['"`])((?:\\.|(?!\1)[\s\S])*?)\1/g)]
+    .map((match) => match[2])
+    .join('\n');
 }
 
 export function runCopyCheck(root) {

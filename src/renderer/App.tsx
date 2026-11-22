@@ -122,6 +122,7 @@ export function App() {
   const openSessionSeq = useRef(0);
   const stoppedSessionRef = useRef<string | null>(null);
   const hydrationSeq = useRef(0);
+  const previewSeq = useRef(0);
   const consentQueue = useRef<Promise<void>>(Promise.resolve());
 
   function resetInsight(): void {
@@ -172,21 +173,21 @@ export function App() {
   // Why: a reloaded page must not render consent off while main still holds it, nor forget a session.
   useEffect(() => {
     if (!bridge) return;
+    // Capture the generation before the read. A consent action that lands while it is in flight
+    // is newer than the snapshot, so its reply must be ignored rather than undoing the action.
+    const seq = hydrationSeq.current;
     void bridge
       .getAppState()
       .then((raw) => {
+        if (seq !== hydrationSeq.current) return;
         const parsed = appStateSchema.safeParse(raw);
         if (!parsed.success) return;
-        const seq = hydrationSeq.current;
         const { consent, session } = parsed.data;
-        // A consent action that landed while this read was in flight is newer than the snapshot.
-        const consentValue = seq === hydrationSeq.current ? consent.granted : grantedNow.current;
-        if (seq === hydrationSeq.current) grantedNow.current = consentValue;
+        grantedNow.current = consent.granted;
         if (
           session.active &&
           session.sessionId &&
           session.startedAtEpochMs !== null &&
-          seq === hydrationSeq.current &&
           !terminalSessionRef.current &&
           !stoppedSessionRef.current
         ) {
@@ -195,7 +196,7 @@ export function App() {
         }
         dispatch({
           type: 'hydrated',
-          consent: consentValue,
+          consent: consent.granted,
           session:
             session.active && session.sessionId && session.startedAtEpochMs !== null
               ? {
@@ -311,12 +312,10 @@ export function App() {
   // Its cleanup runs on every path that leaves Setup, so no screen retains a live camera.
   useEffect(() => {
     if (flow.screen !== 'setup' || !bridge || !flow.consent || setupKey.status !== 'present') {
-      // Keep the status honest when consent or the key removes the preview.
-      if (flow.screen === 'setup' && (preview === 'running' || preview === 'starting')) {
-        setPreview('idle');
-      }
+      // The previous effect's cleanup owns the stop and clears the state only after release.
       return undefined;
     }
+    const seq = ++previewSeq.current;
     let alive = true;
     setPreview('starting');
     setPreviewError(null);
@@ -333,7 +332,14 @@ export function App() {
       });
     return () => {
       alive = false;
-      void bridge.stopPreview().catch(() => undefined);
+      void bridge
+        .stopPreview()
+        .then(() => {
+          if (previewSeq.current === seq) setPreview('idle');
+        })
+        .catch(() => {
+          // Release was not confirmed. Keep the running state so Help still shows the camera.
+        });
     };
   }, [flow.screen, flow.consent, setupKey.status, previewAttempt, bridge]);
 
@@ -420,7 +426,9 @@ export function App() {
       const parsed = sessionStartedSchema.safeParse(event);
       if (!parsed.success) return;
       if (terminalSessionRef.current === parsed.data.sessionId) return;
+      if (stoppedSessionRef.current === parsed.data.sessionId) return;
       if (supersededSessions.current.has(parsed.data.sessionId)) return;
+      if (!grantedNow.current) return;
       // A page that already adopted a different live session must not switch to a late start event.
       if (sessionIdRef.current && sessionIdRef.current !== parsed.data.sessionId) return;
       // The event means main opened a session, which requires consent. Set both before the
@@ -727,7 +735,9 @@ export function App() {
         dispatch({ type: 'notice', message: reportErrorCopy(parsed.data.reportError) });
       }
     } catch (caught: unknown) {
-      dispatch({ type: 'error', message: readIpcError(caught, 'report_failed') });
+      if (seq === openSessionSeq.current) {
+        dispatch({ type: 'error', message: readIpcError(caught, 'report_failed') });
+      }
     }
   }
 
@@ -781,7 +791,10 @@ export function App() {
   if (flow.screen === 'help') {
     return (
       <>
-        <CameraOpenIndicator sensing={Boolean(flow.session)} preview={false} />
+        <CameraOpenIndicator
+          sensing={Boolean(flow.session)}
+          preview={preview === 'running' || preview === 'starting'}
+        />
         <main>
           <p className="label">{COPY.common.screenLabels.help}</p>
           <h1>{COPY.common.actions.help}</h1>

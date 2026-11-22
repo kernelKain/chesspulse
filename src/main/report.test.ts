@@ -433,7 +433,12 @@ describe('buildReport', () => {
     assert.equal(result.ok, false);
     if (result.ok) return;
     assert.equal(result.reason, 'cancelled');
-    await assert.rejects(readFile(path.join(root, 'sessions', id, 'report.json'), 'utf8'));
+    for (const name of ['games.json', 'report.json']) {
+      await assert.rejects(
+        readFile(path.join(root, 'sessions', id, name), 'utf8'),
+        (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT',
+      );
+    }
   });
 
   it('builds a 90-minute synthetic session without losing plies', async () => {
