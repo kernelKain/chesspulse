@@ -7,9 +7,11 @@ import {
   reportSchema,
   type InsightResult,
   type Report,
+  type InsightConfig,
 } from '../../shared/contracts.js';
 import { reportTotals } from '../../shared/summary.js';
 import { digestGames } from '../store.js';
+import { gameQuality } from '../../shared/quality.js';
 import { readAiConfig } from './config.js';
 import { groundInsight } from './grounding.js';
 import { AiProviderError, callProvider } from './providers.js';
@@ -20,6 +22,13 @@ interface InsightOptions {
   signal?: AbortSignal;
   /** Opaque and stable for one report's questions; never the session folder name. */
   conversationId?: string;
+}
+
+/** What the panel may show about the configuration: provider and model, or why it is off. Never the key. */
+export function insightConfigView(env: NodeJS.ProcessEnv): InsightConfig {
+  const state = readAiConfig(env);
+  if (state.disabled) return { configured: false, reason: state.reason };
+  return { configured: true, provider: state.config.provider, model: state.config.model.slice(0, 120) };
 }
 
 export async function requestInsight(
@@ -118,15 +127,34 @@ export function computedSummary(report: Report): unknown {
           },
         }
       : {}),
-    games: report.games.map((game) => ({
-      gameNumber: game.index + 1,
-      index: game.index,
-      moveCount: game.moveCount,
-      blunders: game.blunders,
-      includeInStats: game.includeInStats,
-      aligned: game.aligned,
-      ...(game.summary ? { summary: game.summary } : {}),
-    })),
+    ...(report.playerScope ? { playerScope: report.playerScope } : {}),
+    engine: { name: report.engine.name ?? 'Stockfish', depth: report.engine.depth },
+    games: report.games.map((game) => {
+      // The same view Move Quality draws, so the model cites the labels the player sees.
+      const view = gameQuality(report, game.index);
+      return {
+        gameNumber: game.index + 1,
+        index: game.index,
+        ending: game.ending,
+        ...(game.playerSide ? { playerSide: game.playerSide } : {}),
+        moveCount: game.moveCount,
+        blunders: game.blunders,
+        includeInStats: game.includeInStats,
+        aligned: game.aligned,
+        ...(game.summary ? { summary: game.summary } : {}),
+        ...(view?.kind === 'ok'
+          ? {
+              ...(view.span ? { sessionSpan: view.span } : {}),
+              largestLosses: view.losses.map((loss) => ({
+                move: loss.label,
+                moveNumber: Math.floor(loss.moveIndex / 2) + 1,
+                cpl: loss.cpl,
+                blunder: loss.blunder,
+              })),
+            }
+          : {}),
+      };
+    }),
   };
 }
 

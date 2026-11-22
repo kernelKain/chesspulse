@@ -484,6 +484,14 @@ contextBridge.exposeInMainWorld('chesspulse', {
       return { cancelled: value.cancelled };
     });
   },
+  insightConfig(): Promise<unknown> {
+    return invoke(INVOKE_CHANNELS.insightConfig.name, {}).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('configured' in value) || typeof value.configured !== 'boolean') {
+        throw new Error('The window returned an unexpected AI configuration.');
+      }
+      return value;
+    });
+  },
   validatePgns(slots: unknown): Promise<unknown> {
     if (!Array.isArray(slots) || !slots.every((item) => typeof item === 'string')) {
       return rejectInvalidRequest();

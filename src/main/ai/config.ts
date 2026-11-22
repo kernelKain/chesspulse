@@ -32,7 +32,7 @@ export function readAiConfig(env: NodeJS.ProcessEnv, requested?: AiProvider): Ai
   }
 
   const key = env.CP_AI_KEY?.trim() ?? '';
-  if (!key) return { disabled: true, reason: 'No AI key configured. Layers 1–3 are complete without it.' };
+  if (!key) return { disabled: true, reason: 'CP_AI_KEY is empty. The report is complete without it.' };
   const model = env.CP_AI_MODEL?.trim() ?? '';
   if (!model) return { disabled: true, reason: 'CP_AI_MODEL is missing. The AI reading stays off; the report is complete.' };
 

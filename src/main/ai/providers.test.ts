@@ -276,7 +276,7 @@ describe('readAiConfig', () => {
   it('stays disabled without a key and names the missing custom base URL', () => {
     assert.deepEqual(readAiConfig({}, 'openai'), {
       disabled: true,
-      reason: 'No AI key configured. Layers 1–3 are complete without it.',
+      reason: 'CP_AI_KEY is empty. The report is complete without it.',
     });
     const custom = readAiConfig({ CP_AI_KEY: 'key', CP_AI_MODEL: 'model' }, 'custom');
     assert.equal(custom.disabled, true);

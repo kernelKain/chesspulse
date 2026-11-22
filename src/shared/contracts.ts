@@ -615,6 +615,16 @@ export const insightRequestSchema = z
   })
   .strict();
 
+/**
+ * What: which provider and model .env selected, for a read-only line on the AI panel.
+ * Why: the page no longer chooses a provider, so it must still say which one would be used.
+ * Removed: the player could not tell what a Generate request would reach. The key is never included.
+ */
+export const insightConfigSchema = z.discriminatedUnion('configured', [
+  z.object({ configured: z.literal(true), provider: aiProviderSchema, model: z.string().min(1).max(120) }).strict(),
+  z.object({ configured: z.literal(false), reason: z.string().min(1).max(300) }).strict(),
+]);
+
 export const insightCancelRequestSchema = z
   .object({
     sessionId: z.string().min(1),
@@ -842,4 +852,5 @@ export type InsightRequest = z.infer<typeof insightRequestSchema>;
 export type Insight = z.infer<typeof insightSchema>;
 export type InsightDisabled = z.infer<typeof insightDisabledSchema>;
 export type InsightResult = z.infer<typeof insightResultSchema>;
+export type InsightConfig = z.infer<typeof insightConfigSchema>;
 export type PreviewFrame = z.infer<typeof previewFrameSchema>;

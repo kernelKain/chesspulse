@@ -2,7 +2,9 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import {
   appStateSchema,
   coachMessageSchema,
+  insightConfigSchema,
   insightResultSchema,
+  type InsightConfig,
   reportProgressSchema,
   reportResultSchema,
   sampleBatchSchema,
@@ -58,11 +60,11 @@ import { CameraPreview } from './CameraPreview';
 import { CoachLine } from './CoachLine';
 import { Explainer } from './Explainer';
 import { MoveQuality } from './MoveQuality';
-import { InsightPanel, type InsightViewState } from './InsightPanel';
+import { InsightPanel, insightAside, type InsightViewState } from './InsightPanel';
 import { openKeyboardHelp } from './KeyboardHelp';
 import { MarkPicker } from './MarkPicker';
 import { ReviewStages } from './ReviewStages';
-import { readIpcError } from './ipc-error';
+import { readIpcError, readIpcErrorInfo } from './ipc-error';
 import { markChoiceNeeded, tooFewMarks } from '../shared/marks';
 import { reviewStages } from '../shared/stages';
 import { PasteScreen } from './PasteScreen';
@@ -97,6 +99,8 @@ export function App() {
   const [validation, setValidation] = useState<ValidationMessage | null>(null);
   const [coachMessage, setCoachMessage] = useState<CoachMessage | null>(null);
   const [insightState, setInsightState] = useState<InsightViewState>({ status: 'idle' });
+  // Which provider and model .env selected. Main reads .env once at startup, so one read is enough.
+  const [aiConfig, setAiConfig] = useState<InsightConfig | null>(null);
   // "Open on timeline" in Move Quality: the moment to select, with a counter so a repeat still applies.
   const [timelineFocus, setTimelineFocus] = useState<TimelineFocus | null>(null);
   const [setupKey, setSetupKey] = useState<{ status: KeyStatus; detail: string }>({
@@ -125,6 +129,22 @@ export function App() {
   }>({ status: 'idle', sessions: [], unreadable: 0 });
   const [libraryNonce, setLibraryNonce] = useState(0);
   const bridge = window.chesspulse;
+  useEffect(() => {
+    if (!bridge) return;
+    let live = true;
+    bridge
+      .insightConfig()
+      .then((raw) => {
+        const parsed = insightConfigSchema.safeParse(raw);
+        if (live && parsed.success) setAiConfig(parsed.data);
+      })
+      .catch(() => {
+        // Without the line the panel still works; a request reports its own configuration error.
+      });
+    return () => {
+      live = false;
+    };
+  }, [bridge]);
   const grantedNow = useRef(false);
   const startPending = useRef(false);
   const revokedDuringStart = useRef(false);
@@ -627,7 +647,9 @@ export function App() {
       if (!parsed.success) {
         setInsightState({
           status: 'error',
+          code: 'ai_bad_response',
           message: COPY.errors.insightUnexpected,
+          retryable: false,
         });
       } else if (parsed.data.disabled) {
         setInsightState({ status: 'disabled', reason: parsed.data.reason });
@@ -636,9 +658,12 @@ export function App() {
       }
     } catch (caught: unknown) {
       if (seq !== insightRequestSeq.current) return;
+      const failure = readIpcErrorInfo(caught, 'ai_unavailable');
       setInsightState({
         status: 'error',
-        message: readIpcError(caught, 'ai_unavailable'),
+        code: failure.code,
+        message: failure.message,
+        retryable: failure.retryable,
       });
     }
   }
@@ -1059,10 +1084,12 @@ export function App() {
       result,
       building: Boolean(review?.building),
       failed: Boolean(review?.error),
-      reading: insightState.status,
+      reading: aiConfig?.configured === false ? 'disabled' : insightState.status,
       // The service's own reason distinguishes a missing model from a missing key.
       readingDetail:
-        insightState.status === 'disabled'
+        aiConfig?.configured === false
+          ? aiConfig.reason
+          : insightState.status === 'disabled'
           ? insightState.reason
           : insightState.status === 'error'
             ? insightState.message
@@ -1087,7 +1114,10 @@ export function App() {
           ),
           reading: (
             <InsightPanel
+              key={`insight-${result.sessionId}`}
               state={insightState}
+              config={aiConfig}
+              report={result}
               onRequest={(text) => void onInsightRequest(text)}
               onCancel={() => void onInsightCancel()}
             />
@@ -1106,6 +1136,7 @@ export function App() {
     const asides = result?.ok
       ? {
           engine: COPY.stages.engineBadge(result.engine.name ?? 'Stockfish', result.engine.version, result.engine.depth),
+          reading: insightAside(aiConfig),
         }
       : {};
     return (

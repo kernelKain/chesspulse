@@ -55,6 +55,8 @@
     "src/renderer/ReportSummary.test.tsx",
     "src/renderer/MoveQuality.tsx",
     "src/renderer/MoveQuality.dom.test.tsx",
+    "src/renderer/InsightPanel.tsx",
+    "src/renderer/InsightPanel.dom.test.tsx",
     "src/shared/onboarding.ts"
   ]
 }

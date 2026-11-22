@@ -133,7 +133,8 @@ export const APP_ERRORS: Record<AppErrorCode, { readonly message: string; readon
     retryable: false,
   },
   ai_ungrounded: {
-    message: 'The AI reading made a claim ChessPulse cannot verify, so it was not shown. The report is unchanged.',
+    message:
+      'The response introduced a number or claim that ChessPulse could not trace to the local report, so it was not shown. Nothing in the report changed.',
     retryable: false,
   },
   internal: {

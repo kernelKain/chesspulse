@@ -5,6 +5,7 @@ import type {
   SessionMarkView,
   AppState,
   CoachMessage,
+  InsightConfig,
   InsightRequest,
   InsightResult,
   PasteValidation,
@@ -49,6 +50,7 @@ export interface ChessPulseBridge {
   onSessionStarted(listener: (event: SessionStarted) => void): () => void;
   requestInsight(request: InsightRequest): Promise<InsightResult>;
   cancelInsight(sessionId: string): Promise<{ cancelled: boolean }>;
+  insightConfig(): Promise<InsightConfig>;
   validatePgns(slots: string[]): Promise<PasteValidation>;
   onReportProgress(listener: (progress: ReportProgress) => void): () => void;
   buildReport(

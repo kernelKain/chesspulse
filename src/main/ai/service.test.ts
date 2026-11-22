@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { REPORT_SCHEMA_VERSION, type Report } from '../../shared/contracts.js';
-import { computedSummary, requestInsight } from './service.js';
+import { computedSummary, insightConfigView, requestInsight } from './service.js';
 
 const ENV = { CP_AI_KEY: 'test-secret', CP_AI_MODEL: 'test-model' };
 const REQUEST = { sessionId: 's1', text: 'Review this session.' };
@@ -162,7 +162,7 @@ describe('requestInsight', () => {
         return completion();
       },
     });
-    assert.deepEqual(result, { disabled: true, reason: 'No AI key configured. Layers 1–3 are complete without it.' });
+    assert.deepEqual(result, { disabled: true, reason: 'CP_AI_KEY is empty. The report is complete without it.' });
     assert.equal(calls, 0);
   });
 
@@ -382,5 +382,55 @@ describe('requestInsight', () => {
       /timed out/,
     );
     assert.equal(calls, 2);
+  });
+});
+
+describe('grounded move labels and config view', () => {
+  const PGN2 = '[White "Ada"]\n1. e4 e5';
+  const withGame: Report = {
+    ...REPORT,
+    gamesDigest: digest([PGN2]),
+    games: [{
+      index: 0, white: 'Ada', black: 'Nim', result: '1-0', ending: 'resignation', includeInStats: true,
+      moveCount: 30, blunders: 1, aligned: true, playerSide: 'black',
+      summary: {
+        scored: 15, unscored: 0, overall: { moves: 15, status: 'ok', accuracy: 84 },
+        settled: { band: 'settled', moves: 15, status: 'ok', accuracy: 84 },
+        elevated: { band: 'elevated', moves: 0, status: 'insufficient' },
+        blunders: 1, elevatedBlunders: 0, avgThinkSec: 3.5,
+        largestLosses: [{ moveIndex: 27, cpl: 909, blunder: true }],
+      },
+    }],
+    timeline: {
+      ...REPORT.timeline,
+      stopUs: 600_000_000,
+      games: [{ index: 0, white: 'Ada', black: 'Nim', result: '1-0', ending: 'resignation', includeInStats: true, startUs: 60_000_000, endUs: 300_000_000 }],
+      moves: [{ gameIndex: 0, moveIndex: 27, san: 'Rc8', tUs: 200_000_000, cpl: 909, thinkSec: 4, blunder: true, mate: false, scored: true, band: 'settled' }],
+    },
+  };
+
+  it('gives the model the move labels and session span Move Quality shows', () => {
+    const summary = computedSummary(withGame) as { games: { largestLosses: unknown; sessionSpan: unknown; playerSide: string }[] };
+    assert.deepEqual(summary.games[0]?.largestLosses, [{ move: '14… Rc8', moveNumber: 14, cpl: 909, blunder: true }]);
+    assert.deepEqual(summary.games[0]?.sessionSpan, { start: '1:00', end: '5:00' });
+    assert.equal(summary.games[0]?.playerSide, 'black');
+  });
+
+  it('accepts a cited move label, treating its square as notation, and still refuses a new quantity', async () => {
+    const text = 'In Game 1, 14… Rc8 lost 909 centipawns, the largest change; after exd5 the position held.';
+    const result = await requestInsight(REQUEST, withGame, [PGN2], ENV, { fetch: async () => completion(text) });
+    assert.deepEqual(result, { disabled: false, provider: 'openai', text });
+    await assert.rejects(
+      requestInsight(REQUEST, withGame, [PGN2], ENV, { fetch: async () => completion('14… Rc8 lost 7 points.') }),
+      /introduced a number.*7/,
+    );
+  });
+
+  it('names the provider and model for the panel and never the key', () => {
+    const view = insightConfigView({ CP_AI_PROVIDER: 'opencode', CP_AI_KEY: 'sk-secret-value', CP_AI_MODEL: 'deepseek-v4.1-flash' });
+    assert.deepEqual(view, { configured: true, provider: 'opencode', model: 'deepseek-v4.1-flash' });
+    assert.equal(JSON.stringify(view).includes('sk-secret-value'), false);
+    const off = insightConfigView({});
+    assert.equal(off.configured, false);
   });
 });

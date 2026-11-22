@@ -33,6 +33,7 @@ const VALID: Record<InvokeChannelKey, unknown> = {
   reportCancel: { sessionId: 'session' },
   insightRequest: { sessionId: 'session', text: 'What stood out?' },
   insightCancel: { sessionId: 'session' },
+  insightConfig: {},
   diagnosticsCopy: {},
   sessionDelete: { sessionId: 'session' },
   sessionsList: {},

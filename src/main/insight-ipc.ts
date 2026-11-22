@@ -2,9 +2,9 @@
 // Why: the renderer never supplies grounding statistics, and one session has at most one active call.
 // Removed: a stale or forged renderer payload could reach a provider without cancellation or an audit id.
 import { randomUUID } from 'node:crypto';
-import { insightResultSchema } from '../shared/contracts.js';
+import { insightConfigSchema, insightResultSchema } from '../shared/contracts.js';
 import { AppError, toAppError } from '../shared/errors.js';
-import { requestInsight } from './ai/service.js';
+import { insightConfigView, requestInsight } from './ai/service.js';
 import { AiProviderError } from './ai/providers.js';
 import { GroundingError } from './ai/grounding.js';
 import { registerInvokeChannel } from './ipc-registry.js';
@@ -61,6 +61,8 @@ export function registerInsightHandler(dataRoot: () => string = defaultDataRoot,
     }
   });
 
+  // Read-only: names the provider and model .env selected. The key never leaves main.
+  registerInvokeChannel('insightConfig', () => insightConfigSchema.parse(insightConfigView(env)));
   registerInvokeChannel('insightCancel', (_event, payload) => {
     const controller = active.get(payload.sessionId);
     controller?.abort();

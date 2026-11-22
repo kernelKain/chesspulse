@@ -1274,65 +1274,129 @@ main.main-report > .label {
 }
 
 .insight-panel {
-  margin-top: 32px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
+  display: grid;
+  gap: var(--sp-3);
 }
-
-.insight-panel h2 {
-  margin: 0 0 8px;
+.insight-panel h3 {
+  margin: 0 0 var(--sp-2);
   color: var(--text);
-  font-size: 20px;
-  font-weight: 560;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
-
 .inferred-label {
+  margin: 0 0 var(--sp-2);
   color: var(--warn);
   font-size: 12px;
   letter-spacing: 0.02em;
   max-width: none;
 }
-
-.insight-controls {
-  display: grid;
-  gap: 16px;
-  margin-top: 16px;
-}
-
-.insight-controls label {
-  display: grid;
-  gap: 8px;
+.insight-hint,
+.insight-sent p,
+.insight-notice p,
+.insight-error p,
+.insight-answer-for {
+  margin: 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  max-width: 52rem;
 }
-
-.insight-controls select {
-  width: fit-content;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
+.insight-chips {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.insight-chips li {
+  display: grid;
+  gap: 2px;
+}
+.insight-chip {
+  appearance: none;
+  padding: var(--sp-2) var(--sp-3);
+  border: var(--border-w) solid var(--line);
+  border-radius: var(--r-control);
   background: var(--bg);
   color: var(--text);
   font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
 }
-
-.insight-note,
+.insight-chip:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+/* Chosen is shown by the border and weight, as well as aria-pressed. */
+.insight-chip[aria-pressed='true'] {
+  border-color: var(--text);
+  font-weight: 600;
+}
+.insight-chip:disabled {
+  border-style: dashed;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.insight-chip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.insight-chip-reason {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.insight-question {
+  margin-top: var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.insight-panel textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}
+.insight-sent,
+.insight-notice,
 .insight-error,
-.insight-text {
-  margin-top: 16px;
-  max-width: 44rem;
-  overflow-wrap: anywhere;
+.insight-result {
+  padding: var(--sp-3) var(--sp-4);
+  border: var(--border-w) solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--bg);
 }
-
+.insight-notice,
 .insight-error {
-  color: var(--warn);
+  border-color: var(--warn);
 }
-
+.insight-notice .insight-notice-detail {
+  margin-top: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+.insight-panel .actions {
+  margin-top: 0;
+}
+.insight-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.insight-note:empty {
+  display: none;
+}
+.insight-answer-for {
+  margin-bottom: var(--sp-2);
+}
 .insight-text {
+  margin: 0;
+  max-width: 52rem;
   color: var(--text);
+  line-height: 1.6;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .refusal-panel {
