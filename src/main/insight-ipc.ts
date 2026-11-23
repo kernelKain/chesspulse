@@ -2,9 +2,9 @@
 // Why: the renderer never supplies grounding statistics, and one session has at most one active call.
 // Removed: a stale or forged renderer payload could reach a provider without cancellation or an audit id.
 import { randomUUID } from 'node:crypto';
-import { insightResultSchema } from '../shared/contracts.js';
+import { insightConfigSchema, insightResultSchema } from '../shared/contracts.js';
 import { AppError, toAppError } from '../shared/errors.js';
-import { requestInsight } from './ai/service.js';
+import { insightConfigView, requestInsight } from './ai/service.js';
 import { AiProviderError } from './ai/providers.js';
 import { GroundingError } from './ai/grounding.js';
 import { registerInvokeChannel } from './ipc-registry.js';
@@ -15,6 +15,16 @@ import { defaultDataRoot, readGames, readReport } from './store.js';
 
 export function registerInsightHandler(dataRoot: () => string = defaultDataRoot, env: NodeJS.ProcessEnv = process.env): void {
   const active = new Map<string, AbortController>();
+  // One random id per report for this app run. OpenCode Go routes a conversation by it; a session
+  // folder name would tell the provider when the session was recorded, so it is never sent.
+  const conversations = new Map<string, string>();
+  const conversationFor = (sessionId: string): string => {
+    const known = conversations.get(sessionId);
+    if (known) return known;
+    const created = randomUUID();
+    conversations.set(sessionId, created);
+    return created;
+  };
 
   registerInvokeChannel('insightRequest', async (_event, payload) => {
     if (active.has(payload.sessionId)) throw new AppError('session_busy');
@@ -29,7 +39,10 @@ export function registerInsightHandler(dataRoot: () => string = defaultDataRoot,
       );
       // Provider and grounding failures carry their own meaning; anything else is a report fault.
       const result = insightResultSchema.parse(
-        await requestInsight(payload, artifacts.report, artifacts.pgns, env, { signal: controller.signal }).catch(
+        await requestInsight(payload, artifacts.report, artifacts.pgns, env, {
+          signal: controller.signal,
+          conversationId: conversationFor(payload.sessionId),
+        }).catch(
           (error: unknown) => {
             if (error instanceof AppError) throw error;
             if (error instanceof AiProviderError) throw new AppError(error.code, { cause: error });
@@ -41,18 +54,30 @@ export function registerInsightHandler(dataRoot: () => string = defaultDataRoot,
       log(`[chesspulse] AI reading ${requestId} ${result.disabled ? 'disabled' : 'ready'}`);
       return result;
     } catch (error) {
-      logError(`[chesspulse] AI reading ${requestId} failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+      logError(`[chesspulse] AI reading ${requestId} failed: ${describeFailure(error)}`);
       throw error;
     } finally {
       if (active.get(payload.sessionId) === controller) active.delete(payload.sessionId);
     }
   });
 
+  // Read-only: names the provider and model .env selected. The key never leaves main.
+  registerInvokeChannel('insightConfig', () => insightConfigSchema.parse(insightConfigView(env)));
   registerInvokeChannel('insightCancel', (_event, payload) => {
     const controller = active.get(payload.sessionId);
     controller?.abort();
     return { cancelled: controller !== undefined };
   });
+}
+
+/** The code and the provider's safe diagnostic (status and error type), never a body or a key. */
+function describeFailure(error: unknown): string {
+  if (error instanceof AppError) {
+    const cause = error.cause;
+    const diagnostic = cause instanceof AiProviderError && cause.diagnostic ? ` (${cause.diagnostic})` : '';
+    return `${error.code}${diagnostic}`;
+  }
+  return error instanceof Error ? error.message : 'unknown error';
 }
 
 function readArtifacts(

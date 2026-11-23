@@ -553,3 +553,150 @@ export function spaceEndingLabels(
   }
   return spaced;
 }
+
+/**
+ * What: round pulse ticks inside the drawn range, every 10 bpm (every 20 above an 80 bpm span).
+ * Why: three ticks at the raw min/mid/max read as noise (for example 77, 96, 115); round values
+ *      let the eye place a reading without the inspector.
+ */
+export function bpmTicks(minBpm: number, maxBpm: number): number[] {
+  if (!(maxBpm > minBpm)) return [minBpm];
+  const step = maxBpm - minBpm > 80 ? 20 : 10;
+  const ticks: number[] = [];
+  for (let value = Math.ceil(minBpm / step) * step; value <= maxBpm; value += step) ticks.push(value);
+  return ticks;
+}
+
+/**
+ * What: two label positions on one axis, pushed apart to at least `minGap`, kept inside [min, max].
+ * Why: the baseline and elevated-threshold labels sit 10 bpm apart and overlapped on a wide range.
+ */
+export function separatePair(first: number, second: number, minGap: number, min: number, max: number): [number, number] {
+  let a = first;
+  let b = second;
+  const upper = a <= b;
+  let low = upper ? a : b;
+  let high = upper ? b : a;
+  if (high - low < minGap) {
+    const middle = (low + high) / 2;
+    low = middle - minGap / 2;
+    high = middle + minGap / 2;
+  }
+  if (low < min) {
+    high += min - low;
+    low = min;
+  }
+  if (high > max) {
+    low -= high - max;
+    high = max;
+  }
+  [a, b] = upper ? [low, high] : [high, low];
+  return [a, b];
+}
+
+export type MomentRange = 'settled' | 'elevated' | 'withheld' | 'not_counted';
+
+export interface MomentMove {
+  /** "14. Nf3" for White, "14… Nf6" for Black. */
+  readonly label: string;
+  readonly loss: 'scored' | 'mate' | 'unscored';
+  readonly cpl: number | null;
+  readonly thinkSec: number | null;
+  readonly blunder: boolean;
+}
+
+export interface MomentDetails {
+  readonly position: number;
+  readonly total: number;
+  readonly time: string;
+  readonly bpm: string;
+  readonly range: MomentRange;
+  readonly confidence: number;
+  readonly counted: boolean;
+  readonly game: { readonly number: number; readonly players: string } | null;
+  readonly move: MomentMove | null;
+}
+
+/**
+ * What: the labelled facts for one selected reading, for the inspector beside the chart.
+ * Why: the old readout ran them into one line ("Sample 15/1791 · 0:27 · 92.2 bpm · …") that a
+ *      reader could not parse. Each value is read from the view; nothing new is computed.
+ */
+export function momentDetails(
+  view: TimelineViewModel,
+  sampleIndex: number,
+  /** A move chosen elsewhere (Move Quality). It replaces the nearest move; pulse facts stay the reading's. */
+  pinned?: { readonly gameIndex: number; readonly moveIndex: number } | null,
+): MomentDetails | null {
+  const sample = view.samples[sampleIndex];
+  if (!sample) return null;
+  const counted = sample.occluded !== true && sample.stable && sample.confidence >= CONFIDENCE_FLOOR;
+  const withheld = view.state === 'low_coverage' || view.elevatedThresholdBpm === undefined;
+  const range: MomentRange = !counted
+    ? 'not_counted'
+    : withheld
+      ? 'withheld'
+      : sample.bpm >= (view.elevatedThresholdBpm ?? Infinity)
+        ? 'elevated'
+        : 'settled';
+  const pinnedMove = pinned
+    ? view.moves.find((move) => move.gameIndex === pinned.gameIndex && move.moveIndex === pinned.moveIndex)
+    : undefined;
+  const game = pinnedMove
+    ? view.games.find((entry) => entry.index === pinnedMove.gameIndex)
+    : view.games.find((entry) => sample.tUs >= entry.startUs && sample.tUs <= entry.endUs);
+  const nearest =
+    pinnedMove ?? (game ? nearestMoveTo(view.moves.filter((move) => move.gameIndex === game.index), sample.tUs) : null);
+  return {
+    position: sampleIndex + 1,
+    total: view.samples.length,
+    time: formatElapsed(sample.tUs, view.startUs),
+    bpm: `${formatNumber(sample.bpm)} bpm`,
+    range,
+    // The SDK reports confidence with float noise (99.8483…); a whole number is what a reader can use.
+    confidence: Math.round(sample.confidence),
+    counted,
+    game: game
+      ? {
+          number: game.index + 1,
+          players: game.white || game.black ? `${game.white || 'Unknown'} vs ${game.black || 'Unknown'}` : 'Players unnamed',
+        }
+      : null,
+    move: nearest
+      ? {
+          label: moveLabel(nearest.moveIndex, nearest.san),
+          loss: !nearest.scored ? 'unscored' : nearest.mate ? 'mate' : 'scored',
+          cpl: nearest.scored && !nearest.mate && nearest.cpl !== null ? Math.round(nearest.cpl) : null,
+          thinkSec: nearest.thinkSec,
+          blunder: nearest.blunder,
+        }
+      : null,
+  };
+}
+
+/** Ply index to the move number a chess player reads: 0 → "1. e4", 1 → "1… e5". */
+export function moveLabel(moveIndex: number, san: string): string {
+  const number = Math.floor(moveIndex / 2) + 1;
+  return moveIndex % 2 === 0 ? `${number}. ${san}` : `${number}… ${san}`;
+}
+
+/**
+ * What: the index of the reading closest in time to `tUs`, the earlier one on a tie.
+ * Why: Move Quality opens a move on the timeline, and the timeline selects readings, not moves.
+ * Removed: "Open on timeline" would have nothing to select. `samples` must be time-ordered, as
+ *          `buildTimelineView` returns them.
+ */
+export function nearestSampleIndex(samples: readonly PulseSample[], tUs: number): number | null {
+  if (samples.length === 0) return null;
+  let low = 0;
+  let high = samples.length - 1;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if ((samples[mid]?.tUs ?? 0) < tUs) low = mid + 1;
+    else high = mid;
+  }
+  if (low === 0) return 0;
+  const before = samples[low - 1]?.tUs ?? 0;
+  const after = samples[low]?.tUs ?? 0;
+  return tUs - before <= after - tUs ? low - 1 : low;
+}

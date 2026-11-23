@@ -21,6 +21,10 @@ import {
   THINK_CAP_SEC,
   thinkTimeRatio,
   timeTicks,
+  bpmTicks,
+  momentDetails,
+  moveLabel,
+  separatePair,
 } from './timeline.js';
 
 function sample(tSec: number, bpm: number, confidence = 80, stable = true): PulseSample {
@@ -458,5 +462,84 @@ describe('spaceEndingLabels', () => {
   it('leaves an empty or single label alone', () => {
     assert.deepEqual(spaceEndingLabels([], 0, 100), []);
     assert.deepEqual(spaceEndingLabels([84], 0, 100), [84]);
+  });
+});
+
+describe('chart scale helpers', () => {
+  it('puts pulse ticks on round values inside the drawn range', () => {
+    assert.deepEqual(bpmTicks(65, 115), [70, 80, 90, 100, 110]);
+    assert.deepEqual(bpmTicks(40, 200), [40, 60, 80, 100, 120, 140, 160, 180, 200]);
+    assert.deepEqual(bpmTicks(70, 70), [70]);
+  });
+
+  it('separates two close labels and keeps both inside the rail', () => {
+    assert.deepEqual(separatePair(100, 104, 16, 50, 300), [94, 110]);
+    assert.deepEqual(separatePair(200, 120, 16, 50, 300), [200, 120], 'far labels are left alone');
+    assert.deepEqual(separatePair(52, 54, 16, 50, 300), [50, 66], 'pushed down from the top edge');
+    assert.deepEqual(separatePair(298, 296, 16, 50, 300), [300, 284], 'order is kept when the first is lower');
+  });
+
+  it('writes the move number a chess player reads', () => {
+    assert.equal(moveLabel(0, 'e4'), '1. e4');
+    assert.equal(moveLabel(1, 'e5'), '1… e5');
+    assert.equal(moveLabel(26, 'Nf3'), '14. Nf3');
+  });
+});
+
+describe('momentDetails', () => {
+  const report = {
+    ok: true as const,
+    schemaVersion: 1 as const,
+    sessionId: 's1',
+    gamesDigest: 'a'.repeat(64),
+    coveragePct: 90,
+    baselineBpm: 80,
+    verdict: 'v',
+    settled: { band: 'settled' as const, moves: 0, status: 'insufficient' as const },
+    elevated: { band: 'elevated' as const, moves: 0, status: 'insufficient' as const },
+    engine: { depth: 12, positions: 0, scored: 0, failed: 0, reasons: { timeout: 0, crash: 0, engine: 0, budget: 0 } },
+    alignmentMode: 'marks' as const,
+    toleranceSec: 0,
+    games: [],
+    timeline: {
+      startUs: 0,
+      stopUs: 60_000_000,
+      baselineBpm: 80,
+      elevatedThresholdBpm: 90,
+      samples: [
+        { tUs: 10_000_000, bpm: 92.2, confidence: 90, stable: true },
+        { tUs: 11_000_000, bpm: 70, confidence: 20, stable: true },
+        { tUs: 50_000_000, bpm: 81, confidence: 90, stable: true },
+      ],
+      games: [{ index: 0, white: 'Ada', black: '', result: '1-0', ending: 'resignation' as const, includeInStats: true, startUs: 0, endUs: 30_000_000 }],
+      moves: [
+        { gameIndex: 0, moveIndex: 2, san: 'Nc3', tUs: 10_500_000, cpl: 12.4, thinkSec: 0.7, blunder: false, mate: false, scored: true, band: 'elevated' as const },
+      ],
+    },
+  };
+  const view = buildTimelineView(report);
+
+  it('names each fact of an elevated reading inside a game', () => {
+    assert.deepEqual(momentDetails(view, 0), {
+      position: 1,
+      total: 3,
+      time: '0:10',
+      bpm: '92.2 bpm',
+      range: 'elevated',
+      confidence: 90,
+      counted: true,
+      game: { number: 1, players: 'Ada vs Unknown' },
+      move: { label: '2. Nc3', loss: 'scored', cpl: 12, thinkSec: 0.7, blunder: false },
+    });
+  });
+
+  it('marks a weak reading as not counted and a reading outside games as having no game or move', () => {
+    assert.equal(momentDetails(view, 1)?.range, 'not_counted');
+    assert.equal(momentDetails(view, 1)?.counted, false);
+    const outside = momentDetails(view, 2);
+    assert.equal(outside?.range, 'settled');
+    assert.equal(outside?.game, null);
+    assert.equal(outside?.move, null);
+    assert.equal(momentDetails(view, 9), null);
   });
 });

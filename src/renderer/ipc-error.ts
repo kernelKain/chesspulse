@@ -5,6 +5,7 @@ import {
   appErrorInfo,
   deserializeAppError,
   type AppErrorCode,
+  type AppErrorInfo,
 } from '../shared/errors';
 
 export function readIpcError(caught: unknown, fallback: AppErrorCode = 'internal'): string {
@@ -13,4 +14,12 @@ export function readIpcError(caught: unknown, fallback: AppErrorCode = 'internal
     if (appError) return appError.message;
   }
   return appErrorInfo(fallback).message;
+}
+/** The code as well as the sentence, for a panel that titles each failure and decides on retry. */
+export function readIpcErrorInfo(caught: unknown, fallback: AppErrorCode = 'internal'): AppErrorInfo {
+  if (caught instanceof Error) {
+    const appError = deserializeAppError(caught.message);
+    if (appError) return appErrorInfo(appError.code);
+  }
+  return appErrorInfo(fallback);
 }

@@ -20,8 +20,11 @@ export const APP_ERROR_CODES = [
   'report_newer',
   'ai_cancelled',
   'ai_rejected_key',
+  'ai_not_permitted',
   'ai_rate_limited',
   'ai_unavailable',
+  'ai_request_rejected',
+  'ai_no_answer',
   'ai_bad_response',
   'ai_ungrounded',
   'internal',
@@ -99,7 +102,12 @@ export const APP_ERRORS: Record<AppErrorCode, { readonly message: string; readon
     retryable: false,
   },
   ai_rejected_key: {
-    message: 'The AI provider rejected the key. Check CP_AI_KEY.',
+    message: 'The AI provider rejected the key. Check CP_AI_KEY in .env, then restart ChessPulse.',
+    retryable: false,
+  },
+  ai_not_permitted: {
+    message:
+      'The AI provider refused this key for the configured model. Check that the key’s account can use CP_AI_MODEL, including any subscription, region, or privacy setting.',
     retryable: false,
   },
   ai_rate_limited: {
@@ -110,12 +118,23 @@ export const APP_ERRORS: Record<AppErrorCode, { readonly message: string; readon
     message: 'The AI provider is unavailable. Nothing in this report depends on it.',
     retryable: true,
   },
+  ai_request_rejected: {
+    message:
+      'The AI provider rejected the request. Check CP_AI_BASE_URL and CP_AI_MODEL in .env, then restart ChessPulse. The report is unchanged.',
+    retryable: false,
+  },
+  ai_no_answer: {
+    message:
+      'The AI model finished without a final answer. Try again, or set a different CP_AI_MODEL in .env. The report is unchanged.',
+    retryable: true,
+  },
   ai_bad_response: {
-    message: 'The AI provider returned a response ChessPulse cannot use. The report is unchanged.',
+    message: 'The AI provider returned a response ChessPulse cannot read. The report is unchanged.',
     retryable: false,
   },
   ai_ungrounded: {
-    message: 'The AI reading made a claim ChessPulse cannot verify, so it was not shown. The report is unchanged.',
+    message:
+      'The response introduced a number or claim that ChessPulse could not trace to the local report, so it was not shown. Nothing in the report changed.',
     retryable: false,
   },
   internal: {

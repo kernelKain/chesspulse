@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { groundInsight } from './grounding.js';
+import { GroundingError, groundInsight } from './grounding.js';
 
 interface EvalFixture {
   name: string;
@@ -156,6 +156,33 @@ describe('direct-claim modifiers and measured heart rate', () => {
           'Your pulse was 72 bpm and you were nervous about the position.',
         ),
       /diagnostic or mental-state/,
+    );
+  });
+});
+
+describe('groundInsight chess notation and names', () => {
+  const stats = { blunders: 3, largestLosses: [{ move: '14… Rc8', moveNumber: 14, cpl: 909 }] };
+  it('accepts a move followed by sentence punctuation', () => {
+    for (const text of ['The largest loss was 14… Rc8.', 'After 14… Rc8, it lost 909.', 'Then exd5; 3 blunders.']) {
+      assert.equal(groundInsight(stats, text), text);
+    }
+  });
+  it('still checks a decimal or an exponent that only looks like a square', () => {
+    assert.throws(() => groundInsight(stats, 'It lost e4.5 points.'), GroundingError);
+    assert.throws(() => groundInsight({ value: 1 }, 'About 1e8 positions.'), GroundingError, 'the 8 of 1e8 is not a square');
+    assert.equal(groundInsight({ value: 1e8 }, 'About 1e8 positions.'), 'About 1e8 positions.');
+  });
+  it('does not let a square inside a word escape the check', () => {
+    assert.throws(() => groundInsight(stats, 'Code abc5 applies.'), GroundingError);
+  });
+  it('grounds a numeric username as a name, not a quantity', () => {
+    const named = { ...stats, playerScope: { kind: 'player', name: 'Oikawa9999' } };
+    const text = 'Oikawa9999 made 3 blunders.';
+    assert.equal(groundInsight(named, text, ['Oikawa9999']), text);
+    assert.throws(
+      () => groundInsight(named, 'Oikawa9999 lost 9999 centipawns.', ['Oikawa9999']),
+      /introduced a number.*9999/,
+      'the name does not put 9999 on the allowlist',
     );
   });
 });

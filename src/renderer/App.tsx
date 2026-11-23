@@ -2,7 +2,9 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import {
   appStateSchema,
   coachMessageSchema,
+  insightConfigSchema,
   insightResultSchema,
+  type InsightConfig,
   reportProgressSchema,
   reportResultSchema,
   sampleBatchSchema,
@@ -12,7 +14,6 @@ import {
   sessionMarksResultSchema,
   sessionStartedSchema,
   setupStatusSchema,
-  type AiProvider,
   type CoachMessage,
   type PasteValidation,
   type PulseSample,
@@ -39,6 +40,7 @@ import {
   rememberExplainerSeen,
   type PreferenceStore,
 } from '../shared/onboarding';
+import { readRememberedPlayer, rememberPlayer } from '../shared/player';
 import {
   formatElapsedMs,
   limitWarning,
@@ -51,19 +53,18 @@ import {
   type KeyStatus,
   type PreviewStatus,
 } from '../shared/setup';
-import { BandBars } from './BandBars';
 import logoUrl from './assets/logo.svg?url';
 import { COPY } from './copy';
 import { CameraOpenIndicator } from './CameraOpenIndicator';
 import { CameraPreview } from './CameraPreview';
 import { CoachLine } from './CoachLine';
 import { Explainer } from './Explainer';
-import { GameList } from './GameList';
-import { InsightPanel, type InsightViewState } from './InsightPanel';
+import { MoveQuality } from './MoveQuality';
+import { InsightPanel, insightAside, type InsightViewState } from './InsightPanel';
 import { openKeyboardHelp } from './KeyboardHelp';
 import { MarkPicker } from './MarkPicker';
 import { ReviewStages } from './ReviewStages';
-import { readIpcError } from './ipc-error';
+import { readIpcError, readIpcErrorInfo } from './ipc-error';
 import { markChoiceNeeded, tooFewMarks } from '../shared/marks';
 import { reviewStages } from '../shared/stages';
 import { PasteScreen } from './PasteScreen';
@@ -73,8 +74,8 @@ import { SensingControls } from './SensingControls';
 import { SensingStrip } from './SensingStrip';
 import { SessionList } from './SessionList';
 import { SetupScreen } from './SetupScreen';
-import { Timeline } from './Timeline';
-import { VerdictLine } from './VerdictLine';
+import { Timeline, type TimelineFocus } from './Timeline';
+import { ReportSummary } from './ReportSummary';
 
 const TIME_CONTROLS = ['1+0', '3+2', '10+0'] as const;
 
@@ -98,6 +99,10 @@ export function App() {
   const [validation, setValidation] = useState<ValidationMessage | null>(null);
   const [coachMessage, setCoachMessage] = useState<CoachMessage | null>(null);
   const [insightState, setInsightState] = useState<InsightViewState>({ status: 'idle' });
+  // Which provider and model .env selected. Main reads .env once at startup, so one read is enough.
+  const [aiConfig, setAiConfig] = useState<InsightConfig | null>(null);
+  // "Open on timeline" in Move Quality: the moment to select, with a counter so a repeat still applies.
+  const [timelineFocus, setTimelineFocus] = useState<TimelineFocus | null>(null);
   const [setupKey, setSetupKey] = useState<{ status: KeyStatus; detail: string }>({
     status: 'loading',
     detail: COPY.setup.checkingKey,
@@ -110,6 +115,7 @@ export function App() {
     sessionId: string;
     pgns: string[];
     marks: SessionMarkView[];
+    playerName?: string;
   } | null>(null);
   const [previewAttempt, setPreviewAttempt] = useState(0);
   const [starting, setStarting] = useState(false);
@@ -123,6 +129,22 @@ export function App() {
   }>({ status: 'idle', sessions: [], unreadable: 0 });
   const [libraryNonce, setLibraryNonce] = useState(0);
   const bridge = window.chesspulse;
+  useEffect(() => {
+    if (!bridge) return;
+    let live = true;
+    bridge
+      .insightConfig()
+      .then((raw) => {
+        const parsed = insightConfigSchema.safeParse(raw);
+        if (live && parsed.success) setAiConfig(parsed.data);
+      })
+      .catch(() => {
+        // Without the line the panel still works; a request reports its own configuration error.
+      });
+    return () => {
+      live = false;
+    };
+  }, [bridge]);
   const grantedNow = useRef(false);
   const startPending = useRef(false);
   const revokedDuringStart = useRef(false);
@@ -614,18 +636,20 @@ export function App() {
     }
   }
 
-  async function onInsightRequest(provider: AiProvider, text: string): Promise<void> {
+  async function onInsightRequest(text: string): Promise<void> {
     if (!bridge || !sessionId) return;
     const seq = ++insightRequestSeq.current;
     setInsightState({ status: 'loading' });
     try {
-      const raw = await bridge.requestInsight({ sessionId, provider, text });
+      const raw = await bridge.requestInsight({ sessionId, text });
       if (seq !== insightRequestSeq.current) return;
       const parsed = insightResultSchema.safeParse(raw);
       if (!parsed.success) {
         setInsightState({
           status: 'error',
+          code: 'ai_bad_response',
           message: COPY.errors.insightUnexpected,
+          retryable: false,
         });
       } else if (parsed.data.disabled) {
         setInsightState({ status: 'disabled', reason: parsed.data.reason });
@@ -634,9 +658,12 @@ export function App() {
       }
     } catch (caught: unknown) {
       if (seq !== insightRequestSeq.current) return;
+      const failure = readIpcErrorInfo(caught, 'ai_unavailable');
       setInsightState({
         status: 'error',
-        message: readIpcError(caught, 'ai_unavailable'),
+        code: failure.code,
+        message: failure.message,
+        retryable: failure.retryable,
       });
     }
   }
@@ -656,6 +683,7 @@ export function App() {
     pgns: string[],
     _validation?: PasteValidation,
     gameEndMarks?: number[],
+    playerName?: string,
   ): Promise<void> {
     if (!sessionId) {
       dispatch({ type: 'error', message: COPY.errors.noStoredSession });
@@ -682,11 +710,16 @@ export function App() {
           return;
         }
         if (markChoiceNeeded(answers.data.marks, pgns.length)) {
-          setMarkChoice({ sessionId, pgns, marks: answers.data.marks });
+          setMarkChoice({
+            sessionId,
+            pgns,
+            marks: answers.data.marks,
+            ...(playerName === undefined ? {} : { playerName }),
+          });
           return;
         }
       }
-      const raw = await bridge.buildReport(sessionId, pgns, gameEndMarks);
+      const raw = await bridge.buildReport(sessionId, pgns, gameEndMarks, playerName);
       if (seq !== reportRequestSeq.current) return;
       const parsed = reportResultSchema.safeParse(raw);
       if (!parsed.success) {
@@ -1005,12 +1038,15 @@ export function App() {
         {status.tone === 'error' ? <StatusRegion status={status} /> : null}
         <PasteScreen
           initialSlots={flow.draft.length > 0 ? flow.draft : undefined}
+          rememberedPlayer={readRememberedPlayer(preferenceStore())}
           onBack={(currentSlots) => {
             dispatch({ type: 'pasteChanged', slots: currentSlots });
             dispatch({ type: 'openStopped' });
           }}
-          onContinue={(pgns, validation) => {
-            void onPasteContinue(pgns, validation);
+          onContinue={(pgns, validation, playerName) => {
+            // Stored only in this window's local storage, so the next paste can preselect it.
+            if (playerName) rememberPlayer(preferenceStore(), playerName);
+            void onPasteContinue(pgns, validation, undefined, playerName);
           }}
           onHelp={() => dispatch({ type: 'openHelp' })}
           onSlotsChange={(slots) => dispatch({ type: 'pasteChanged', slots })}
@@ -1030,7 +1066,7 @@ export function App() {
             setMarkChoice(null);
             // The picker was opened for one session; its PGNs and marks must never reach another.
             if (chosen.sessionId !== sessionId) return;
-            void onPasteContinue(chosen.pgns, undefined, ends);
+            void onPasteContinue(chosen.pgns, undefined, ends, chosen.playerName);
           }}
           onCancel={() => {
             setMarkChoice(null);
@@ -1048,10 +1084,12 @@ export function App() {
       result,
       building: Boolean(review?.building),
       failed: Boolean(review?.error),
-      reading: insightState.status,
+      reading: aiConfig?.configured === false ? 'disabled' : insightState.status,
       // The service's own reason distinguishes a missing model from a missing key.
       readingDetail:
-        insightState.status === 'disabled'
+        aiConfig?.configured === false
+          ? aiConfig.reason
+          : insightState.status === 'disabled'
           ? insightState.reason
           : insightState.status === 'error'
             ? insightState.message
@@ -1059,17 +1097,28 @@ export function App() {
     });
     const bodies = result?.ok
       ? {
-          pulse: <Timeline key={`pulse-${result.sessionId}`} result={result} />,
+          pulse: <Timeline key={`pulse-${result.sessionId}`} result={result} focus={timelineFocus} />,
           engine: (
-            <>
-              <BandBars report={result} />
-              <GameList report={result} />
-            </>
+            <MoveQuality
+              key={`quality-${result.sessionId}`}
+              report={result}
+              onOpenMoment={(target) =>
+                setTimelineFocus((previous) => ({
+                  sessionId: result.sessionId,
+                  ...target,
+                  seq: (previous?.seq ?? 0) + 1,
+                }))
+              }
+              onRebuild={() => dispatch({ type: 'openGames' })}
+            />
           ),
           reading: (
             <InsightPanel
+              key={`insight-${result.sessionId}`}
               state={insightState}
-              onRequest={(provider, text) => void onInsightRequest(provider, text)}
+              config={aiConfig}
+              report={result}
+              onRequest={(text) => void onInsightRequest(text)}
               onCancel={() => void onInsightCancel()}
             />
           ),
@@ -1084,8 +1133,14 @@ export function App() {
             ),
           }
         : {};
+    const asides = result?.ok
+      ? {
+          engine: COPY.stages.engineBadge(result.engine.name ?? 'Stockfish', result.engine.version, result.engine.depth),
+          reading: insightAside(aiConfig),
+        }
+      : {};
     return (
-      <main>
+      <main className="main-report">
         <p className="label">{COPY.common.screenLabels.report}</p>
         {status.tone === 'error' ? <StatusRegion status={status} /> : null}
         {review?.building ? (
@@ -1105,11 +1160,11 @@ export function App() {
             </div>
           </>
         ) : result?.ok ? (
-          <VerdictLine report={result} />
+          <ReportSummary report={result} />
         ) : (
           <h1>{result ? COPY.review.withheld : COPY.review.timelineOnly}</h1>
         )}
-        <ReviewStages stages={stages} bodies={bodies} />
+        <ReviewStages stages={stages} bodies={bodies} asides={asides} />
         <div className="actions">
           <button type="button" onClick={() => dispatch({ type: 'openGames' })} className="btn btn-secondary">
             {COPY.review.editGames}

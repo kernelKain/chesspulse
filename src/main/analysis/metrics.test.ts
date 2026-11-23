@@ -2,7 +2,18 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { bandFor } from './bands.js';
-import { analyseMoves, mateToCp, scoreMove, verdictLine, type MoveMetric } from './metrics.js';
+import { MIN_GAME_ACCURACY_MOVES } from '../../shared/contracts.js';
+import {
+  analyseMoves,
+  LARGEST_LOSSES,
+  MIN_BAND_MOVES,
+  mateToCp,
+  scoreMove,
+  summariseGame,
+  verdictLine,
+  type MoveMetric,
+  type ScoredPly,
+} from './metrics.js';
 
 const ok = (scoreCp: number) => ({ evalFailed: false, scoreCp });
 const failed = { evalFailed: true };
@@ -17,6 +28,74 @@ function counted(partial: Partial<MoveMetric> & Pick<MoveMetric, 'band'>): MoveM
     includeInStats: partial.includeInStats ?? true,
   };
 }
+
+describe('summariseGame', () => {
+  it('uses the same five-move floor as the report contract', () => {
+    assert.equal(MIN_BAND_MOVES, MIN_GAME_ACCURACY_MOVES);
+  });
+
+  const ply = (moveIndex: number, partial: Partial<MoveMetric> & Pick<MoveMetric, 'band'>, thinkSec: number | null = 2): ScoredPly => ({
+    moveIndex,
+    metric: counted(partial),
+    thinkSec,
+  });
+
+  it('withholds whole-game accuracy below five scored moves', () => {
+    const summary = summariseGame([0, 2, 4, 6].map((index) => ply(index, { band: 'settled', accuracy: 90 })));
+    assert.deepEqual(summary.overall, { moves: 4, status: 'insufficient' });
+    assert.equal(summary.scored, 4);
+  });
+
+  it('averages scored moves and agrees with the band and blunder totals', () => {
+    const plies = [
+      ply(0, { band: 'settled', accuracy: 100 }),
+      ply(2, { band: 'settled', accuracy: 90 }),
+      ply(4, { band: 'elevated', accuracy: 60, blunder: true, cpl: 250 }),
+      ply(6, { band: 'elevated', accuracy: 70 }),
+      ply(8, { band: null, accuracy: 81 }),
+      ply(10, { band: 'settled', accuracy: null, cpl: null }),
+    ];
+    const summary = summariseGame(plies);
+    assert.deepEqual(summary.overall, { moves: 5, status: 'ok', accuracy: 80 });
+    assert.equal(summary.unscored, 1);
+    assert.equal(summary.blunders, 1);
+    assert.equal(summary.elevatedBlunders, 1);
+    const totals = analyseMoves(plies.map((entry) => entry.metric));
+    assert.deepEqual([summary.settled, summary.elevated], [totals.settled, totals.elevated]);
+  });
+
+  it('averages known think times to a tenth of a second and is null without clocks', () => {
+    assert.equal(summariseGame([ply(0, { band: 'settled' }, 1), ply(2, { band: 'settled' }, 2.25)]).avgThinkSec, 1.6);
+    assert.equal(summariseGame([ply(0, { band: 'settled' }, null)]).avgThinkSec, null);
+  });
+
+  it('keeps the largest losses first, breaks ties by move, and skips mate and zero loss', () => {
+    const summary = summariseGame([
+      ply(0, { band: 'settled', cpl: 40 }),
+      ply(2, { band: 'settled', cpl: 120.4, blunder: true }),
+      ply(4, { band: 'settled', cpl: 40 }),
+      ply(6, { band: 'settled', cpl: null, mate: true }),
+      ply(8, { band: 'settled', cpl: 0 }),
+      ply(10, { band: 'settled', cpl: 39 }),
+    ]);
+    assert.equal(summary.largestLosses.length, LARGEST_LOSSES);
+    assert.deepEqual(summary.largestLosses, [
+      { moveIndex: 2, cpl: 120, blunder: true },
+      { moveIndex: 0, cpl: 40, blunder: false },
+      { moveIndex: 4, cpl: 40, blunder: false },
+    ]);
+  });
+
+  it('ignores moves left out of accuracy', () => {
+    const summary = summariseGame([
+      ply(0, { band: 'settled', includeInStats: false, cpl: 500, blunder: true }, 30),
+      ply(2, { band: 'settled', cpl: 10 }, 4),
+    ]);
+    assert.equal(summary.blunders, 0);
+    assert.equal(summary.avgThinkSec, 4);
+    assert.deepEqual(summary.largestLosses, [{ moveIndex: 2, cpl: 10, blunder: false }]);
+  });
+});
 
 describe('bandFor', () => {
   it('shifts the same pulses when the baseline changes', () => {

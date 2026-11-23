@@ -458,15 +458,15 @@ contextBridge.exposeInMainWorld('chesspulse', {
     if (typeof request !== 'object' || request === null) {
       return rejectInvalidRequest();
     }
-    const value = request as { sessionId?: unknown; provider?: unknown; text?: unknown };
-    if (
-      typeof value.sessionId !== 'string' ||
-      typeof value.provider !== 'string' ||
-      typeof value.text !== 'string'
-    ) {
+    const value = request as { sessionId?: unknown; text?: unknown };
+    if (typeof value.sessionId !== 'string' || typeof value.text !== 'string') {
       return rejectInvalidRequest();
     }
-    return invoke(INVOKE_CHANNELS.insightRequest.name, request).then((result: unknown) => {
+    // Only these two fields cross: a provider in the page's object is dropped, not forwarded.
+    return invoke(INVOKE_CHANNELS.insightRequest.name, {
+      sessionId: value.sessionId,
+      text: value.text,
+    }).then((result: unknown) => {
       if (typeof result !== 'object' || result === null || !('disabled' in result) || typeof result.disabled !== 'boolean') {
         throw new Error('The window returned an unexpected AI reading.');
       }
@@ -484,6 +484,14 @@ contextBridge.exposeInMainWorld('chesspulse', {
       return { cancelled: value.cancelled };
     });
   },
+  insightConfig(): Promise<unknown> {
+    return invoke(INVOKE_CHANNELS.insightConfig.name, {}).then((value: unknown) => {
+      if (typeof value !== 'object' || value === null || !('configured' in value) || typeof value.configured !== 'boolean') {
+        throw new Error('The window returned an unexpected AI configuration.');
+      }
+      return value;
+    });
+  },
   validatePgns(slots: unknown): Promise<unknown> {
     if (!Array.isArray(slots) || !slots.every((item) => typeof item === 'string')) {
       return rejectInvalidRequest();
@@ -495,7 +503,7 @@ contextBridge.exposeInMainWorld('chesspulse', {
       return value;
     });
   },
-  buildReport(sessionId: unknown, pgns: unknown, gameEndMarks?: unknown): Promise<unknown> {
+  buildReport(sessionId: unknown, pgns: unknown, gameEndMarks?: unknown, playerName?: unknown): Promise<unknown> {
     if (typeof sessionId !== 'string' || sessionId.length === 0) {
       return rejectInvalidRequest();
     }
@@ -509,10 +517,15 @@ contextBridge.exposeInMainWorld('chesspulse', {
     ) {
       return rejectInvalidRequest();
     }
-    const payload =
-      gameEndMarks === undefined
-        ? { sessionId, pgns }
-        : { sessionId, pgns, gameEndMarks };
+    if (playerName !== undefined && (typeof playerName !== 'string' || playerName.trim().length === 0)) {
+      return rejectInvalidRequest();
+    }
+    const payload = {
+      sessionId,
+      pgns,
+      ...(gameEndMarks === undefined ? {} : { gameEndMarks }),
+      ...(playerName === undefined ? {} : { playerName }),
+    };
     return invoke(INVOKE_CHANNELS.reportBuild.name, payload).then((value: unknown) => {
       if (typeof value !== 'object' || value === null || !('ok' in value) || typeof value.ok !== 'boolean') {
         throw new Error('The window returned an unexpected report.');

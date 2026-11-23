@@ -115,6 +115,77 @@ export function analyseMoves(moves: readonly MoveMetric[]): AnalysisSummary {
   };
 }
 
+/** Whole-game accuracy uses the same five-move floor as a band, so one game cannot print a guess. */
+export type AccuracySummary =
+  | { moves: number; status: 'insufficient' }
+  | { moves: number; status: 'ok'; accuracy: number };
+
+/** How many of a game's largest move losses the report keeps for review. */
+export const LARGEST_LOSSES = 3;
+
+export interface ScoredPly {
+  moveIndex: number;
+  metric: MoveMetric;
+  thinkSec: number | null;
+}
+
+export interface GameSummary {
+  scored: number;
+  unscored: number;
+  overall: AccuracySummary;
+  settled: BandSummary;
+  elevated: BandSummary;
+  blunders: number;
+  elevatedBlunders: number;
+  /** Mean think time over the player's moves with a known clock, to 0.1 s. Null without clocks. */
+  avgThinkSec: number | null;
+  /** The player's largest centipawn losses, largest first; ties keep the earlier move. */
+  largestLosses: { moveIndex: number; cpl: number; blunder: boolean }[];
+}
+
+/**
+ * What: one game's facts, from the same move metrics that produce the session verdict.
+ * Why: per-game review must agree with the session totals; recomputing in the page could drift.
+ * Removed: the report could only say how many blunders a game had, not how it went.
+ */
+export function summariseGame(plies: readonly ScoredPly[]): GameSummary {
+  const metrics = plies.map((ply) => ply.metric);
+  const totals = analyseMoves(metrics);
+  const counted = plies.filter((ply) => ply.metric.includeInStats);
+  const scoredAccuracies = counted
+    .map((ply) => ply.metric.accuracy)
+    .filter((value): value is number => value !== null);
+  const overall: AccuracySummary =
+    scoredAccuracies.length < MIN_BAND_MOVES
+      ? { moves: scoredAccuracies.length, status: 'insufficient' }
+      : {
+          moves: scoredAccuracies.length,
+          status: 'ok',
+          accuracy: Math.round(scoredAccuracies.reduce((sum, value) => sum + value, 0) / scoredAccuracies.length),
+        };
+  const thinks = counted
+    .map((ply) => ply.thinkSec)
+    .filter((value): value is number => value !== null && Number.isFinite(value) && value >= 0);
+  const avgThinkSec =
+    thinks.length === 0 ? null : Math.round((thinks.reduce((sum, value) => sum + value, 0) / thinks.length) * 10) / 10;
+  const largestLosses = counted
+    .filter((ply) => ply.metric.cpl !== null && ply.metric.cpl > 0)
+    .map((ply) => ({ moveIndex: ply.moveIndex, cpl: Math.round(ply.metric.cpl ?? 0), blunder: ply.metric.blunder }))
+    .sort((left, right) => right.cpl - left.cpl || left.moveIndex - right.moveIndex)
+    .slice(0, LARGEST_LOSSES);
+  return {
+    scored: totals.scored,
+    unscored: totals.unscored,
+    overall,
+    settled: totals.settled,
+    elevated: totals.elevated,
+    blunders: totals.blunders,
+    elevatedBlunders: totals.elevatedBlunders,
+    avgThinkSec,
+    largestLosses,
+  };
+}
+
 export function verdictLine(
   summary: AnalysisSummary,
   moment: { elevatedMinutes?: number; deltaBpm?: number; gapClause?: string },

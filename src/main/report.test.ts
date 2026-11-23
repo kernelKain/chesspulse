@@ -549,7 +549,7 @@ describe('buildReport', () => {
 
     await assert.rejects(
       requestInsight(
-        { sessionId: id, provider: 'openai', text: 'Review this session.' },
+        { sessionId: id, text: 'Review this session.' },
         storedReport,
         storedGames,
         { CP_AI_KEY: 'test-secret', CP_AI_MODEL: 'test-model' },
@@ -578,6 +578,8 @@ describe('placement from player marks', () => {
     assert.equal(result.alignmentMode, 'none');
     assert.equal(result.banner, 'No game-end marks: games are not placed on the timeline.');
     assert.equal(result.games[0]?.aligned, false);
+    assert.equal(result.games[0]?.includeInStats, true);
+    assert.equal(result.games[0]?.summary, undefined, 'an unplaced game is not summarised as a clean game');
     assert.equal(result.timeline.games.length, 0);
     assert.equal(result.verdict, 'Not enough scored moves for a verdict.');
   });
@@ -589,6 +591,213 @@ describe('placement from player marks', () => {
     await assert.rejects(
       buildReport(root, id, [pgnAt(EPOCH + 4_000), pgnAt(EPOCH + 8_000)], evaluator()),
       /does not match the number of pasted games/,
+    );
+  });
+});
+
+describe('player scope', () => {
+  /** Four plies with clocks. No header time, so order is unverified and placement uses marks only. */
+  function gamePgn(white: string, black: string): string {
+    return `[Event "Live Chess"]
+[White "${white}"]
+[Black "${black}"]
+[Result "1-0"]
+[TimeControl "60"]
+[Termination "${white} won by resignation"]
+
+1. e4 {[%clk 0:00:59]} e5 {[%clk 0:00:59]} 2. Nf3 {[%clk 0:00:58]} Nc6 {[%clk 0:00:58]} 1-0
+`;
+  }
+
+  async function twoGameSession(root: string): Promise<string> {
+    const samples = Array.from({ length: 11 }, (_unused, index) => sample(index * 1_000_000));
+    return session(root, samples, 10_000_000, EPOCH, [4_000_000, 10_000_000]);
+  }
+
+  it('scores only the sensed player when one name is in every game', async () => {
+    const root = useRoot();
+    const id = await twoGameSession(root);
+    const result = await buildReport(root, id, [gamePgn('Ada', 'Nim'), gamePgn('Bo', 'ada')], evaluator());
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.playerScope, { kind: 'player', name: 'Ada' });
+    assert.deepEqual(result.games.map((game) => game.playerSide), ['white', 'black']);
+    // Ada had White in game 1 (plies 0 and 2) and Black in game 2 (plies 1 and 3).
+    assert.deepEqual(
+      result.timeline.moves.map((move) => [move.gameIndex, move.moveIndex, move.san]),
+      [[0, 0, 'e4'], [0, 2, 'Nf3'], [1, 1, 'e5'], [1, 3, 'Nc6']],
+    );
+    // Game facts still describe the whole game; only scoring is narrowed.
+    assert.deepEqual(result.games.map((game) => game.moveCount), [4, 4]);
+  });
+
+  it('scores the chosen player in a single game, case-insensitively', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 11 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 10_000_000);
+    const result = await buildReport(root, id, [gamePgn('Ada', 'Nim')], evaluator(), {}, undefined, 'nim');
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.playerScope, { kind: 'player', name: 'Nim' });
+    assert.equal(result.games[0]?.playerSide, 'black');
+    assert.deepEqual(result.timeline.moves.map((move) => move.san), ['e5', 'Nc6']);
+  });
+
+  it('counts both sides and says why when no player was chosen in a single game', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 11 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 10_000_000);
+    const result = await buildReport(root, id, [gamePgn('Ada', 'Nim')], evaluator());
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.playerScope, { kind: 'all_moves', reason: 'ambiguous' });
+    assert.equal(result.games[0]?.playerSide, 'both');
+    assert.equal(result.timeline.moves.length, 4);
+  });
+
+  it('counts both sides when no name is in every game', async () => {
+    const root = useRoot();
+    const id = await twoGameSession(root);
+    const result = await buildReport(root, id, [gamePgn('Ada', 'Nim'), gamePgn('Bo', 'Cy')], evaluator());
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.playerScope, { kind: 'all_moves', reason: 'no_common_name' });
+    assert.equal(result.timeline.moves.length, 8);
+  });
+
+  it('refuses a chosen player who is missing from a game and writes nothing', async () => {
+    const root = useRoot();
+    const id = await twoGameSession(root);
+    await assert.rejects(
+      buildReport(root, id, [gamePgn('Ada', 'Nim'), gamePgn('Ada', 'Bo')], evaluator(), {}, undefined, 'Nim'),
+      /not in every pasted game/,
+    );
+    await assert.rejects(readReport(root, id));
+  });
+
+  it('sends the engine only the positions around the player’s moves', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 11 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 10_000_000);
+    const seen: string[] = [];
+    const counting = {
+      async evaluate(fen: string) {
+        seen.push(fen);
+        return { fen, depth: 8, evalFailed: false, scoreCp: 12, bestmove: 'e7e5' };
+      },
+      async close() {},
+    };
+    const pgn = gamePgn('Ada', 'Nim');
+    const white = await buildReport(root, id, [pgn], counting, {}, undefined, 'Ada');
+    assert.equal(white.ok, true);
+    if (!white.ok) return;
+    const sans = ['e4', 'e5', 'Nf3', 'Nc6'];
+    const positions = positionsFromMoves(sans);
+    const expected = new Set(
+      [0, 2].flatMap((ply) => [positions[ply]?.fenBefore, positions[ply]?.fenAfter]).filter(Boolean),
+    );
+    assert.deepEqual(new Set(seen), expected);
+    assert.equal(white.engine.positions, expected.size);
+  });
+});
+
+describe('per-game summaries', () => {
+  function threeMovePgn(white: string, black: string, ending = 'won by resignation'): string {
+    return `[Event "Live Chess"]
+[White "${white}"]
+[Black "${black}"]
+[Result "1-0"]
+[TimeControl "60"]
+[Termination "${white} ${ending}"]
+
+1. e4 {[%clk 0:00:59]} e5 {[%clk 0:00:59]} 2. Nf3 {[%clk 0:00:57]} Nc6 {[%clk 0:00:58]} 3. Bb5 {[%clk 0:00:54]} a6 {[%clk 0:00:57]} 1-0
+`;
+  }
+
+  /** Deterministic, varied scores so losses and accuracy are not all equal. */
+  function varied() {
+    return {
+      async evaluate(fen: string) {
+        let hash = 0;
+        for (const char of fen) hash = (hash * 31 + char.charCodeAt(0)) % 997;
+        return { fen, depth: 8, evalFailed: false, scoreCp: (hash % 9) * 40 - 160, bestmove: 'e7e5' };
+      },
+      async close() {},
+    };
+  }
+
+  it('stores per-game facts that agree with the session totals', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 21 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 20_000_000, EPOCH, [8_000_000, 20_000_000], [12_000_000]);
+    const result = await buildReport(
+      root,
+      id,
+      [threeMovePgn('Ada', 'Nim'), threeMovePgn('Bo', 'Ada')],
+      varied(),
+    );
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const summaries = result.games.map((game) => game.summary);
+    assert.ok(summaries.every((summary) => summary !== undefined));
+    const sum = (pick: (summary: NonNullable<(typeof summaries)[number]>) => number) =>
+      summaries.reduce((total, summary) => total + (summary ? pick(summary) : 0), 0);
+    assert.deepEqual(result.totals, {
+      gamesIncluded: 2,
+      scored: sum((summary) => summary.scored),
+      unscored: sum((summary) => summary.unscored),
+      blunders: sum((summary) => summary.blunders),
+      elevatedBlunders: sum((summary) => summary.elevatedBlunders),
+    });
+    // Ada made three moves in each game; the per-game blunder field and the summary agree.
+    for (const game of result.games) {
+      assert.equal(game.summary?.scored, 3);
+      assert.equal(game.summary?.blunders, game.blunders);
+      assert.equal(game.summary?.overall.status, 'insufficient');
+      const cpls: [number, number][] = result.timeline.moves
+        .filter((move) => move.gameIndex === game.index)
+        .map((move): [number, number] => [move.moveIndex, Math.round(move.cpl ?? 0)]);
+      for (const loss of game.summary?.largestLosses ?? []) {
+        assert.ok(cpls.some(([moveIndex, cpl]) => moveIndex === loss.moveIndex && cpl === loss.cpl));
+      }
+      const losses: number[] = (game.summary?.largestLosses ?? []).map((loss) => loss.cpl);
+      assert.deepEqual(losses, [...losses].sort((left, right) => right - left));
+    }
+    assert.ok(result.timeline.moves.every((move) => !move.scored || Number.isInteger(move.accuracy)));
+    assert.deepEqual(result.longestGap, { afterIndex: 0, beforeIndex: 1, durationSec: 4 });
+    assert.match(result.verdict, /Between games 1 and 2 you waited 4 seconds\./);
+  });
+
+  it('gives an excluded game no summary and leaves it out of the totals', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 21 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 20_000_000, EPOCH, [8_000_000, 20_000_000]);
+    const aborted = threeMovePgn('Ada', 'Nim').replace('[Termination "Ada won by resignation"]', '[Termination "Game aborted"]');
+    const result = await buildReport(root, id, [aborted, threeMovePgn('Bo', 'Ada')], varied(), {}, undefined, 'Ada');
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.games[0]?.includeInStats, false);
+    assert.equal(result.games[0]?.summary, undefined);
+    assert.equal(result.totals?.gamesIncluded, 1);
+    assert.equal(result.totals?.scored, result.games[1]?.summary?.scored);
+  });
+
+  it('names the engine only when the evaluator names itself', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 11 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 10_000_000);
+    const stub = await buildReport(root, id, [pgnAt(EPOCH + 10_000)], evaluator());
+    assert.equal(stub.ok && stub.engine.name, undefined);
+    const named = await buildReport(root, id, [pgnAt(EPOCH + 10_000)], {
+      ...evaluator(),
+      depth: 12,
+      identity: { name: 'Stockfish', version: '19.0.1', build: 'lite-single' },
+    });
+    assert.equal(named.ok, true);
+    if (!named.ok) return;
+    assert.deepEqual(
+      [named.engine.name, named.engine.version, named.engine.build, named.engine.depth],
+      ['Stockfish', '19.0.1', 'lite-single', 12],
     );
   });
 });

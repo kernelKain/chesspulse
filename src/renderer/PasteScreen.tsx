@@ -1,7 +1,7 @@
 // What: Screen 4 (Paste) for entering ordered chess.com PGNs and inspecting per-game validation.
 // Why: AC-06 requires chronological order checks per game with no partial report when order fails.
 // Removed: a player could not enter PGNs or see order, clockless, and exclusion states before reporting.
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   pasteValidationSchema,
   type PasteGameSummary,
@@ -9,6 +9,7 @@ import {
   type PasteState,
   type PasteValidation,
 } from '../shared/contracts';
+import { playerCandidates, sameName } from '../shared/player';
 import { COPY } from './copy';
 import { readIpcError } from './ipc-error';
 import { SlotBadge, SlotError } from './PasteValidation';
@@ -49,16 +50,23 @@ function emptyValidation(count: number): PasteValidation {
   };
 }
 
+/** The player's answer to "Which player are you?". `all` keeps both sides on purpose. */
+type PlayerChoice = { kind: 'player'; name: string } | { kind: 'all' };
+
 export function PasteScreen({
   initialSlots,
+  rememberedPlayer = null,
   onBack,
   onContinue,
   onHelp,
   onSlotsChange,
 }: {
   initialSlots?: string[];
+  /** The username chosen on an earlier paste, preselected when it is in every game. */
+  rememberedPlayer?: string | null;
   onBack: (slots: string[]) => void;
-  onContinue: (pgns: string[], validation: PasteValidation) => void;
+  /** `playerName` is absent when both sides are counted. */
+  onContinue: (pgns: string[], validation: PasteValidation, playerName?: string) => void;
   onHelp?: () => void;
   onSlotsChange?: (slots: string[]) => void;
 }) {
@@ -70,6 +78,7 @@ export function PasteScreen({
   const [validation, setValidation] = useState<PasteValidation>(() => emptyValidation(slots.length));
   const [validating, setValidating] = useState(false);
   const [bridgeError, setBridgeError] = useState<string | null>(null);
+  const [choice, setChoice] = useState<PlayerChoice | null>(null);
   const requestSeq = useRef(0);
   const baseId = useId();
   const bridge = window.chesspulse;
@@ -140,14 +149,33 @@ export function PasteScreen({
     onSlotsChange?.(next);
   }
 
+  const candidates = useMemo(() => playerCandidates(pastedGames(validation)), [validation]);
+  const needsChoice = candidates.length > 1;
+  // A stale answer (the games changed under it) falls back to the remembered name, never to a guess.
+  const selected: PlayerChoice | null = !needsChoice
+    ? null
+    : choice?.kind === 'all'
+      ? choice
+      : choice && candidates.some((name) => sameName(name, choice.name))
+        ? choice
+        : rememberedChoice(candidates, rememberedPlayer);
+  const playerName =
+    candidates.length === 1
+      ? candidates[0]
+      : selected?.kind === 'player'
+        ? candidates.find((name) => sameName(name, selected.name))
+        : undefined;
+
   function handleContinue(): void {
     if (!validation.canBuild || validating || bridgeError) return;
+    if (needsChoice && !selected) return;
     const filled = slots.filter((text) => text.trim().length > 0);
-    onContinue(filled, validation);
+    onContinue(filled, validation, playerName);
   }
 
   const bannerTone = toneFor(bridgeError ? 'invalid' : validation.state);
-  const canContinue = Boolean(bridge) && !validating && !bridgeError && validation.canBuild;
+  const canContinue =
+    Boolean(bridge) && !validating && !bridgeError && validation.canBuild && (!needsChoice || selected !== null);
 
   return (
     <section className="paste-screen" aria-labelledby={`${baseId}-heading`}>
@@ -249,6 +277,15 @@ export function PasteScreen({
         })}
       </ol>
 
+      {validation.canBuild && !bridgeError ? (
+        <PlayerQuestion
+          candidates={candidates}
+          selected={selected}
+          groupName={`${baseId}-player`}
+          onChoose={setChoice}
+        />
+      ) : null}
+
       <div className="actions">
         <button type="button" className="btn btn-primary" disabled={!canContinue} onClick={handleContinue}>
           {COPY.games.continue}
@@ -315,6 +352,74 @@ export function GameSummaryRow({ game }: { game: PasteGameSummary }) {
       ) : null}
     </div>
   );
+}
+
+/**
+ * What: asks which pasted player is the one being sensed, or states who will be counted.
+ * Why: one game or a rematch series has two names in every game; only the player knows which is theirs.
+ * Removed: the report would score the opponent's moves against the player's pulse.
+ */
+export function PlayerQuestion({
+  candidates,
+  selected,
+  groupName,
+  onChoose,
+}: {
+  candidates: readonly string[];
+  selected: PlayerChoice | null;
+  groupName: string;
+  onChoose: (choice: PlayerChoice) => void;
+}) {
+  if (candidates.length === 1 && candidates[0]) {
+    return <p className="player-note">{COPY.games.player.single(candidates[0])}</p>;
+  }
+  if (candidates.length === 0) {
+    return <p className="player-note tone-warn">{COPY.games.player.none}</p>;
+  }
+  const helpId = `${groupName}-help`;
+  return (
+    <fieldset className="player-question" aria-describedby={helpId}>
+      <legend>{COPY.games.player.legend}</legend>
+      <p id={helpId} className="player-help">{COPY.games.player.help}</p>
+      <div className="player-options">
+        {candidates.map((name) => (
+          <label key={name} className="player-option">
+            <input
+              type="radio"
+              name={groupName}
+              value={name}
+              checked={selected?.kind === 'player' && sameName(selected.name, name)}
+              onChange={() => onChoose({ kind: 'player', name })}
+            />
+            <span>{name}</span>
+          </label>
+        ))}
+        <label className="player-option player-option-both">
+          <input
+            type="radio"
+            name={groupName}
+            value=""
+            checked={selected?.kind === 'all'}
+            onChange={() => onChoose({ kind: 'all' })}
+          />
+          <span>{COPY.games.player.both}</span>
+        </label>
+      </div>
+      {selected === null ? <p className="player-required">{COPY.games.player.required}</p> : null}
+    </fieldset>
+  );
+}
+
+function pastedGames(validation: PasteValidation): PasteGameSummary[] {
+  return validation.slots.flatMap((slot) =>
+    slot.status === 'valid' || slot.status === 'order_error' ? [slot.game] : [],
+  );
+}
+
+function rememberedChoice(candidates: readonly string[], remembered: string | null): PlayerChoice | null {
+  if (!remembered) return null;
+  const name = candidates.find((candidate) => sameName(candidate, remembered));
+  return name ? { kind: 'player', name } : null;
 }
 
 function formatCounts(summary: PasteValidation['summary']): string {

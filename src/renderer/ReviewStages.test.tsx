@@ -30,11 +30,25 @@ describe('ReviewStages markup', () => {
         bodies: { pulse: 'trace', engine: 'bands', reading: 'reading' },
       }),
     );
-    const order = ['Stage 1 · Pulse', 'Stage 2 · Engine', 'Stage 3 · Reading'].map((label) =>
-      html.indexOf(label),
-    );
-    assert.ok(order.every((at) => at >= 0), 'a stage heading is missing');
+    const order = [COPY.stages.titles.pulse, COPY.stages.titles.engine, COPY.stages.titles.reading]
+      .map((label) => label.replace('&', '&amp;'))
+      .map((label) => html.indexOf(`>${label}</h2>`));
+    assert.ok(order.every((at) => at >= 0), 'a section heading is missing');
     assert.deepEqual([...order].sort((left, right) => left - right), order);
+    assert.equal(/Stage \d/.test(html), false, 'internal stage numbers are not shown');
+    assert.ok(html.includes(COPY.stages.descriptions.engine));
+  });
+  it('shows a section aside in light text beside the state', () => {
+    const html = renderToStaticMarkup(
+      createElement(ReviewStages, {
+        stages: [stage(1, 'pulse', 'ready', null), stage(2, 'engine', 'ready', null), stage(3, 'reading', 'ready', null)],
+        bodies: { pulse: 'trace', engine: 'bands', reading: 'reading' },
+        asides: { engine: COPY.stages.engineBadge('Stockfish', '19.0.1', 12) },
+      }),
+    );
+    assert.match(html, /<span class="stage-aside">Stockfish 19\.0\.1 · depth 12 · runs locally<\/span>/);
+    assert.equal((html.match(/stage-aside/g) ?? []).length, 1);
+    assert.equal(COPY.stages.engineBadge('Stockfish', undefined, 12), 'Stockfish · depth 12 · local');
   });
 
   it('keeps the reading panel and its controls when the reading is disabled', () => {
@@ -69,7 +83,7 @@ describe('ReviewStages markup', () => {
     assert.equal(html.includes(COPY.stages.reasons.no_key), false);
   });
 
-  it('names Stage 1 as the reason the later stages are blocked', () => {
+  it('names the pulse timeline as the reason the later sections are blocked', () => {
     const html = renderToStaticMarkup(
       createElement(ReviewStages, {
         stages: [
@@ -81,7 +95,7 @@ describe('ReviewStages markup', () => {
       }),
     );
     assert.equal((html.match(new RegExp(COPY.stages.reasons.blocked, 'g')) ?? []).length, 2);
-    // Stage 1 carries the refusal panel, so it shows the body rather than a reason line.
+    // The pulse section carries the refusal panel, so it shows the body rather than a reason line.
     assert.match(html, /data-state="refused"/);
     assert.equal(html.includes(COPY.stages.reasons.low_coverage), false);
   });

@@ -162,7 +162,7 @@ export const COPY = {
     partialClocks: 'Partial clocks',
     clocksOk: 'Clocks OK',
     clockOptionNote:
-      'On chess.com, turn on the option that includes clock times when you copy a game. The review uses the clock on each move.',
+      'On chess.com, choose Share, then PGN, and tick the timestamps box (the clock icon) before you copy. The review uses the clock on each move.',
     card: {
       result: 'Result',
       ending: 'Ending',
@@ -178,18 +178,33 @@ export const COPY = {
       aborted: (count: number) => `${count} aborted`,
       abandoned: (count: number) => `${count} abandoned`,
     },
+    player: {
+      legend: 'Which player are you?',
+      help: 'Your pulse is compared only with your own moves. Pick your chess.com username.',
+      both: 'Count both players’ moves',
+      required: 'Choose which player you are to continue.',
+      single: (name: string) => `Accuracy counts only the moves played by ${name}.`,
+      none: 'No player appears in every game, so accuracy counts both players’ moves.',
+    },
     unavailablePage:
       'This page is open outside the ChessPulse window. Paste validation is unavailable.',
     unexpectedResult: 'Validation returned an unexpected result.',
   },
   stages: {
-    label: 'Review stages',
-    heading: (index: number) => `Stage ${index}`,
+    label: 'Review sections',
     titles: {
-      pulse: 'Pulse',
-      engine: 'Engine',
-      reading: 'Reading',
+      pulse: 'Pulse & Play Timeline',
+      engine: 'Move Quality',
+      reading: 'AI Session Explainer',
     },
+    descriptions: {
+      pulse: 'See how pulse, games, think time, and move quality line up on the session clock.',
+      engine: 'Review the session overall, then open a game to inspect its locally scored moves.',
+      reading:
+        'Ask for an explanation of the locally computed report. The model may interpret patterns, but it does not calculate report values.',
+    },
+    engineBadge: (name: string, version: string | undefined, depth: number) =>
+      version ? `${name} ${version} · depth ${depth} · runs locally` : `${name} · depth ${depth} · local`,
     states: {
       ready: 'Ready',
       refused: 'Refused',
@@ -200,14 +215,14 @@ export const COPY = {
     reasons: {
       low_coverage: 'Coverage was too low, so nothing could be compared.',
       refused: 'The report was refused, so this stage did not run.',
-      blocked: 'Blocked: Stage 1 produced no trace, so there is nothing to compare against.',
+      blocked: 'Not run: the pulse timeline has no usable trace, so there is nothing to compare against.',
       building: 'Building the report…',
       report_failed: 'The report could not be built. Fix the pasted games and try again.',
       no_report: 'No report was built yet.',
       no_key: 'Disabled: no provider key set.',
-      ai_error: 'The reading could not be written. The rest of the report is unchanged.',
-      not_written: 'Nothing is sent until you choose Write reading.',
-      writing: 'Writing from the computed report…',
+      ai_error: 'The explanation could not be generated. The rest of the report is unchanged.',
+      not_written: 'Nothing is sent until you choose Generate explanation.',
+      writing: 'Generating from the saved report…',
     },
   },
   markChoice: {
@@ -239,9 +254,9 @@ export const COPY = {
     editGames: 'Edit pasted PGNs',
   },
   bands: {
-    label: 'Accuracy by pulse band',
-    title: 'Accuracy by band',
-    note: 'Minimum 5 scored moves per band',
+    label: 'Accuracy by pulse range',
+    title: 'Accuracy by pulse range',
+    note: 'Minimum five scored moves per range',
     settled: 'Settled',
     elevated: 'Elevated',
     below: (threshold: string) => `< ${threshold} bpm`,
@@ -253,6 +268,46 @@ export const COPY = {
     insufficientBar: (title: string, count: number) =>
       `${title} accuracy insufficient: ${count} scored ${count === 1 ? 'move' : 'moves'}, minimum 5 required`,
   },
+  summary: {
+    label: 'Session summary',
+    eyebrow: 'Session report',
+    context: (games: number, duration: string) =>
+      `${games} ${games === 1 ? 'game' : 'games'} · ${duration} session`,
+    headlines: {
+      no_scored: 'There were not enough scored moves for a session comparison.',
+      thin_bands: 'This session did not have enough moves in both pulse ranges for a reliable comparison.',
+      no_blunders: 'No moves met ChessPulse’s local blunder rule in this session.',
+      most_elevated: (personal: boolean) =>
+        personal
+          ? 'Most of your mistakes occurred while your pulse was elevated.'
+          : 'Most mistakes occurred while pulse was elevated.',
+      some_elevated: (personal: boolean) =>
+        personal
+          ? 'Some of your mistakes occurred while your pulse was elevated.'
+          : 'Some mistakes occurred while pulse was elevated.',
+      none_elevated: (personal: boolean) =>
+        personal
+          ? 'Your mistakes did not cluster during elevated pulse.'
+          : 'Mistakes did not cluster during elevated pulse.',
+    },
+    metricsLabel: 'Session facts',
+    metrics: {
+      baseline: { label: 'Baseline', help: 'Median usable pulse during the first minute.' },
+      threshold: { label: 'Elevated at', help: 'Baseline plus 10 bpm.' },
+      coverage: { label: 'Coverage', help: 'Share of session time with usable pulse readings.' },
+      blunders: { label: 'Blunders', help: 'Moves that crossed ChessPulse’s local win-chance-loss rule.' },
+      games: { label: 'Games included', help: 'Finished games counted in move quality.' },
+      scored: { label: 'Scored moves', help: 'Moves the local engine returned a usable score for.' },
+      settledAccuracy: { label: 'Settled accuracy', help: 'Mean move accuracy below the elevated threshold.' },
+      elevatedAccuracy: { label: 'Elevated accuracy', help: 'Mean move accuracy at or above the elevated threshold.' },
+      longestBreak: { label: 'Longest break', help: 'Longest marked gap between two games.' },
+    },
+    moreFacts: 'More session facts',
+    fewerFacts: 'Fewer session facts',
+    explain: 'What these numbers mean',
+    hideExplain: 'Hide explanations',
+    verdictLabel: 'Computed verdict',
+  },
   verdict: {
     occluded: (seconds: number) => {
       if (seconds < 60) return 'Face or motion checks excluded under a minute of readings.';
@@ -262,10 +317,89 @@ export const COPY = {
     label: 'Session verdict',
     meta: (baseline: string, threshold: string, coverage: number) =>
       `Baseline ${baseline} bpm · Elevated ≥ ${threshold} bpm · Coverage ${coverage}%`,
+    scope: {
+      player: (name: string) => `Accuracy and blunders count only the moves played by ${name}.`,
+      ambiguous: 'Accuracy and blunders count both players’ moves, because no player was chosen.',
+      noCommonName:
+        'Accuracy and blunders count both players’ moves, because no player appears in every game.',
+      legacy: 'This report counts both players’ moves. Build it again to count only yours.',
+    },
   },
   refusal: {
     metrics: (measured: number, threshold: number) =>
       `Coverage was ${measured}%; a review needs ${threshold}%.`,
+  },
+  quality: {
+    tabsLabel: 'Move Quality views',
+    overall: 'Overall',
+    game: (number: number) => `Game ${number}`,
+    sessionFacts: 'Session facts',
+    supports: 'What this supports',
+    scored: 'Scored moves',
+    notScored: 'Not scored',
+    blunders: 'Blunders',
+    duringElevated: 'During elevated pulse',
+    gamesIncluded: 'Games included',
+    gamesExcluded: 'Games excluded',
+    comparisonTitle: 'Game comparison',
+    comparisonHint: 'Open a game to see its moves.',
+    rowAccuracy: (value: number | 'insufficient' | null) =>
+      value === null ? 'Accuracy not stored' : value === 'insufficient' ? 'Accuracy: too few moves' : `Accuracy ${value}%`,
+    rowBlunders: (count: number) => `${count} ${count === 1 ? 'blunder' : 'blunders'}`,
+    rowExcluded: 'Excluded from accuracy',
+    openGame: 'Open game',
+    players: (white: string, black: string) =>
+      white || black ? `${white || 'Unknown'} vs ${black || 'Unknown'}` : 'Players unnamed',
+    comparison: {
+      same: 'Accuracy was the same in both pulse ranges.',
+      settled_higher: (difference: number) =>
+        `Settled accuracy was ${difference} percentage ${difference === 1 ? 'point' : 'points'} higher.`,
+      elevated_higher: (difference: number) =>
+        `Elevated accuracy was ${difference} percentage ${difference === 1 ? 'point' : 'points'} higher.`,
+      insufficient: 'There were not enough scored moves in both pulse ranges for a comparison.',
+    },
+    blunderSplit: (blunders: number, elevated: number) =>
+      blunders === 0
+        ? 'No move met the blunder rule.'
+        : `${elevated} of ${blunders} ${blunders === 1 ? 'blunder was' : 'blunders were'} during elevated pulse.`,
+    gameSummary: 'Game summary',
+    result: 'Result',
+    ending: 'Ending',
+    sidePlayed: 'Side played',
+    sides: { white: 'White', black: 'Black', both: 'Both sides counted' },
+    sideUnknown: 'Not recorded',
+    timeControl: 'Time control',
+    noTimeControl: 'Not in the PGN',
+    sessionSpan: 'Session span',
+    span: (start: string, end: string) => `${start} to ${end}`,
+    notPlaced: 'Not placed on the timeline',
+    gameAccuracy: 'Accuracy',
+    overallAccuracy: 'Overall accuracy',
+    settledAccuracy: 'Settled accuracy',
+    elevatedAccuracy: 'Elevated accuracy',
+    accuracyValue: (value: number) => `${value}%`,
+    tooFew: 'Too few moves',
+    moves: (count: number) => `${count} scored ${count === 1 ? 'move' : 'moves'}`,
+    averageThink: 'Average think time',
+    seconds: (value: number) => `${value.toFixed(1)} s`,
+    noClock: 'No clock data',
+    lossesTitle: 'Largest locally scored changes',
+    lossesNone: 'No scored move lost centipawns in this game.',
+    loss: (cpl: number) => `${cpl} cp lost`,
+    blunderTag: 'Blunder',
+    openOnTimeline: 'Open on timeline',
+    openOnTimelineLabel: (label: string) => `Open ${label} on the timeline`,
+    excludedTitle: 'Not counted toward accuracy',
+    excludedBody: (ending: string, placed: boolean) =>
+      `This game was ${ending}, so it is left out of accuracy and blunder counts.${placed ? ' It still appears on the timeline.' : ''}`,
+    unplacedTitle: 'Not placed on the timeline',
+    unplacedBody:
+      'This game could not be placed on the session clock, so its moves were not scored. It is not counted as a game without mistakes.',
+    rowUnplaced: 'Not placed on the timeline',
+    rebuildTitle: 'Rebuild for game-by-game details',
+    rebuildBody:
+      'This saved report predates per-game summaries. Its overall result is still available. Rebuild it from the saved PGNs to add the new game details.',
+    rebuildAction: 'Rebuild report',
   },
   gamesList: {
     label: 'Session games',
@@ -307,16 +441,57 @@ export const COPY = {
       `${bpm} bpm, confidence ${confidence}, ${stable ? 'stable' : 'not stable'}`,
   },
   insight: {
-    label: 'Reading (optional)',
-    title: 'Reading',
+    inferred: 'INFERRED',
     inferredLabel: 'INFERRED — written by a model from the numbers above. Not measured.',
-    provider: 'Provider',
-    question: 'Question',
-    prompt: 'What should I understand from this session?',
-    idle: 'Nothing is sent until you choose Write reading.',
-    loading: 'Writing from the computed report…',
-    write: 'Write reading',
+    providers: { openai: 'OpenAI', anthropic: 'Anthropic', google: 'Google', opencode: 'OpenCode', custom: 'Custom provider' },
+    providerLine: (provider: string, model: string) => `${provider} · ${model}`,
+    notConfiguredLine: 'Not configured',
+    suggestionsLabel: 'Suggested questions',
+    suggestionsHint: 'Choosing a question fills the box. Nothing is sent until you choose Generate explanation.',
+    questions: {
+      timeline: 'Explain the Pulse & Play Timeline in plain English.',
+      quality: 'Explain Move Quality and what its numbers mean.',
+      pattern: 'What is the clearest supported pattern in this session?',
+      ranges: 'Compare my play during settled and elevated pulse periods.',
+      reviewFirst: 'Which game should I review first, and why?',
+      mistakes: 'Which locally scored mistakes changed the position most?',
+      thinkTime: 'How did my think time change across the session?',
+      longestBreak: 'What happened around my longest between-game break?',
+      limits: 'Which conclusions are strong, and which are limited by coverage or alignment?',
+      nextSession: 'Give me one non-medical, post-game question to consider before my next session.',
+    },
+    unavailable: {
+      mistakes: 'Rebuild the report to add per-game mistakes.',
+      thinkTime: 'These games have no clock times.',
+      longestBreak: 'No break between games was marked.',
+    },
+    question: 'Your question',
+    tooLong: 'This question is over the 4,000-byte limit. Shorten it to send.',
+    placeholder: 'Ask about the timeline, move quality, one game, or the limits of the report.',
+    idle: 'Nothing is sent until you choose Generate explanation.',
+    loading: 'Generating from the saved report…',
+    write: 'Generate explanation',
     cancel: 'Cancel',
+    retry: 'Try again',
+    clear: 'Clear explanation',
+    sentTitle: 'What is sent',
+    sentBody:
+      'The selected provider receives your pasted PGNs, this question, and locally computed report summaries. It never receives video, images, raw pulse samples, logs, or local file paths. Your provider key from .env is sent only to authenticate the request; it is not part of the prompt.',
+    answerFor: (question: string) => `Explanation for: ${question}`,
+    notConfiguredTitle: 'AI explanation is not configured',
+    notConfiguredBody:
+      'Add CP_AI_PROVIDER, CP_AI_KEY, and CP_AI_MODEL to .env, then restart ChessPulse. The measured and computed report above is complete without AI.',
+    errorTitles: {
+      ai_rejected_key: 'The provider rejected the key',
+      ai_not_permitted: 'The key cannot use the configured model',
+      ai_rate_limited: 'The provider limit was reached',
+      ai_unavailable: 'The provider did not complete the request',
+      ai_request_rejected: 'The provider rejected the request',
+      ai_no_answer: 'The model gave no final answer',
+      ai_bad_response: 'The provider returned an unsupported response',
+      ai_ungrounded: 'ChessPulse withheld this explanation',
+    } as Record<string, string>,
+    errorTitleFallback: 'The explanation could not be generated',
   },
   timeline: {
     label: 'Session timeline',
@@ -326,9 +501,80 @@ export const COPY = {
     table: 'Table',
     lowCoverage: 'Low coverage · raw trace only',
     chartAria: 'Pulse, move error, think time, and game endings',
-    stepAria: 'Step through samples',
-    previous: 'Previous sample',
-    next: 'Next sample',
+    stepAria: 'Step through pulse readings',
+    previous: 'Previous reading',
+    next: 'Next reading',
+    rails: {
+      games: 'Games',
+      pulse: 'Pulse',
+      bpm: 'bpm',
+      loss: 'Move loss',
+      think: 'Think time',
+      lossCap: '300+ cp',
+      thinkCap: '60 s+',
+      zero: '0',
+    },
+    lineLabels: {
+      elevated: (bpm: string) => `${bpm} elevated`,
+      baseline: (bpm: string) => `${bpm} baseline`,
+    },
+    inspectorLabel: 'Selected moment and chart key',
+    keysHint: 'Focus the chart and press ← or →, or use Previous and Next, to inspect a reading.',
+    key: {
+      title: 'How to read this',
+      label: 'Timeline key',
+      items: {
+        pulse: { term: 'Pulse', text: 'The line is your measured pulse, in beats per minute.' },
+        elevated: {
+          term: 'Elevated pulse',
+          text: 'Hatched area and ember line: at least 10 bpm above your first-minute baseline.',
+        },
+        baseline: { term: 'Baseline', text: 'Dashed line: the median usable pulse from the first minute.' },
+        gaps: {
+          term: 'Gaps and faint dots',
+          text: 'Readings that failed confidence or framing checks. They are shown but never counted.',
+        },
+        loss: {
+          term: 'Move loss',
+          text: 'Bars show how much a move worsened the position (centipawn loss). A diamond marks a blunder.',
+        },
+        think: { term: 'Think time', text: 'Dots show how long each move took, from the PGN clock.' },
+        games: { term: 'Games', text: 'Shaded spans, placed from the game-end marks you made while sensing.' },
+      },
+    },
+    moment: {
+      title: 'Selected moment',
+      position: (position: number, total: number) => `Reading ${position} of ${total}`,
+      labels: {
+        time: 'Time in session',
+        pulse: 'Pulse',
+        range: 'Pulse range',
+        signal: 'Signal',
+        game: 'Game',
+        move: 'Nearest move',
+        loss: 'Move loss',
+        think: 'Think time',
+        rule: 'Blunder rule',
+      },
+      ranges: {
+        settled: 'Settled: below the elevated threshold',
+        elevated: 'Elevated: at least 10 bpm above baseline',
+        withheld: 'Not banded: coverage was too low',
+        not_counted: 'Not counted: failed confidence or framing checks',
+      },
+      signal: (confidence: number, counted: boolean) =>
+        counted ? `Counted (confidence ${confidence})` : `Not counted (confidence ${confidence})`,
+      game: (number: number, players: string) => `Game ${number} · ${players}`,
+      noGame: 'Between games, or before the first game',
+      noMove: 'No timed move within 2 seconds',
+      loss: (cpl: number) => `${cpl} centipawns`,
+      mate: 'Part of a mate sequence (no centipawn value)',
+      unscored: 'Not scored by the engine',
+      think: (seconds: string) => `${seconds} s`,
+      noClock: 'No clock data',
+      blunder: 'Met the local blunder rule',
+      notBlunder: 'Did not meet the blunder rule',
+    },
     perGame: 'Per-game timelines',
     gameTimeline: (index: number) => `Game ${index + 1} timeline`,
     elevated: (bpm: string) => `Elevated ≥ ${bpm} bpm`,
@@ -395,7 +641,7 @@ export const COPY = {
     consentNotSaved: 'Consent could not be saved. The camera state is unchanged.',
     stoppedAfterConsent: 'The session stopped after consent was withdrawn.',
     noRecentSignal: 'No recent signal — check the camera',
-    insightUnexpected: 'The reading returned an unexpected shape. The report is unchanged.',
+    insightUnexpected: 'The explanation returned an unexpected shape. The report is unchanged.',
     noStoredSession: 'No stored session is available for this report.',
     reportUnexpected: 'The report returned an unexpected shape.',
     stopBeforeOpening: 'Stop the current session before opening another.',

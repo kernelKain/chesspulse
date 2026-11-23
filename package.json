@@ -1,6 +1,7 @@
 {
   "name": "chesspulse",
   "version": "0.0.0",
+  "license": "GPL-3.0-or-later",
   "private": true,
   "description": "Post-game chess review aligned with a local pulse trace.",
   "main": "dist-electron/main/index.js",

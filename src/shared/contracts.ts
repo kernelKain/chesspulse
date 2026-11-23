@@ -192,6 +192,8 @@ export const timelineMoveSchema = z
     mate: z.boolean(),
     scored: z.boolean(),
     band: z.enum(['settled', 'elevated']).nullable(),
+    /** Rounded move accuracy, 0–100. Absent for unscored moves and in older reports. */
+    accuracy: z.number().int().min(0).max(100).optional(),
   })
   .strict();
 
@@ -204,21 +206,6 @@ export const timelineDataSchema = z
     samples: z.array(pulseSampleSchema),
     games: z.array(timelineGameSchema),
     moves: z.array(timelineMoveSchema),
-  })
-  .strict();
-
-export const reportGameSchema = z
-  .object({
-    index: z.number().int().nonnegative(),
-    white: z.string(),
-    black: z.string(),
-    result: z.string(),
-    ending: endingSchema,
-    includeInStats: z.boolean(),
-    moveCount: z.number().int().nonnegative(),
-    blunders: z.number().int().nonnegative(),
-    aligned: z.boolean(),
-    timeControl: z.string().optional(),
   })
   .strict();
 
@@ -240,6 +227,99 @@ const bandSummarySchema = z.discriminatedUnion('status', [
     .strict(),
 ]);
 
+/** The floor in main/analysis/metrics.ts (MIN_BAND_MOVES); a test there keeps the two equal. */
+export const MIN_GAME_ACCURACY_MOVES = 5;
+
+/** Whole-game accuracy. Below five scored moves it is `insufficient` and carries no number. */
+const accuracySummarySchema = z.discriminatedUnion('status', [
+  z.object({ moves: z.number().int().nonnegative(), status: z.literal('insufficient') }).strict(),
+  z
+    .object({
+      moves: z.number().int().min(MIN_GAME_ACCURACY_MOVES),
+      status: z.literal('ok'),
+      accuracy: z.number().finite(),
+    })
+    .strict(),
+]);
+
+/**
+ * What: one game's locally computed facts for the scored player.
+ * Why: Move Quality reviews one game at a time, and the AI may only cite numbers the report holds.
+ * Removed: the page would recompute per-game numbers from timeline moves and could drift from the verdict.
+ */
+export const gameSummarySchema = z
+  .object({
+    scored: z.number().int().nonnegative(),
+    unscored: z.number().int().nonnegative(),
+    overall: accuracySummarySchema,
+    settled: bandSummarySchema,
+    elevated: bandSummarySchema,
+    blunders: z.number().int().nonnegative(),
+    elevatedBlunders: z.number().int().nonnegative(),
+    avgThinkSec: z.number().finite().nonnegative().nullable(),
+    largestLosses: z
+      .array(
+        z
+          .object({
+            moveIndex: z.number().int().nonnegative(),
+            cpl: z.number().int().nonnegative(),
+            blunder: z.boolean(),
+          })
+          .strict(),
+      )
+      .max(3),
+  })
+  .strict();
+
+export const reportGameSchema = z
+  .object({
+    index: z.number().int().nonnegative(),
+    white: z.string(),
+    black: z.string(),
+    result: z.string(),
+    ending: endingSchema,
+    includeInStats: z.boolean(),
+    moveCount: z.number().int().nonnegative(),
+    blunders: z.number().int().nonnegative(),
+    aligned: z.boolean(),
+    timeControl: z.string().optional(),
+    /** The side the scored player had. Absent in reports built before player scope existed. */
+    playerSide: z.enum(['white', 'black', 'both']).optional(),
+    /** Absent for games left out of accuracy and in reports built before per-game summaries. */
+    summary: gameSummarySchema.optional(),
+  })
+  .strict();
+
+/** Session counts behind the summary rail; the same totals the verdict sentence uses. */
+export const reportTotalsSchema = z
+  .object({
+    gamesIncluded: z.number().int().nonnegative(),
+    scored: z.number().int().nonnegative(),
+    unscored: z.number().int().nonnegative(),
+    blunders: z.number().int().nonnegative(),
+    elevatedBlunders: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/** The longest player-marked break between two placed games. Indexes are zero-based game indexes. */
+export const reportGapSchema = z
+  .object({
+    afterIndex: z.number().int().nonnegative(),
+    beforeIndex: z.number().int().nonnegative(),
+    durationSec: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/**
+ * What: whose moves the report scored.
+ * Why: the pulse belongs to one person, so accuracy must say whether it covers that person or both sides.
+ * Removed: a report could not tell the page that opponent moves were mixed into "accuracy".
+ */
+export const playerScopeSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('player'), name: z.string().min(1).max(64) }).strict(),
+  z.object({ kind: z.literal('all_moves'), reason: z.enum(['ambiguous', 'no_common_name']) }).strict(),
+]);
+
 /** A finished review. A refusal is a different object and never carries these fields. */
 export const reportSchema = z
   .object({
@@ -254,6 +334,10 @@ export const reportSchema = z
     elevated: bandSummarySchema,
     engine: z
       .object({
+        /** Absent in older reports and for an injected test evaluator that does not name itself. */
+        name: z.string().min(1).max(40).optional(),
+        version: z.string().min(1).max(40).optional(),
+        build: z.string().min(1).max(40).optional(),
         depth: z.number().int().positive(),
         positions: z.number().int().nonnegative(),
         scored: z.number().int().nonnegative(),
@@ -273,6 +357,12 @@ export const reportSchema = z
     /** Time the face was covered by a hand or object, from marked samples only. */
     occludedSec: z.number().int().nonnegative().optional(),
     banner: z.string().min(1).optional(),
+    /** Absent in reports built before player scope existed; those scored both sides. */
+    playerScope: playerScopeSchema.optional(),
+    /** Absent in reports built before per-game summaries. */
+    totals: reportTotalsSchema.optional(),
+    /** Absent when no break between placed games was marked, and in older reports. */
+    longestGap: reportGapSchema.optional(),
     games: z.array(reportGameSchema),
     timeline: timelineDataSchema,
   })
@@ -400,6 +490,8 @@ export const reportBuildRequestSchema = z
     pgns: z.array(z.string()).max(20),
     /** The marks the player chose when their own marks did not match the pasted games. */
     gameEndMarks: z.array(monoUsSchema).max(20).optional(),
+    /** The player the page said is being sensed. Main accepts it only if it is in every counted game. */
+    playerName: z.string().trim().min(1).max(64).optional(),
   })
   .strict()
   .refine(
@@ -515,13 +607,23 @@ export const sessionDeleteResultSchema = z
   })
   .strict();
 
+/** The provider is not part of the request: main reads it from CP_AI_PROVIDER in .env. */
 export const insightRequestSchema = z
   .object({
     sessionId: z.string().min(1),
-    provider: aiProviderSchema,
     text: z.string().min(1).max(4000).refine((text) => new TextEncoder().encode(text).length <= 4000),
   })
   .strict();
+
+/**
+ * What: which provider and model .env selected, for a read-only line on the AI panel.
+ * Why: the page no longer chooses a provider, so it must still say which one would be used.
+ * Removed: the player could not tell what a Generate request would reach. The key is never included.
+ */
+export const insightConfigSchema = z.discriminatedUnion('configured', [
+  z.object({ configured: z.literal(true), provider: aiProviderSchema, model: z.string().min(1).max(120) }).strict(),
+  z.object({ configured: z.literal(false), reason: z.string().min(1).max(300) }).strict(),
+]);
 
 export const insightCancelRequestSchema = z
   .object({
@@ -719,6 +821,10 @@ export type TimelineGame = z.infer<typeof timelineGameSchema>;
 export type TimelineMove = z.infer<typeof timelineMoveSchema>;
 export type TimelineData = z.infer<typeof timelineDataSchema>;
 export type ReportGame = z.infer<typeof reportGameSchema>;
+export type ReportPlayerScope = z.infer<typeof playerScopeSchema>;
+export type GameSummaryData = z.infer<typeof gameSummarySchema>;
+export type ReportTotals = z.infer<typeof reportTotalsSchema>;
+export type ReportGap = z.infer<typeof reportGapSchema>;
 export type Report = z.infer<typeof reportSchema>;
 export type ReportResult = z.infer<typeof reportResultSchema>;
 export type ReportExport = z.infer<typeof reportExportSchema>;
@@ -746,4 +852,5 @@ export type InsightRequest = z.infer<typeof insightRequestSchema>;
 export type Insight = z.infer<typeof insightSchema>;
 export type InsightDisabled = z.infer<typeof insightDisabledSchema>;
 export type InsightResult = z.infer<typeof insightResultSchema>;
+export type InsightConfig = z.infer<typeof insightConfigSchema>;
 export type PreviewFrame = z.infer<typeof previewFrameSchema>;

@@ -114,6 +114,12 @@ export const INVOKE_CHANNELS = {
     fallback: 'internal',
     absentAsEmpty: false,
   },
+  insightConfig: {
+    name: 'cp:insight:config',
+    request: emptyRequestSchema,
+    fallback: 'internal',
+    absentAsEmpty: true,
+  },
   diagnosticsCopy: {
     name: 'cp:diagnostics:copy',
     request: emptyRequestSchema,
