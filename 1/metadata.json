@@ -1,0 +1,43 @@
+{
+  "cli_version": "0.12.3-nightly.202610310614.54b6a5cac",
+  "checkpoint_id": "01M835DPZAR36NJ0R4XAAMV1WA",
+  "session_id": "sess_3ef51f10-9586-472f-ac76-be21838634fc",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-23T02:58:20.837392408Z",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "save_step_count": 3,
+  "files_touched": [
+    "demo/README.md",
+    "demo/article/architecture.png",
+    "demo/article/architecture.svg",
+    "demo/article/cover.png",
+    "demo/article/cover.svg",
+    "demo/article/data-flow.png",
+    "demo/article/data-flow.svg",
+    "demo/article/entire-analytics.png",
+    "demo/article/three-layers.png",
+    "demo/article/three-layers.svg"
+  ],
+  "agent": "Kiro",
+  "model": "",
+  "turn_id": "af8a2a3a6414",
+  "compact_transcript_start": 0,
+  "redaction": {
+    "replacements": 2,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 2,
+      "credentialed_uri": 0,
+      "entropy": 0,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 3
+  }
+}
