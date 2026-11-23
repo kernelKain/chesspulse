@@ -12,6 +12,7 @@ import { AppError } from '../shared/errors.js';
 import { registerInvokeChannel } from './ipc-registry.js';
 import { CANCELLED_REFUSAL, buildReport } from './report.js';
 import { withReportExclusion } from './report-lock.js';
+import type { SessionRoot } from './examples.js';
 import { defaultDataRoot, readMeta } from './store.js';
 
 interface ActiveBuild {
@@ -28,7 +29,10 @@ export function isReportBuilding(sessionId: string): boolean {
   return activeBuilds.has(sessionId);
 }
 
-export function registerReportHandler(dataRoot: () => string = defaultDataRoot): void {
+export function registerReportHandler(
+  dataRoot: SessionRoot = defaultDataRoot,
+  isReadOnly: (sessionId: string) => boolean = () => false,
+): void {
   registerInvokeChannel('reportBuild', async (event, payload) => {
     const { sessionId, pgns, gameEndMarks, playerName } = payload;
     if (activeBuilds.has(sessionId)) throw new AppError('session_busy');
@@ -38,8 +42,9 @@ export function registerReportHandler(dataRoot: () => string = defaultDataRoot):
       // Shared exclusion also covers insight artifact reads; only one Stockfish build runs at once.
       const result = await withReportExclusion(
         () =>
-          buildReport(dataRoot(), sessionId, pgns, undefined, {
+          buildReport(dataRoot(sessionId), sessionId, pgns, undefined, {
             signal: build.controller.signal,
+            readOnly: isReadOnly(sessionId),
             onCommitStart: () => {
               build.committing = true;
             },
@@ -62,7 +67,7 @@ export function registerReportHandler(dataRoot: () => string = defaultDataRoot):
   });
 
   registerInvokeChannel('sessionMarks', async (_event, payload) => {
-    const meta = await readMeta(dataRoot(), payload.sessionId);
+    const meta = await readMeta(dataRoot(payload.sessionId), payload.sessionId);
     // Elapsed time is the only clock the player saw; raw monotonic µs means nothing to them.
     return sessionMarksResultSchema.parse({
       marks: (meta.marks ?? []).map((mark) => ({

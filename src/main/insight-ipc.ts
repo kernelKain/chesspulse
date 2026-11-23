@@ -11,9 +11,10 @@ import { registerInvokeChannel } from './ipc-registry.js';
 import { log, logError } from './log.js';
 import { reportAppError } from './report-errors.js';
 import { withReportExclusion } from './report-lock.js';
+import type { SessionRoot } from './examples.js';
 import { defaultDataRoot, readGames, readReport } from './store.js';
 
-export function registerInsightHandler(dataRoot: () => string = defaultDataRoot, env: NodeJS.ProcessEnv = process.env): void {
+export function registerInsightHandler(dataRoot: SessionRoot = defaultDataRoot, env: NodeJS.ProcessEnv = process.env): void {
   const active = new Map<string, AbortController>();
   // One random id per report for this app run. OpenCode Go routes a conversation by it; a session
   // folder name would tell the provider when the session was recorded, so it is never sent.
@@ -32,7 +33,7 @@ export function registerInsightHandler(dataRoot: () => string = defaultDataRoot,
     const controller = new AbortController();
     active.set(payload.sessionId, controller);
     try {
-      const artifacts = await readArtifacts(dataRoot(), payload.sessionId, controller.signal).catch(
+      const artifacts = await readArtifacts(dataRoot(payload.sessionId), payload.sessionId, controller.signal).catch(
         (error: unknown) => {
           throw reportAppError(error);
         },

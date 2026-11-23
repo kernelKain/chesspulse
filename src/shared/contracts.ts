@@ -588,6 +588,8 @@ export const sessionListResultSchema = z
   .object({
     sessions: z.array(sessionSummarySchema),
     unreadable: z.number().int().nonnegative(),
+    // Read-only sessions shipped with the app. Listed apart from the player's own.
+    examples: z.array(sessionSummarySchema),
   })
   .strict();
 

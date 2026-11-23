@@ -24,8 +24,20 @@ export interface SessionLibraryResult {
   unreadable: number;
 }
 
-export async function listSessionSummaries(root: string): Promise<SessionLibraryResult> {
-  const ids = await listSessions(root);
+/**
+ * Lists the player's sessions. Ids in `exclude` (the shipped examples) are left out, so an example
+ * that also exists in the data folder is never shown twice or offered for deletion.
+ */
+export async function listSessionSummaries(
+  root: string,
+  exclude: ReadonlySet<string> = new Set(),
+): Promise<SessionLibraryResult> {
+  const ids = (await listSessions(root)).filter((id) => !exclude.has(id));
+  return summarizeSessions(root, ids);
+}
+
+/** Summarizes the given ids under one root. It only reads, so it is safe on a read-only root. */
+export async function summarizeSessions(root: string, ids: readonly string[]): Promise<SessionLibraryResult> {
   const sessions: SessionSummary[] = [];
   let unreadable = 0;
   for (const id of ids) {

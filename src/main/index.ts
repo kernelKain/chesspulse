@@ -35,6 +35,7 @@ import { loadEnvCandidates, readSensingKey } from './env.js';
 import { installFileLog, installSafeConsole, log, logError } from './log.js';
 import { registerDiagnosticsHandler } from './diagnostics-ipc.js';
 import { runDoctor } from './doctor.js';
+import { exampleRoot, isExampleSession, readExampleLibrary, sessionRootFor } from './examples.js';
 import { registerInsightHandler } from './insight-ipc.js';
 import { registerInvokeChannel } from './ipc-registry.js';
 import { configureIpcSender } from './ipc-sender.js';
@@ -494,9 +495,12 @@ app.whenReady().then(async () => {
   );
   registerSessionHandlers();
   registerPasteHandler();
-  registerReportHandler();
-  registerInsightHandler();
-  registerLibraryHandler(defaultDataRoot);
+  const examples = readExampleLibrary(exampleRoot(app, process.resourcesPath));
+  log(`[chesspulse] ${examples.ids.size} example session(s) available`);
+  const sessionRoot = sessionRootFor(examples, defaultDataRoot);
+  registerReportHandler(sessionRoot, (id) => isExampleSession(examples, id));
+  registerInsightHandler(sessionRoot);
+  registerLibraryHandler(defaultDataRoot, examples);
   registerDiagnosticsHandler(defaultDataRoot, {
     doctorLines: async () =>
       (await runDoctor({ env: process.env, envFile: env, dataRoot: defaultDataRoot() })).lines,

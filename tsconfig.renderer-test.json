@@ -39,6 +39,8 @@
     "src/renderer/CameraOpenIndicator.test.ts",
     "src/renderer/SessionList.tsx",
     "src/renderer/SessionList.test.ts",
+    "src/renderer/ExampleSessions.tsx",
+    "src/renderer/ExampleSessions.test.ts",
     "src/renderer/PasteValidation.tsx",
     "src/renderer/PasteValidation.test.ts",
     "src/renderer/ReviewStages.tsx",

@@ -72,6 +72,7 @@ import { RefusalPanel } from './RefusalPanel';
 import { ReviewProgress } from './ReviewProgress';
 import { SensingControls } from './SensingControls';
 import { SensingStrip } from './SensingStrip';
+import { ExampleSessions } from './ExampleSessions';
 import { SessionList } from './SessionList';
 import { SetupScreen } from './SetupScreen';
 import { Timeline, type TimelineFocus } from './Timeline';
@@ -126,7 +127,8 @@ export function App() {
     status: 'idle' | 'loading' | 'ready' | 'error';
     sessions: SessionSummary[];
     unreadable: number;
-  }>({ status: 'idle', sessions: [], unreadable: 0 });
+    examples: SessionSummary[];
+  }>({ status: 'idle', sessions: [], unreadable: 0, examples: [] });
   const [libraryNonce, setLibraryNonce] = useState(0);
   const bridge = window.chesspulse;
   useEffect(() => {
@@ -276,7 +278,7 @@ export function App() {
   useEffect(() => {
     if (flow.screen !== 'home' && flow.screen !== 'sessions') return;
     if (!bridge) {
-      setLibrary({ status: 'error', sessions: [], unreadable: 0 });
+      setLibrary({ status: 'error', sessions: [], unreadable: 0, examples: [] });
       return;
     }
     const seq = ++librarySeq.current;
@@ -287,18 +289,19 @@ export function App() {
         if (seq !== librarySeq.current) return;
         const parsed = sessionListResultSchema.safeParse(raw);
         if (!parsed.success) {
-          setLibrary({ status: 'error', sessions: [], unreadable: 0 });
+          setLibrary({ status: 'error', sessions: [], unreadable: 0, examples: [] });
           return;
         }
         setLibrary({
           status: 'ready',
           sessions: parsed.data.sessions,
           unreadable: parsed.data.unreadable,
+          examples: parsed.data.examples,
         });
       })
       .catch(() => {
         if (seq === librarySeq.current) {
-          setLibrary({ status: 'error', sessions: [], unreadable: 0 });
+          setLibrary({ status: 'error', sessions: [], unreadable: 0, examples: [] });
         }
       });
   }, [flow.screen, bridge, libraryNonce]);
@@ -944,6 +947,9 @@ export function App() {
             />
           )}
         </section>
+        {library.status === 'ready' ? (
+          <ExampleSessions sessions={library.examples} onOpen={(id) => void onOpenSession(id)} />
+        ) : null}
       </main>
     );
   }

@@ -11,6 +11,7 @@ export const APP_ERROR_CODES = [
   'session_busy',
   'session_failed',
   'session_not_running',
+  'example_read_only',
   'mark_not_recorded',
   'storage_failed',
   'pgn_invalid',
@@ -66,6 +67,10 @@ export const APP_ERRORS: Record<AppErrorCode, { readonly message: string; readon
   },
   session_not_running: {
     message: 'No session is running.',
+    retryable: false,
+  },
+  example_read_only: {
+    message: 'Example sessions are read-only. Start your own session to build and keep a report.',
     retryable: false,
   },
   mark_not_recorded: {

@@ -972,3 +972,39 @@ describe('refusal remedy', () => {
     assert.match(remedy, /too much movement/);
   });
 });
+
+describe('read-only example sessions', () => {
+  it('still returns the real coverage refusal for a refused example', async () => {
+    const root = useRoot();
+    const id = await session(
+      root,
+      [sample(0), sample(1_000_000), sample(2_000_000), sample(3_000_000)],
+      10_000_000,
+    );
+    const result = await buildReport(root, id, [pgnAt(EPOCH + 10_000)], evaluator(), { readOnly: true });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.reason, 'low_coverage');
+    await assert.rejects(readFile(path.join(root, 'sessions', id, 'report.json'), 'utf8'));
+  });
+
+  it('rejects a build that passes the gate before scoring, and writes nothing', async () => {
+    const root = useRoot();
+    const samples = Array.from({ length: 10 }, (_unused, index) => sample(index * 1_000_000));
+    const id = await session(root, samples, 10_000_000);
+    let evaluated = 0;
+    const counting = {
+      async evaluate(fen: string) {
+        evaluated += 1;
+        return { fen, depth: 8, evalFailed: false, scoreCp: 12, bestmove: 'e7e5' };
+      },
+      async close() {},
+    };
+    await assert.rejects(
+      buildReport(root, id, [pgnAt(EPOCH + 10_000)], counting, { readOnly: true }),
+      (error: unknown) => (error as { code?: string }).code === 'example_read_only',
+    );
+    assert.equal(evaluated, 0);
+    await assert.rejects(readFile(path.join(root, 'sessions', id, 'report.json'), 'utf8'));
+    await assert.rejects(readFile(path.join(root, 'sessions', id, 'games.json'), 'utf8'));
+  });
+});

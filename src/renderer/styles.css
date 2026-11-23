@@ -2043,6 +2043,47 @@ main.main-report > .label {
 .session-list-section .empty-state {
   margin-top: 16px;
 }
+/* Example sessions: the outcome is the word and the icon; the edge colour repeats it. */
+.example-sessions {
+  margin-top: 32px;
+  max-width: 48rem;
+}
+.example-sessions-intro {
+  color: var(--muted);
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+/* Two classes, so the shared .card border rule further down cannot override the edge. */
+.session-row.example-row {
+  border-left: 4px solid var(--line);
+}
+.session-row.example-built {
+  border-left-color: var(--ok);
+}
+.session-row.example-withheld {
+  border-left-color: var(--danger);
+}
+.example-outcome {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-weight: 600;
+  font-size: 14px;
+}
+.example-built .example-outcome {
+  color: var(--ok);
+}
+.example-withheld .example-outcome {
+  color: var(--danger);
+}
+.example-pending .example-outcome {
+  color: var(--muted);
+}
+.example-detail {
+  display: block;
+  margin-top: 8px;
+}
 
 /* ---- Component system (W5 S53) ---- */
 .btn {

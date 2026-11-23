@@ -49,6 +49,13 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "demo/sessions",
+        "to": "demo/sessions",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "asarUnpack": [

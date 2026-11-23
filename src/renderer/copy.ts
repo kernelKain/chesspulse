@@ -44,6 +44,9 @@ export const COPY = {
     intro:
       'Start a session, play on chess.com, then paste your games to see your pulse next to your moves. Only numeric pulse samples are stored during play; no video or image is saved.',
     recentHeading: 'Recent sessions',
+    examplesHeading: 'Example sessions',
+    examplesIntro:
+      'Two real sessions captured with ChessPulse ship with the app, so you can see both outcomes before you play. They are read-only and are not part of your own sessions.',
   },
   sessions: {
     heading: 'Sessions',
@@ -58,6 +61,15 @@ export const COPY = {
     exportUnavailable: 'Export is available after a report is built.',
     deleteQuestion: 'Delete this session? This cannot be undone.',
     exportQuestion: 'Export this report? The file contains no pulse samples.',
+    example: {
+      built: 'Passed the coverage gate',
+      withheld: 'Failed the coverage gate',
+      pending: 'Not built yet',
+      builtDetail: 'Open it to see the full report.',
+      withheldDetail: 'Too little of the session had a usable pulse signal, so ChessPulse withholds the report.',
+      pendingDetail: 'Open it to see what was captured.',
+      readOnly: 'Read-only example',
+    },
   },
   setup: {
     heading: 'Set up your session.',

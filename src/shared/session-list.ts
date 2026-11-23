@@ -3,6 +3,22 @@
 // Removed: each list would format the same fields differently, and a null would print as a number.
 import { formatElapsedMs } from './sensing.js';
 
+/** Below this share of usable pulse signal, a report is refused rather than built weak. */
+export const COVERAGE_GATE_PCT = 70;
+
+/**
+ * Where a shipped example session stands. "built": its report is saved. "withheld": its coverage is
+ * below the gate, so any report build is refused. "pending": neither, which a shipped example should
+ * never be, but the card must still say something true.
+ */
+export type ExampleOutcome = 'built' | 'withheld' | 'pending';
+
+export function exampleOutcome(session: { hasReport: boolean; coveragePct: number | null }): ExampleOutcome {
+  if (session.hasReport) return 'built';
+  if (session.coveragePct !== null && session.coveragePct < COVERAGE_GATE_PCT) return 'withheld';
+  return 'pending';
+}
+
 export function formatSessionDate(epochMs: number): string {
   if (!Number.isFinite(epochMs)) return 'Unknown date';
   const date = new Date(epochMs);

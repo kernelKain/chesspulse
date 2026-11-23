@@ -35,7 +35,9 @@ import { FRAMING_CAUSES, type FramingCause } from '../shared/framing.js';
 import { plyBelongsTo, resolvePlayer, sideInGame, type PlayerSide } from '../shared/player.js';
 import { CONFIDENCE_FLOOR, SAMPLE_HOLD_US, occludedUs } from '../shared/sensing.js';
 
-export const COVERAGE_GATE_PCT = 70;
+// The gate lives in shared code so the example cards can say which side of it a session fell on.
+export { COVERAGE_GATE_PCT } from '../shared/session-list.js';
+import { COVERAGE_GATE_PCT } from '../shared/session-list.js';
 const LOW_COVERAGE_REMEDY =
   'Most often this is lighting or moving out of frame. Sit facing the screen with a lamp in front of you, and keep the session shorter next time.';
 
@@ -96,6 +98,11 @@ export interface ReportBuildControl {
   onProgress?: (progress: { scored: number; total: number }) => void;
   /** Marks the point where cancellation is no longer accepted because the commit has begun. */
   onCommitStart?: () => void;
+  /**
+   * A shipped example session: the coverage gate still runs, so a refused example shows its real
+   * refusal, but a build that passes the gate is rejected before scoring because nothing may be written.
+   */
+  readOnly?: boolean;
 }
 
 interface EngineStats {
@@ -171,6 +178,7 @@ export async function buildReport(
   const samples = await readSamples(root, sessionId);
   const refusal = gate(meta, samples, pgnBatch);
   if (refusal) return refusal;
+  if (control.readOnly) throw new AppError('example_read_only');
 
   const parsed = parsePgnBatch(pgnBatch);
   if (!parsed.ok) {

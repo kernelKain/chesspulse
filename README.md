@@ -41,6 +41,12 @@ flowchart LR
 If too little of the session has a usable pulse signal, ChessPulse refuses to compare and says why.
 It does not produce a weak report.
 
+### Example sessions
+
+Home lists two real sessions under **Example sessions**, so you can see both outcomes before you set
+up a camera. One passed the 70% coverage gate and opens a full report. The other reached 9% and is
+withheld. They are read-only and are kept apart from your own sessions. See [demo/](demo/README.md).
+
 ## Run
 
 Requirements: Linux, Node 22, npm, a display, a webcam, and a SmartSpectra API key
@@ -100,6 +106,9 @@ The app window also keeps the player name you chose in its local storage, under
 `~/.config/chesspulse`, so the next paste can preselect it. Nothing else is kept there by
 ChessPulse.
 
+The two example sessions ship with the app (`demo/sessions/` in this repository). ChessPulse only
+reads them and never writes to them.
+
 **Retention and deletion.** Nothing expires on its own. **Delete** on the Sessions screen removes a
 session's folder. Deleting `~/.local/share/chesspulse` removes every session and the log. Deleting
 `~/.config/chesspulse` removes the remembered name. There is no account and no cloud copy.
@@ -135,6 +144,13 @@ session's folder. Deleting `~/.local/share/chesspulse` removes every session and
   scored moves) is shown as "Insufficient", not as a number.
 - Scoring uses Stockfish at depth 12 for speed, so it is less exact than a deep analysis.
 - Linux is the only tested platform.
+
+## Documentation
+
+- [Product discovery](docs/PRODUCT_DISCOVERY.md): the user, the problem, scope and non-negotiables.
+- [Engineering blueprint](docs/ENGINEERING_BLUEPRINT.md): architecture, contracts, design and phases.
+- [Execution](docs/EXECUTION.md): what each phase delivered, key decisions, and known limits.
+- [Demo material](demo/README.md): the example sessions and screenshots.
 
 ## Licence and credits
 

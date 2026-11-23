@@ -64,6 +64,7 @@ interface SessionSummary {
 interface SessionListResult {
   sessions: SessionSummary[];
   unreadable: number;
+  examples: SessionSummary[];
 }
 
 interface SessionOpenResult {
@@ -172,42 +173,54 @@ function readAppState(value: unknown): AppState {  if (typeof value !== 'object'
 }
 
 function readSessionList(value: unknown): SessionListResult {
-  if (typeof value !== 'object' || value === null || !('sessions' in value) || !Array.isArray(value.sessions)) {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('sessions' in value) ||
+    !Array.isArray(value.sessions) ||
+    !('examples' in value) ||
+    !Array.isArray(value.examples)
+  ) {
     throw new Error('The window returned an unexpected session list.');
   }
-  const record = value as { sessions: unknown[]; unreadable?: unknown };
-  const sessions = record.sessions.map((raw) => {
-    if (typeof raw !== 'object' || raw === null) {
-      throw new Error('The window returned an unexpected session list.');
-    }
-    const session = raw as {
-      id?: unknown;
-      startedAtEpochMs?: unknown;
-      durationMs?: unknown;
-      coveragePct?: unknown;
-      hasReport?: unknown;
-    };
-    if (
-      typeof session.id !== 'string' ||
-      typeof session.startedAtEpochMs !== 'number' ||
-      (session.durationMs !== null && typeof session.durationMs !== 'number') ||
-      (session.coveragePct !== null && typeof session.coveragePct !== 'number') ||
-      typeof session.hasReport !== 'boolean'
-    ) {
-      throw new Error('The window returned an unexpected session list.');
-    }
-    return {
-      id: session.id,
-      startedAtEpochMs: session.startedAtEpochMs,
-      durationMs: session.durationMs,
-      coveragePct: session.coveragePct,
-      hasReport: session.hasReport,
-    };
-  });
+  const record = value as { sessions: unknown[]; examples: unknown[]; unreadable?: unknown };
   if (typeof record.unreadable !== 'number' || !Number.isInteger(record.unreadable) || record.unreadable < 0) {
     throw new Error('The window returned an unexpected session list.');
   }
-  return { sessions, unreadable: record.unreadable };
+  return {
+    sessions: record.sessions.map(readSessionSummary),
+    unreadable: record.unreadable,
+    examples: record.examples.map(readSessionSummary),
+  };
+}
+
+function readSessionSummary(raw: unknown): SessionSummary {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error('The window returned an unexpected session list.');
+  }
+  const session = raw as {
+    id?: unknown;
+    startedAtEpochMs?: unknown;
+    durationMs?: unknown;
+    coveragePct?: unknown;
+    hasReport?: unknown;
+  };
+  if (
+    typeof session.id !== 'string' ||
+    typeof session.startedAtEpochMs !== 'number' ||
+    (session.durationMs !== null && typeof session.durationMs !== 'number') ||
+    (session.coveragePct !== null && typeof session.coveragePct !== 'number') ||
+    typeof session.hasReport !== 'boolean'
+  ) {
+    throw new Error('The window returned an unexpected session list.');
+  }
+  return {
+    id: session.id,
+    startedAtEpochMs: session.startedAtEpochMs,
+    durationMs: session.durationMs,
+    coveragePct: session.coveragePct,
+    hasReport: session.hasReport,
+  };
 }
 
 function readSessionOpen(value: unknown): SessionOpenResult {
