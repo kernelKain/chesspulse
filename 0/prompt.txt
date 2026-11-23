@@ -1,0 +1,23 @@
+genearte a plan to do these and make proejct betetr , just plan do not edit anything yet:: - from example sessions remove date and time :Nov 23, 2026, 6:05 AM and Nov 23, 2026, 12:19 AM. Mention which one was what like bullet sesstion 10 games or what, bltiz seeison 10 games or what..
+
+- The failed session should have already pasted PGN that i sned you before for this with incomplet graphs and stifuf like we can see in the image.
+
+- remove this from passes session: "This session did not have enough moves in both pulse ranges for a reliable comparison."
+
+- In the chart for all code i shoudl be able to click o n the dot and move it manyually like hold it and move it isntaed of doing multiple clicks on mosue for next reading or previous reading.
+
+- Remove this from move quality in eamaple: "What this supports
+
+There were not enough scored moves in both pulse ranges for a comparison.
+
+No move met the blunder rule."
+
+- In exaple make elevent show smehting fake it for exmaple only in move qualiat section
+
+- In exmaple reduce game accuray of each game as eahc were very bad games.
+
+-
+
+---
+
+also find bugs and problem in proejct that can be debugsged faster and improvement that can be done fatser and make proejct betetr , add these in aboeve plan
