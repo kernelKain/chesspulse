@@ -96,7 +96,8 @@ export async function requestInsight(
     return {
       disabled: false,
       provider: configured.config.provider,
-      text: groundInsight(summary, output),
+      // The player's name is grounded as a name: its digits are not report quantities.
+      text: groundInsight(summary, output, stored.data.playerScope?.kind === 'player' ? [stored.data.playerScope.name] : []),
     };
   }
   throw new AiProviderError('The AI provider did not respond. Nothing in this report depends on it.', true, 'ai_unavailable');

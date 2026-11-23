@@ -69,6 +69,10 @@ describe('ReportSummary markup', () => {
     assert.ok(html.includes(COPY.verdict.scope.legacy));
     assert.match(html, /3 positions timed out and were left out\./);
     assert.equal(html.includes('Baseline 70 bpm · Elevated'), false, 'the old metadata line is gone');
+    const at = (marker: string) => html.indexOf(marker);
+    assert.ok(at('class="report-headline"') < at('class="metric-rail"'), 'headline before the facts');
+    assert.ok(at('class="metric-rail"') < at('class="report-verdict"'), 'facts before the verdict');
+    assert.ok(at('class="report-verdict"') < at('class="report-notes"'), 'verdict before the notes');
   });
 
   it('states the time the face was covered when the session recorded it', () => {

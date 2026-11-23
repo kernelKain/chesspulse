@@ -133,11 +133,20 @@ describe('gameQuality', () => {
       'the moves come from this game, not the other game with the same move index',
     );
   });
-  it('gives no timeline link or span for a game that was not placed', () => {
-    const view = gameQuality(report([game(0, { aligned: false })]), 0);
-    assert.ok(view && view.kind === 'ok');
-    assert.equal(view.span, null);
-    assert.deepEqual(view.losses.map((loss) => loss.tUs), [null, null]);
+  it('shows an unplaced counted game as unplaced, not as a clean game, and asks for no rebuild', () => {
+    const unplaced = report([game(0, { aligned: false, summary: undefined, blunders: 0 })]);
+    assert.equal(gameQuality(unplaced, 0)?.kind, 'unplaced');
+    assert.equal(needsRebuild(unplaced), false, 'a rebuild cannot score a game the clock could not place');
+    const row = overallQuality(unplaced).rows[0];
+    assert.deepEqual([row?.placed, row?.accuracy, row?.blunders], [false, null, null]);
+  });
+  it('says whether an excluded game is on the timeline', () => {
+    const aborted = { includeInStats: false, ending: 'aborted' as const, summary: undefined };
+    const placed = gameQuality(report([game(0, aborted)]), 0);
+    assert.deepEqual(placed?.kind === 'excluded' && placed.placed, true);
+    const off = report([game(0, { ...aborted, aligned: false })]);
+    const unplacedExcluded = gameQuality({ ...off, timeline: { ...off.timeline, games: [] } }, 0);
+    assert.deepEqual(unplacedExcluded?.kind === 'excluded' && unplacedExcluded.placed, false);
   });
   it('labels a loss whose move is missing by its number alone', () => {
     const view = gameQuality(report([game(1)]), 1);

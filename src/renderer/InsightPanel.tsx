@@ -9,6 +9,13 @@ import type { InsightConfig, Report } from '../shared/contracts';
 import { QUESTION_KEYS, unavailableQuestions } from '../shared/explainer';
 import { COPY } from './copy';
 
+/** The request schema's limit, in UTF-8 bytes. A character limit alone lets non-ASCII text exceed it. */
+export const QUESTION_MAX_BYTES = 4000;
+
+export function questionBytes(text: string): number {
+  return new TextEncoder().encode(text.trim()).length;
+}
+
 export type InsightViewState =
   | { status: 'idle' }
   | { status: 'loading' }
@@ -43,6 +50,10 @@ export function InsightPanel({
   const loading = state.status === 'loading';
   const notConfigured = config?.configured === false;
   const missing = unavailableQuestions(report);
+  const trimmed = question.trim();
+  const tooLong = questionBytes(question) > QUESTION_MAX_BYTES;
+  // One rule for the button and the send guard, so the panel never forwards a question main would reject.
+  const canSend = !loading && !notConfigured && trimmed.length > 0 && !tooLong;
 
   // The last explanation stays on screen while the next question is edited or sent.
   useEffect(() => {
@@ -59,6 +70,7 @@ export function InsightPanel({
   }, [loading]);
 
   function send(text: string): void {
+    if (questionBytes(text) > QUESTION_MAX_BYTES || text.trim().length === 0) return;
     sent.current = text;
     onRequest(text);
   }
@@ -115,12 +127,20 @@ export function InsightPanel({
       <textarea
         id={questionId}
         rows={3}
-        maxLength={4000}
+        maxLength={QUESTION_MAX_BYTES}
         value={question}
+        aria-invalid={tooLong}
+        aria-describedby={tooLong ? `${questionId}-limit` : undefined}
         placeholder={copy.placeholder}
         disabled={loading}
         onChange={(event) => setQuestion(event.target.value)}
       />
+
+      {tooLong ? (
+        <p id={`${questionId}-limit`} className="insight-limit" role="status">
+          {copy.tooLong}
+        </p>
+      ) : null}
 
       <div className="insight-sent">
         <h3>{copy.sentTitle}</h3>
@@ -131,8 +151,8 @@ export function InsightPanel({
         <button
           ref={writeButton}
           type="button"
-          disabled={loading || notConfigured || !question.trim()}
-          onClick={() => send(question.trim())}
+          disabled={!canSend}
+          onClick={() => send(trimmed)}
           className="btn btn-primary"
         >
           {copy.write}

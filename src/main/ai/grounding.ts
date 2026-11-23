@@ -3,11 +3,13 @@
 // Removed: injected PGN numbers, leading-dot decimals, and rounded large integers could pass as grounded.
 const NUMBER = /(?<![\d.])[-+]?(?:\d[\d,]*(?:\.\d*)?|\.\d[\d,]*)(?:[eE][-+]?\d+)?/g;
 /**
- * A rank digit directly after a file letter, as in `Rc8` or `exd5`. It names a square, not a
- * quantity, so it is neither allowed by the stats nor checked in the output. Squares come from PGN
- * text, so counting them would let untrusted input widen the allowlist.
+ * A whole chess move token such as `e4`, `Rc8`, `exd5`, `Nbd7`, or `e8=Q+`. Its digits name squares,
+ * not quantities, so the token is removed before numbers are checked, in the output and in the stats.
+ * Squares come from PGN text, so counting them would let untrusted input widen the allowlist.
+ * The token must stand alone: `1e8` or `abc5` is not a move, and its digits stay checked. Sentence
+ * punctuation may follow (`Rc8.`), but a decimal may not (`e4.5` stays a number).
  */
-const SQUARE_DIGIT = /(?<=[a-h])[1-8](?![\d.,])/g;
+const MOVE_TOKEN = /(?<![A-Za-z0-9])(?:[KQRBN][a-h]?[1-8]?x?|[a-h]x)?[a-h][1-8](?:=[QRBN])?[+#]?(?![A-Za-z0-9]|[.,]\d)/g;
 const VALID_COMMA_NUMBER = /^[-+]?(?:\d+(?:,\d{3})*(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/;
 const UNICODE_NEGATIVE_NUMBER = /[\u2212\uFE63\uFF0D]\s*\p{Nd}/u;
 
@@ -50,20 +52,24 @@ export class GroundingError extends Error {
   }
 }
 
-export function groundInsight(stats: unknown, output: string): string {
+/**
+ * `names` are player names the stats carry (the scoped player). Their digits are part of a name, not a
+ * quantity: they neither widen the allowlist nor need allowing when the reading names the player.
+ */
+export function groundInsight(stats: unknown, output: string, names: readonly string[] = []): string {
   assertSupportedNotation(output);
   assertNoClaims(output);
-  const quantities = output.replace(SQUARE_DIGIT, '');
+  const quantities = withoutNames(output, names).replace(MOVE_TOKEN, ' ');
   for (const match of quantities.matchAll(NUMBER)) {
     const token = withoutSentencePunctuation(match[0]);
     if (token.includes(',') && !VALID_COMMA_NUMBER.test(token)) {
       throw new GroundingError(`The AI response contained a malformed number: ${match[0]}. Nothing in the report changed.`);
     }
   }
-  const serialized = (JSON.stringify(stats, (_key, value) => (typeof value === 'bigint' ? value.toString() : value)) ?? '').replace(
-    SQUARE_DIGIT,
-    '',
-  );
+  const serialized = withoutNames(
+    JSON.stringify(stats, (_key, value) => (typeof value === 'bigint' ? value.toString() : value)) ?? '',
+    names,
+  ).replace(MOVE_TOKEN, ' ');
   const allowed = new Set([...serialized.matchAll(NUMBER)].map((match) => canonicalDecimal(withoutSentencePunctuation(match[0]))));
   for (const match of quantities.matchAll(NUMBER)) {
     const token = withoutSentencePunctuation(match[0]);
@@ -72,6 +78,18 @@ export function groundInsight(stats: unknown, output: string): string {
     }
   }
   return output;
+}
+
+/** Replaces each whole, case-insensitive occurrence of a name with a space. */
+function withoutNames(text: string, names: readonly string[]): string {
+  let result = text;
+  for (const name of names) {
+    const trimmed = name.trim();
+    if (!trimmed) continue;
+    const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    result = result.replace(new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, 'gi'), ' ');
+  }
+  return result;
 }
 
 function assertSupportedNotation(text: string): void {

@@ -120,8 +120,8 @@ session's folder. Deleting `~/.local/share/chesspulse` removes every session and
 - **Stockfish** runs locally as WebAssembly. Scoring a session makes no network request.
 - **AI explanation, optional.** Nothing is sent when a report opens. Only when you choose
   **Generate explanation** does the provider in `.env` receive your question, the pasted PGNs, and
-  the report's computed summary numbers. It never receives video, images, raw pulse samples, keys,
-  logs, or file paths. A request times out after 30 seconds. It is retried once only after a
+  the report's computed summary numbers. It never receives video, images, raw pulse samples, logs,
+  or file paths. Your `CP_AI_KEY` is sent only to authenticate the request; it is not in the prompt. A request times out after 30 seconds. It is retried once only after a
   provider server error or a failed connection, and never after a timeout. The reply is shown as plain text labelled
   `INFERRED`. If it contains a number the report does not hold, or a medical or mental-state
   claim, ChessPulse withholds it. The AI never changes a report value. Each provider's own

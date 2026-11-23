@@ -18,14 +18,20 @@ import { COPY } from './copy';
 
 type Tab = 'overall' | number;
 
+export interface MomentTarget {
+  readonly gameIndex: number;
+  readonly moveIndex: number;
+  readonly tUs: number;
+}
+
 export function MoveQuality({
   report,
   onOpenMoment,
   onRebuild,
 }: {
   report: Report;
-  /** Selects the reading closest to `tUs` on the timeline and moves focus there. */
-  onOpenMoment: (tUs: number) => void;
+  /** Selects the reading closest to the move on the timeline, names that move, and moves focus there. */
+  onOpenMoment: (target: MomentTarget) => void;
   /** Opens the saved games so the player can rebuild the report. */
   onRebuild: () => void;
 }) {
@@ -141,7 +147,7 @@ function OverallPanel({
                 <span className="quality-game-players">{copy.players(row.white, row.black)}</span>
                 <span className="quality-game-result">{row.result}</span>
                 <span className="quality-game-detail">
-                  {row.included ? copy.rowAccuracy(row.accuracy) : copy.rowExcluded}
+                  {!row.included ? copy.rowExcluded : !row.placed ? copy.rowUnplaced : copy.rowAccuracy(row.accuracy)}
                 </span>
                 <span className="quality-game-detail">
                   {row.blunders !== null ? copy.rowBlunders(row.blunders) : ''}
@@ -168,7 +174,7 @@ function GamePanel({
   onOpenMoment,
 }: {
   view: GameQualityView | null;
-  onOpenMoment: (tUs: number) => void;
+  onOpenMoment: (target: MomentTarget) => void;
 }) {
   const copy = COPY.quality;
   if (!view) return null;
@@ -201,7 +207,21 @@ function GamePanel({
         </div>
         <aside className="quality-side">
           <h3>{copy.excludedTitle}</h3>
-          <p className="quality-sentence">{copy.excludedBody(ending.label)}</p>
+          <p className="quality-sentence">{copy.excludedBody(ending.label, view.placed)}</p>
+        </aside>
+      </div>
+    );
+  }
+  if (view.kind === 'unplaced') {
+    return (
+      <div className="quality-grid">
+        <div className="quality-main">
+          {heading}
+          <Facts items={facts} />
+        </div>
+        <aside className="quality-side">
+          <h3>{copy.unplacedTitle}</h3>
+          <p className="quality-sentence">{copy.unplacedBody}</p>
         </aside>
       </div>
     );
@@ -259,7 +279,7 @@ function GamePanel({
                       type="button"
                       className="btn btn-quiet btn-small"
                       aria-label={copy.openOnTimelineLabel(loss.label)}
-                      onClick={() => onOpenMoment(at)}
+                      onClick={() => onOpenMoment({ gameIndex: game.index, moveIndex: loss.moveIndex, tUs: at })}
                     >
                       {copy.openOnTimeline}
                     </button>

@@ -135,6 +135,17 @@ describe('parsePgnBatch order', () => {
     if (!batch.ok) return;
     assert.equal(batch.order, 'unverified');
   });
+  it('rejects dated games out of order even when another game has a date-less EndTime', () => {
+    const header = '[White "Ada"]\n[Black "Nim"]\n[Result "1-0"]\n';
+    const batch = parsePgnBatch([
+      `${header}[EndDate "2026.11.22"]\n[EndTime "19:00:00 GMT+0000"]\n\n1. e4 1-0\n`,
+      `${header}[EndTime "18:30:00 GMT+0000"]\n\n1. e4 1-0\n`,
+      `${header}[EndDate "2026.11.22"]\n[EndTime "18:00:00 GMT+0000"]\n\n1. e4 1-0\n`,
+    ]);
+    assert.equal(batch.ok, false);
+    if (batch.ok || batch.reason !== 'order') return assert.fail('expected an order rejection');
+    assert.deepEqual(batch.indices, [0, 2], 'names the two dated games');
+  });
   it('still rejects a dated batch when a game has no EndTime at all', () => {
     const header = '[White "Ada"]\n[Black "Nim"]\n[Result "1-0"]\n';
     const batch = parsePgnBatch([

@@ -622,7 +622,12 @@ export interface MomentDetails {
  * Why: the old readout ran them into one line ("Sample 15/1791 · 0:27 · 92.2 bpm · …") that a
  *      reader could not parse. Each value is read from the view; nothing new is computed.
  */
-export function momentDetails(view: TimelineViewModel, sampleIndex: number): MomentDetails | null {
+export function momentDetails(
+  view: TimelineViewModel,
+  sampleIndex: number,
+  /** A move chosen elsewhere (Move Quality). It replaces the nearest move; pulse facts stay the reading's. */
+  pinned?: { readonly gameIndex: number; readonly moveIndex: number } | null,
+): MomentDetails | null {
   const sample = view.samples[sampleIndex];
   if (!sample) return null;
   const counted = sample.occluded !== true && sample.stable && sample.confidence >= CONFIDENCE_FLOOR;
@@ -634,8 +639,14 @@ export function momentDetails(view: TimelineViewModel, sampleIndex: number): Mom
       : sample.bpm >= (view.elevatedThresholdBpm ?? Infinity)
         ? 'elevated'
         : 'settled';
-  const game = view.games.find((entry) => sample.tUs >= entry.startUs && sample.tUs <= entry.endUs);
-  const nearest = game ? nearestMoveTo(view.moves.filter((move) => move.gameIndex === game.index), sample.tUs) : null;
+  const pinnedMove = pinned
+    ? view.moves.find((move) => move.gameIndex === pinned.gameIndex && move.moveIndex === pinned.moveIndex)
+    : undefined;
+  const game = pinnedMove
+    ? view.games.find((entry) => entry.index === pinnedMove.gameIndex)
+    : view.games.find((entry) => sample.tUs >= entry.startUs && sample.tUs <= entry.endUs);
+  const nearest =
+    pinnedMove ?? (game ? nearestMoveTo(view.moves.filter((move) => move.gameIndex === game.index), sample.tUs) : null);
   return {
     position: sampleIndex + 1,
     total: view.samples.length,

@@ -115,9 +115,9 @@ describe('Move Quality tabs', () => {
   });
 
   it('shows a game panel with labelled facts and opens its largest loss on the timeline', () => {
-    const opened: number[] = [];
+    const opened: { gameIndex: number; moveIndex: number; tUs: number }[] = [];
     const harness = mountDom(
-      createElement(MoveQuality, { report: report([counted(0)]), onOpenMoment: (tUs: number) => opened.push(tUs), onRebuild: noop }),
+      createElement(MoveQuality, { report: report([counted(0)]), onOpenMoment: (target: { gameIndex: number; moveIndex: number; tUs: number }) => opened.push(target), onRebuild: noop }),
     );
     try {
       harness.click(findButton(harness.document, 'Open game'));
@@ -134,7 +134,7 @@ describe('Move Quality tabs', () => {
       assert.match(loss?.textContent ?? '', /350 cp lost/);
       assert.match(loss?.textContent ?? '', /Blunder/, 'the blunder is named in words, not only by colour');
       harness.click(findButton(harness.document, 'Open on timeline'));
-      assert.deepEqual(opened, [300_000_000]);
+      assert.deepEqual(opened, [{ gameIndex: 0, moveIndex: 13, tUs: 300_000_000 }]);
     } finally {
       harness.unmount();
     }

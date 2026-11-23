@@ -291,8 +291,11 @@ export async function buildReport(
         aligned: alignedIndices.has(game.index),
         ...(game.timeControl !== undefined ? { timeControl: game.timeControl } : {}),
         playerSide: sides.get(game.index) ?? 'both',
-        // Excluded games were never scored, so they get no summary rather than a row of zeros.
-        ...(game.includeInStats ? { summary: summariseGame(scoredMoves.plies.get(game.index) ?? []) } : {}),
+        // Only placed games are scored. An excluded or unplaced game gets no summary rather than a
+        // row of zeros that would read like a clean game.
+        ...(game.includeInStats && alignedIndices.has(game.index)
+          ? { summary: summariseGame(scoredMoves.plies.get(game.index) ?? []) }
+          : {}),
       })),
       timeline: {
         startUs: meta.startAnchor.monoUs,

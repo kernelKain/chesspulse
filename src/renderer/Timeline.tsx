@@ -54,6 +54,9 @@ type Rect = { xOf: (tUs: number) => number; yOfBpm: (bpm: number) => number };
 export interface TimelineFocus {
   readonly sessionId: string;
   readonly tUs: number;
+  /** The move asked for. The inspector names it, even when a neighbouring move is nearer the reading. */
+  readonly gameIndex: number;
+  readonly moveIndex: number;
   readonly seq: number;
 }
 
@@ -61,6 +64,8 @@ export function Timeline({ result, focus = null }: { result: ReportResult | null
   const view = buildTimelineView(result);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [mode, setMode] = useState<'chart' | 'table'>('chart');
+  // Set by a focus request; cleared as soon as the player steps, so stepping shows the nearest move.
+  const [pinned, setPinned] = useState<{ gameIndex: number; moveIndex: number } | null>(null);
   const hatchId = useId();
   const keysHintId = useId();
   const frameRef = useRef<HTMLDivElement>(null);
@@ -78,6 +83,7 @@ export function Timeline({ result, focus = null }: { result: ReportResult | null
     pendingFocus.current = true;
     setMode('chart');
     setSelectedIndex(index);
+    setPinned({ gameIndex: focus.gameIndex, moveIndex: focus.moveIndex });
   }, [focus, sessionId, view.samples]);
 
   // Moves focus once per request, after the chart is drawn: in table mode the frame only exists
@@ -98,6 +104,7 @@ export function Timeline({ result, focus = null }: { result: ReportResult | null
   function stepSample(delta: -1 | 1): void {
     if (view.samples.length === 0) return;
     const base = activeIndex ?? (delta > 0 ? -1 : view.samples.length);
+    setPinned(null);
     setSelectedIndex(Math.min(view.samples.length - 1, Math.max(0, base + delta)));
   }
 
@@ -114,6 +121,7 @@ export function Timeline({ result, focus = null }: { result: ReportResult | null
     const next = keys[event.key];
     if (next === undefined) return;
     event.preventDefault();
+    setPinned(null);
     setSelectedIndex(next);
   }
 
@@ -132,7 +140,7 @@ export function Timeline({ result, focus = null }: { result: ReportResult | null
   };
 
   const selectedSample = activeIndex !== null ? view.samples[activeIndex] : undefined;
-  const moment = activeIndex !== null ? momentDetails(view, activeIndex) : null;
+  const moment = activeIndex !== null ? momentDetails(view, activeIndex, pinned) : null;
   const chessRails = view.state !== 'low_coverage' && view.state !== 'empty';
   const moveRows = mode === 'table' ? moveTableRows(view) : [];
   const sampleRows = mode === 'table' ? sampleTableRows(view) : [];

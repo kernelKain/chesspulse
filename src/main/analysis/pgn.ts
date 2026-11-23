@@ -365,11 +365,14 @@ function chronologicalOrder(
         remedy: 'Every game needs an EndTime, or none of them can, so the order is not guessed.',
       };
     }
-    if (games.some((game) => game.endTimeEpochMs === undefined)) return { kind: 'unverified' };
-    return compareKeys(
-      games.map((game) => game.endTimeEpochMs ?? 0),
-      games,
+    // The dated games must still be in order among themselves; an undated one only stops a full check.
+    const dated = games.filter((game) => game.endTimeEpochMs !== undefined);
+    const order = compareKeys(
+      dated.map((game) => game.endTimeEpochMs ?? 0),
+      dated,
     );
+    if (order.kind === 'reject') return order;
+    return dated.length < games.length ? { kind: 'unverified' } : order;
   }
 
   const missingStarts = games

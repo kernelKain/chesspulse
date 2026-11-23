@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { playerScopeSchema } from './contracts.js';
 import {
+  PLAYER_NAME_MAX,
   PLAYER_PREFERENCE_KEY,
   playerCandidates,
   plyBelongsTo,
@@ -39,6 +41,16 @@ describe('playerCandidates', () => {
 });
 
 describe('resolvePlayer', () => {
+  it('never resolves to a name the report schema cannot store', () => {
+    const long = 'x'.repeat(PLAYER_NAME_MAX + 1);
+    const games = [game(long, 'Nim'), game('Bo', long)];
+    assert.deepEqual(playerCandidates(games), []);
+    const resolved = resolvePlayer(games);
+    assert.ok(resolved.ok);
+    assert.deepEqual(resolved.scope, { kind: 'all_moves', reason: 'no_common_name' });
+    assert.equal(playerScopeSchema.safeParse(resolved.scope).success, true);
+    assert.equal(resolvePlayer(games, long).ok, false, 'a requested long name is refused, not stored');
+  });
   it('chooses the only shared name without asking', () => {
     assert.deepEqual(resolvePlayer([game('Ada', 'Nim'), game('Bo', 'Ada')]), {
       ok: true,

@@ -3,7 +3,27 @@ import { describe, it } from 'node:test';
 import { createElement } from 'react';
 import type { InsightConfig, Report } from '../shared/contracts.js';
 import { findButton, mountDom } from './dom-harness.js';
-import { InsightPanel, insightAside, type InsightViewState } from './InsightPanel.js';
+import { act } from 'react';
+import { InsightPanel, QUESTION_MAX_BYTES, insightAside, questionBytes, type InsightViewState } from './InsightPanel.js';
+
+/**
+ * Sets a controlled textarea the way typing does, so React's onChange runs. react-dom loads before the
+ * harness installs jsdom globals, so it falls back to its old-IE value polyfill, which watches the
+ * focused element through `attachEvent` and reads changes on keyup. jsdom has no `attachEvent`, so the
+ * test gives the element no-op hooks; the change itself is still detected by React.
+ */
+function setTextarea(harness: ReturnType<typeof mountDom>, box: HTMLTextAreaElement, value: string): void {
+  const legacy = box as unknown as { attachEvent: () => void; detachEvent: () => void };
+  legacy.attachEvent = () => undefined;
+  legacy.detachEvent = () => undefined;
+  const setter = Object.getOwnPropertyDescriptor(harness.window.HTMLTextAreaElement.prototype, 'value')?.set;
+  act(() => {
+    box.focus();
+    setter?.call(box, value);
+    box.dispatchEvent(new harness.window.Event('input', { bubbles: true }));
+    box.dispatchEvent(new harness.window.KeyboardEvent('keyup', { bubbles: true }));
+  });
+}
 
 const report: Report = {
   ok: true, schemaVersion: 1, sessionId: 's1', gamesDigest: 'a'.repeat(64), coveragePct: 90, baselineBpm: 80, verdict: 'v.',
@@ -35,7 +55,27 @@ describe('AI Session Explainer panel', () => {
       assert.match(harness.document.querySelector('.insight-suggestions')?.textContent ?? '', /No break between games was marked\./);
       harness.click(findButton(harness.document, 'Generate explanation'));
       assert.deepEqual(sent, ['Explain the Pulse & Play Timeline in plain English.']);
-      assert.match(harness.document.querySelector('.insight-sent')?.textContent ?? '', /never receives video, images, raw pulse samples, API keys/);
+      assert.match(harness.document.querySelector('.insight-sent')?.textContent ?? '', /never receives video, images, raw pulse samples, logs, or local file paths\. Your provider key from \.env is sent only to authenticate/);
+    } finally {
+      harness.unmount();
+    }
+  });
+
+  it('blocks a question over the byte limit even when it is under the character limit', () => {
+    const sent: string[] = [];
+    const harness = mountDom(panel({ status: 'idle' }, configured, sent));
+    try {
+      const box = harness.document.querySelector('textarea');
+      assert.ok(box);
+      const text = 'क'.repeat(1500); // 1,500 characters, 4,500 UTF-8 bytes
+      assert.ok(questionBytes(text) > QUESTION_MAX_BYTES && text.length < QUESTION_MAX_BYTES);
+      setTextarea(harness, box, text);
+      const generate = findButton(harness.document, 'Generate explanation');
+      assert.equal(generate.disabled, true);
+      assert.match(harness.document.querySelector('.insight-limit')?.textContent ?? '', /4,000-byte limit/);
+      assert.equal(box.getAttribute('aria-invalid'), 'true');
+      harness.click(generate);
+      assert.deepEqual(sent, []);
     } finally {
       harness.unmount();
     }

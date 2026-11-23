@@ -578,6 +578,8 @@ describe('placement from player marks', () => {
     assert.equal(result.alignmentMode, 'none');
     assert.equal(result.banner, 'No game-end marks: games are not placed on the timeline.');
     assert.equal(result.games[0]?.aligned, false);
+    assert.equal(result.games[0]?.includeInStats, true);
+    assert.equal(result.games[0]?.summary, undefined, 'an unplaced game is not summarised as a clean game');
     assert.equal(result.timeline.games.length, 0);
     assert.equal(result.verdict, 'Not enough scored moves for a verdict.');
   });

@@ -42,7 +42,10 @@ export function playerCandidates(games: readonly NamedGame[]): string[] {
   const seeds: string[] = [];
   for (const name of [first.white, first.black]) {
     const trimmed = name.trim();
-    if (trimmed.length > 0 && !seeds.some((seed) => sameName(seed, trimmed))) seeds.push(trimmed);
+    // A name over the stored limit can be neither chosen nor saved in a report's player scope,
+    // so it is never a candidate. Such a game falls back to counting both sides.
+    if (trimmed.length === 0 || trimmed.length > PLAYER_NAME_MAX) continue;
+    if (!seeds.some((seed) => sameName(seed, trimmed))) seeds.push(trimmed);
   }
   return seeds.filter((name) =>
     counted.every((game) => sameName(game.white, name) || sameName(game.black, name)),

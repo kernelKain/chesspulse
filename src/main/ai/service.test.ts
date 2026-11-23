@@ -426,6 +426,18 @@ describe('grounded move labels and config view', () => {
     );
   });
 
+  it('grounds the scoped player name as a name in a live request', async () => {
+    const named: Report = { ...withGame, playerScope: { kind: 'player', name: 'Ada2024' } };
+    const ok = 'Ada2024 lost 909 centipawns on 14… Rc8.';
+    assert.deepEqual(await requestInsight(REQUEST, named, [PGN2], ENV, { fetch: async () => completion(ok) }), {
+      disabled: false, provider: 'openai', text: ok,
+    });
+    await assert.rejects(
+      requestInsight(REQUEST, named, [PGN2], ENV, { fetch: async () => completion('Ada2024 had 2024 blunders.') }),
+      /introduced a number.*2024/,
+    );
+  });
+
   it('rounds coverage and bpm as the report header prints them', () => {
     const summary = computedSummary({
       ...withGame,

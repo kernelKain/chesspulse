@@ -1102,10 +1102,10 @@ export function App() {
             <MoveQuality
               key={`quality-${result.sessionId}`}
               report={result}
-              onOpenMoment={(tUs) =>
+              onOpenMoment={(target) =>
                 setTimelineFocus((previous) => ({
                   sessionId: result.sessionId,
-                  tUs,
+                  ...target,
                   seq: (previous?.seq ?? 0) + 1,
                 }))
               }

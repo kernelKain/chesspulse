@@ -390,8 +390,12 @@ export const COPY = {
     openOnTimeline: 'Open on timeline',
     openOnTimelineLabel: (label: string) => `Open ${label} on the timeline`,
     excludedTitle: 'Not counted toward accuracy',
-    excludedBody: (ending: string) =>
-      `This game was ${ending}, so it is left out of accuracy and blunder counts. It still appears on the timeline.`,
+    excludedBody: (ending: string, placed: boolean) =>
+      `This game was ${ending}, so it is left out of accuracy and blunder counts.${placed ? ' It still appears on the timeline.' : ''}`,
+    unplacedTitle: 'Not placed on the timeline',
+    unplacedBody:
+      'This game could not be placed on the session clock, so its moves were not scored. It is not counted as a game without mistakes.',
+    rowUnplaced: 'Not placed on the timeline',
     rebuildTitle: 'Rebuild for game-by-game details',
     rebuildBody:
       'This saved report predates per-game summaries. Its overall result is still available. Rebuild it from the saved PGNs to add the new game details.',
@@ -462,6 +466,7 @@ export const COPY = {
       longestBreak: 'No break between games was marked.',
     },
     question: 'Your question',
+    tooLong: 'This question is over the 4,000-byte limit. Shorten it to send.',
     placeholder: 'Ask about the timeline, move quality, one game, or the limits of the report.',
     idle: 'Nothing is sent until you choose Generate explanation.',
     loading: 'Generating from the saved report…',
@@ -471,7 +476,7 @@ export const COPY = {
     clear: 'Clear explanation',
     sentTitle: 'What is sent',
     sentBody:
-      'The selected provider receives your pasted PGNs, this question, and locally computed report summaries. It never receives video, images, raw pulse samples, API keys, logs, or local file paths.',
+      'The selected provider receives your pasted PGNs, this question, and locally computed report summaries. It never receives video, images, raw pulse samples, logs, or local file paths. Your provider key from .env is sent only to authenticate the request; it is not part of the prompt.',
     answerFor: (question: string) => `Explanation for: ${question}`,
     notConfiguredTitle: 'AI explanation is not configured',
     notConfiguredBody:
@@ -519,7 +524,7 @@ export const COPY = {
       title: 'How to read this',
       label: 'Timeline key',
       items: {
-        pulse: { term: 'Pulse', text: 'The cyan line is your measured pulse.' },
+        pulse: { term: 'Pulse', text: 'The line is your measured pulse, in beats per minute.' },
         elevated: {
           term: 'Elevated pulse',
           text: 'Hatched area and ember line: at least 10 bpm above your first-minute baseline.',

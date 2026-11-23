@@ -1379,6 +1379,11 @@ main.main-report > .label {
 .insight-panel .actions {
   margin-top: 0;
 }
+.insight-limit {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--fs-sm);
+}
 .insight-note {
   margin: 0;
   color: var(--muted);
@@ -2563,5 +2568,10 @@ kbd {
   }
   .quality-game > .quality-game-players {
     flex: 1 1 200px;
+  }
+  /* The fixed columns plus the button overflow a narrow card; wrap instead. */
+  .quality-loss {
+    display: flex;
+    flex-wrap: wrap;
   }
 }

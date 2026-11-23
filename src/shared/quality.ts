@@ -36,9 +36,11 @@ export interface GameComparisonRow {
   readonly black: string;
   readonly result: string;
   readonly included: boolean;
-  /** `null` when the game is excluded or the report predates per-game summaries. */
+  /** False when the game could not be placed on the session clock, so its moves were not scored. */
+  readonly placed: boolean;
+  /** `null` when the game is excluded, unplaced, or the report predates per-game summaries. */
   readonly accuracy: number | 'insufficient' | null;
-  /** `null` for an excluded game, which has no scored moves. */
+  /** `null` for an excluded or unplaced game, which has no scored moves. */
   readonly blunders: number | null;
 }
 
@@ -68,19 +70,21 @@ export function overallQuality(report: Report): OverallQualityView {
       black: game.black,
       result: game.result,
       included: game.includeInStats,
+      placed: game.aligned,
       accuracy: !game.summary
         ? null
         : game.summary.overall.status === 'ok'
           ? game.summary.overall.accuracy
           : 'insufficient',
-      blunders: game.includeInStats ? (game.summary?.blunders ?? game.blunders) : null,
+      blunders: game.includeInStats && game.aligned ? (game.summary?.blunders ?? game.blunders) : null,
     })),
     needsRebuild: needsRebuild(report),
   };
 }
 
+/** A rebuild can only add a summary to a counted game that was placed; an unplaced one has none to add. */
 export function needsRebuild(report: Report): boolean {
-  return report.games.some((game) => game.includeInStats && !game.summary);
+  return report.games.some((game) => game.includeInStats && game.aligned && !game.summary);
 }
 
 /** One of the game's largest losses, with what the timeline needs to open it. */
@@ -95,7 +99,8 @@ export interface LossRow {
 }
 
 export type GameQualityView =
-  | { readonly kind: 'excluded'; readonly game: ReportGame }
+  | { readonly kind: 'excluded'; readonly game: ReportGame; readonly placed: boolean }
+  | { readonly kind: 'unplaced'; readonly game: ReportGame }
   | { readonly kind: 'needs_rebuild'; readonly game: ReportGame }
   | {
       readonly kind: 'ok';
@@ -110,10 +115,12 @@ export type GameQualityView =
 export function gameQuality(report: Report, gameIndex: number): GameQualityView | null {
   const game = report.games.find((candidate) => candidate.index === gameIndex);
   if (!game) return null;
-  if (!game.includeInStats) return { kind: 'excluded', game };
+  const timeline = report.timeline;
+  const onTimeline = timeline.games.some((candidate) => candidate.index === game.index);
+  if (!game.includeInStats) return { kind: 'excluded', game, placed: game.aligned && onTimeline };
+  if (!game.aligned) return { kind: 'unplaced', game };
   const summary = game.summary;
   if (!summary) return { kind: 'needs_rebuild', game };
-  const timeline = report.timeline;
   const placed = game.aligned ? timeline.games.find((candidate) => candidate.index === game.index) : undefined;
   const moves = timeline.moves.filter((move) => move.gameIndex === game.index);
   return {
