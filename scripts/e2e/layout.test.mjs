@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import { _electron as electron } from 'playwright-core';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
-const SHOTS = path.join(ROOT, 'docs', 'images', 'w5');
+const SHOTS = path.join(ROOT, 'docs', 'drafts', 'images', 'w5');
 const WIDTHS = [960, 1100, 1440, 640];
 
 async function launch(home) {

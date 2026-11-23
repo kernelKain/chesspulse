@@ -27,7 +27,7 @@ function parseArgs(argv) {
 
 const options = parseArgs(process.argv.slice(2));
 const minutes = Number(options.minutes ?? 2);
-const buildDir = path.resolve(options.out ?? path.join(ROOT, 'docs', 'evidence', 'limit-build'));
+const buildDir = path.resolve(options.out ?? path.join(ROOT, 'docs', 'drafts', 'evidence', 'limit-build'));
 const dataDir = `${buildDir}-data`;
 const rootInsideBuild = path.relative(buildDir, ROOT);
 const buildContainsRepository =

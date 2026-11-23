@@ -2,7 +2,7 @@
 // Why: H-31 needs a dated, reproducible record of coverage, stop reason, and report presence, and
 //      the raw files contain personal data that should not travel with a screenshot folder.
 // Removed: "it worked" would have no artifact, and the easy alternative is copying the whole
-//          session folder into `docs/`.
+//          session folder into `docs/drafts/` (ignored by git).
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -188,7 +188,7 @@ options.limitMinutes = limitMinutes;
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const directory = path.resolve(
-  options.out ?? path.join(ROOT, 'docs', 'evidence', `${stamp}${options.label ? `-${options.label}` : ''}`),
+  options.out ?? path.join(ROOT, 'docs', 'drafts', 'evidence', `${stamp}${options.label ? `-${options.label}` : ''}`),
 );
 mkdirSync(directory, { recursive: true });
 

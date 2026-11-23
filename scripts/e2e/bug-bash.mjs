@@ -22,7 +22,9 @@ import { test } from 'node:test';
 import { _electron as electron } from 'playwright-core';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
-const SHOTS = path.join(ROOT, 'docs', 'images', 'bug-bash');
+const SHOTS = path.join(ROOT, 'docs', 'drafts', 'images', 'bug-bash');
+const REAL_PGN = path.join(ROOT, 'docs', 'drafts', 'proofs', 's4', '10+0.pgn');
+const EXAMPLES = path.join(ROOT, 'demo', 'sessions');
 
 function dataRootFor(home) {
   return path.join(home, 'data', 'chesspulse');
@@ -73,8 +75,13 @@ function realSessionWithSamples() {
     ? path.join(process.env.XDG_DATA_HOME, 'chesspulse', 'sessions')
     : path.join(os.homedir(), '.local', 'share', 'chesspulse', 'sessions');
   if (!existsSync(base)) return null;
+  // The real PGN below is private working material; without it this profile cannot run.
+  if (!existsSync(REAL_PGN)) return null;
+  // Shipped examples are listed apart from the player's own sessions, so they cannot seed this list.
+  const examples = new Set(existsSync(EXAMPLES) ? readdirSync(EXAMPLES) : []);
   const candidates = [];
   for (const id of readdirSync(base)) {
+    if (examples.has(id)) continue;
     const dir = path.join(base, id);
     if (!statSync(dir).isDirectory()) continue;
     try {
@@ -261,7 +268,7 @@ test('seeded profile: stored session, paste validation, below-gate refusal', asy
     await shot(page, '09-paste-invalid');
 
     await page.getByRole('button', { name: 'Clear game 1' }).click();
-    const realPgn = readFileSync(path.join(ROOT, 'docs', 'proofs', 's4', '10+0.pgn'), 'utf8');
+    const realPgn = readFileSync(REAL_PGN, 'utf8');
     await gameOne.fill(realPgn);
     await page.locator('.status-pill', { hasText: 'Partial' }).waitFor();
     assert.match(await page.locator('.banner-message').innerText(), /1 game validated\./);
