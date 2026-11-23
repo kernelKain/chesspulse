@@ -1,13 +1,10 @@
 # ---------------------------------------------------------------------------
 # ChessPulse .gitignore
 #
-# docs/ is private working material: the product packet, the engineering
-# blueprint, decisions, phase notes, drafts, scripts and media.
-# Nothing in docs/ is tracked. Un-ignore single files deliberately when the
-# user chooses to publish one — never bulk-un-ignore the directory.
+# docs/ holds the published project documents. docs/drafts/ is private
+# working material and stays out of git.
 # ---------------------------------------------------------------------------
-docs/
-
+docs/drafts/
 # Vendor proof sample used to test Electron before the product scaffold exists.
 # It is not the app, and it must not be committed (native runtimes, possible local keys).
 spikes/
@@ -43,7 +40,8 @@ release/
 *.dmg
 
 # ---------------------------------------------------------------------------
-# Logs and local captures (a captured session must never land in git).
+# Logs and local captures (a captured session must never land in git,
+# except the two example sessions in demo/sessions/).
 # PGN test fixtures under tests/fixtures/ are intentionally tracked so the
 # public parse suite can run; real captured sessions are not.
 # ---------------------------------------------------------------------------
@@ -52,6 +50,8 @@ logs/
 npm-debug.log*
 sessions/
 *.session.json
+# The two shipped example sessions are public on purpose (see demo/README.md).
+!demo/sessions/
 
 # ---------------------------------------------------------------------------
 # Editor / OS noise
