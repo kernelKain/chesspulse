@@ -1,0 +1,50 @@
+{
+  "cli_version": "0.12.3-nightly.202610310614.54b6a5cac",
+  "checkpoint_id": "01M835MTSZRPMYWGCEBB2QAJCK",
+  "session_id": "sess_3e78385d-a4b1-49ae-a32f-92d0f04a0925",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-23T03:02:13.915393979Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "save_step_count": 1,
+  "files_touched": [
+    "README.md",
+    "package.json",
+    "src/main/index.ts",
+    "src/main/insight-ipc.ts",
+    "src/main/library-ipc.ts",
+    "src/main/report-ipc.ts",
+    "src/main/report.test.ts",
+    "src/main/report.ts",
+    "src/main/session-library.ts",
+    "src/preload/index.ts",
+    "src/renderer/App.tsx",
+    "src/renderer/copy.ts",
+    "src/renderer/styles.css",
+    "src/shared/contracts.ts",
+    "src/shared/errors.ts",
+    "src/shared/session-list.ts",
+    "tsconfig.renderer-test.json"
+  ],
+  "agent": "Kiro",
+  "model": "",
+  "turn_id": "2ed9649e3d53",
+  "compact_transcript_start": 0,
+  "redaction": {
+    "replacements": 0,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 0,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 2
+  }
+}
