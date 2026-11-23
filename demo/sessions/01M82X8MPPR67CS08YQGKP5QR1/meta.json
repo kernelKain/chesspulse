@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "01M82X8MPPR67CS08YQGKP5QR1",
+  "startedAtEpochMs": 1795394130646,
+  "startAnchor": {
+    "monoUs": 766833156,
+    "epochMs": 1795394130646
+  },
+  "stopAnchor": {
+    "monoUs": 1778653348,
+    "epochMs": 1795395142466
+  },
+  "baselineBpm": 75.31380844116211,
+  "baselineWindow": {
+    "fromUs": 766833156,
+    "toUs": 826833156
+  },
+  "coverage": {
+    "usableUs": 93957847,
+    "totalUs": 1011820192,
+    "pct": 9.286022135442815,
+    "confidenceFloor": 50
+  },
+  "stopReason": "user",
+  "marks": [
+    {
+      "atUs": 1015769487,
+      "kind": "end"
+    },
+    {
+      "atUs": 1042648980,
+      "kind": "next"
+    },
+    {
+      "atUs": 1254709857,
+      "kind": "end"
+    },
+    {
+      "atUs": 1280985053,
+      "kind": "next"
+    },
+    {
+      "atUs": 1742180932,
+      "kind": "end"
+    }
+  ],
+  "framing": {
+    "total": 30018,
+    "counts": {
+      "no_face": 2,
+      "chest": 25140
+    }
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "id": "01M829E6SVWDNHB7XH84E4TAZB",
+  "startedAtEpochMs": 1795373341499,
+  "startAnchor": {
+    "monoUs": 382613208,
+    "epochMs": 1795373341499
+  },
+  "stopAnchor": {
+    "monoUs": 1722493129,
+    "epochMs": 1795374681379
+  },
+  "baselineBpm": 81.39413452148438,
+  "baselineWindow": {
+    "fromUs": 382613208,
+    "toUs": 442613208
+  },
+  "coverage": {
+    "usableUs": 1181413772,
+    "totalUs": 1339879921,
+    "pct": 88.17310816317546,
+    "confidenceFloor": 50
+  },
+  "stopReason": "user",
+  "marks": [
+    {
+      "atUs": 531824321,
+      "kind": "end"
+    },
+    {
+      "atUs": 541141515,
+      "kind": "next"
+    },
+    {
+      "atUs": 666665277,
+      "kind": "end"
+    },
+    {
+      "atUs": 673730294,
+      "kind": "next"
+    },
+    {
+      "atUs": 795660960,
+      "kind": "end"
+    },
+    {
+      "atUs": 828310538,
+      "kind": "next"
+    },
+    {
+      "atUs": 954860354,
+      "kind": "end"
+    },
+    {
+      "atUs": 961251927,
+      "kind": "next"
+    },
+    {
+      "atUs": 1097847417,
+      "kind": "end"
+    },
+    {
+      "atUs": 1104485781,
+      "kind": "next"
+    },
+    {
+      "atUs": 1221616752,
+      "kind": "end"
+    },
+    {
+      "atUs": 1240642669,
+      "kind": "next"
+    },
+    {
+      "atUs": 1292694344,
+      "kind": "end"
+    },
+    {
+      "atUs": 1301537911,
+      "kind": "next"
+    },
+    {
+      "atUs": 1419355890,
+      "kind": "end"
+    },
+    {
+      "atUs": 1429444129,
+      "kind": "next"
+    },
+    {
+      "atUs": 1548277125,
+      "kind": "end"
+    },
+    {
+      "atUs": 1583665288,
+      "kind": "next"
+    },
+    {
+      "atUs": 1712882766,
+      "kind": "end"
+    }
+  ],
+  "framing": {
+    "total": 39829,
+    "counts": {
+      "no_face": 95,
+      "motion": 259,
+      "chest": 164
+    }
+  }
+}
