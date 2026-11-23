@@ -1,0 +1,91 @@
+make tis into proepr plan to udpate the draft file for dev artcile, do not edit anything yet: All the image sused must first be put in demo fodler in 1 place and those links could be aded here in the dreaft
+
+rearrange all sections in corrrect order.
+
+Choose good bacakrgoun title image from images i suppleid or betetr genartee a high quailty iage for putting as atricle background image on top for dev artcile.
+
+Agent session:
+
+- recorded session from multiple harnesses namely Cursor, Copilot, Opencode, Kiro
+
+- CUrsor and opencode were avaiable in ENtire but I had to extrenally add Kiro for caputring sesisio even though entire was not very sutiable with it. But I wanted to aggrates all my coidng session in 1 place so entire was best option .
+
+- also tell how i added kiro in few points as it was hard to do so that other can replicate it.
+
+- Add this entire chesspulse overview link: https://entire.com/gh/kernelKain/chesspulse
+
+- Add this sessions link: https://entire.com/gh/kernelKain/chesspulse/sessions
+
+- Add this trail link: https://entire.com/gh/kernelKain/chesspulse/trails
+
+- From this folder embedd entire-analytics imaeg : /home/kernel-kain/Pictures/Screenshots
+
+- Write few points from the anaytics image useful ones.
+
+- Also make this section wirte inhuman language.
+
+Consent and Data handling:
+
+- Make it better written, more hmane but betetr and cover all relevant points.
+
+Prize Categories:
+
+- I built it for bullet, bltiz and rapid palyer all 3 inclue.
+
+- remove todo 
+
+- Alos make this section a litle moe convincity why it firts this category.
+
+What i built:
+
+- Add  tilt concept in it, with some expaliton, also made it for chess palyers, 
+
+- people who play chess someti s10-15 game sin a row may end end losing muitple gaems and this problem is associetd with their mood or state which cannot be anaysisue by just game anayiss so i build chesspulse.
+
+- It does naysis on 3 lelvel: Firts horugh you pulse,... usingsmartspectr sdk, 2nd through stockfish engien analasysis of game using your game PGN data and finnaly htorugh ai based on these 2 you ca ask question and make imprvements in you game through all these 3 which cannotbbe done by just chess.com game reviw and the good thinsg is all fo it is opensoure and free .
+
+- The report give you: Make it betetr and mroe accuarte.
+
+- chess pulse it for bullet, reapid and blitiz alal 3 players
+
+- Make this sectio obverall betetr wirtten , mreo humane
+
+Demo:
+
+- Add one passed run: Bullet sessio with images and some expalaito of process step by step
+
+- Add one failed run: Bltiz session with imaegs nd expalaintions tep by step.
+
+- Add run localaly part with steps from code section
+
+- GIve repository link
+
+- Alos mention ssytem requiemnets
+
+Code: Remove this section
+
+How it respond to human signals:
+
+- make this section give it a betetr title as it constisn all inetranl working , 
+
+- add archietcure diageam and other good diagram fromr epo
+
+- The 3 layer diagram(genareta a good iameg for ita and add here) , also give expalaiotn fro eahch section poreely.
+
+- MAke it written overall bettr and more humane readbale.
+
+---
+
+1. yes, 2. vs code, 3. i am not sure, 4. no is it necessary? if i add images of demo, 5. prefer best order ; aks me nay more questions reagaringthsi post if needed
+
+---
+
+1. yes, 2. yes, 3. yes, 4. yes, 5. yes
+
+---
+
+1. yes, 2. i will add it in 2-3 hrs keep todo, 3. not sure find yousrself, 4. chesk yourself, 5. you see yourself i gave you persmisison.
+
+---
+
+do not push draft article to github, commit and pushh all other fiels and fodlers.
